@@ -1,5 +1,8 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::os::unix::net::UnixListener;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -32,6 +35,38 @@ struct Ptys {
     next_id: AtomicU64,
 }
 
+/// Caminhos resolvidos uma vez no boot. O app é aberto pelo Finder, com um PATH
+/// mínimo que não tem `~/.cargo/bin` nem `~/.local/bin` — procurar `fala_claudio`
+/// ou `claude` pelo nome só funcionaria quando aberto de um terminal.
+struct Config {
+    socket: PathBuf,
+    fala: PathBuf,
+    claude: PathBuf,
+}
+
+/// Primeiro caminho que existe; se nenhum, o nome cru, pra falhar com uma
+/// mensagem legível em vez de silenciosamente.
+fn achar(nome: &str, candidatos: &[&str]) -> PathBuf {
+    let home = dirs_home().unwrap_or_default();
+    candidatos
+        .iter()
+        .map(|c| PathBuf::from(c.replace("~", &home)))
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| PathBuf::from(nome))
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            // O pid no nome deixa duas janelas do TermIAu conviverem sem se
+            // roubarem eventos; o hook descobre o caminho pelo ambiente do painel.
+            socket: std::env::temp_dir().join(format!("termiau-{}.sock", std::process::id())),
+            fala: achar("fala_claudio", &["~/.cargo/bin/fala_claudio", "/usr/local/bin/fala_claudio"]),
+            claude: achar("claude", &["~/.local/bin/claude", "/usr/local/bin/claude", "~/.claude/local/claude"]),
+        }
+    }
+}
+
 /// Erros da webview são invisíveis no terminal sem esta ponte.
 #[tauri::command]
 fn js_log(msg: String) {
@@ -54,7 +89,7 @@ const HERDA: &[&str] = &[
     "__CF_USER_TEXT_ENCODING",    // codificação de texto do macOS
 ];
 
-fn shell(cwd: Option<String>) -> CommandBuilder {
+fn shell(cwd: Option<String>, id: u64, cfg: &Config) -> CommandBuilder {
     let sh = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
     let mut cmd = CommandBuilder::new(sh);
     cmd.arg("-l"); // login shell: carrega o PATH completo do usuário
@@ -84,6 +119,12 @@ fn shell(cwd: Option<String>) -> CommandBuilder {
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "TermIAu");
+
+    // Como o hook do Claude Code sabe pra quem está falando. Ele roda como neto
+    // deste shell, então herda os dois — e fora do TermIAu não existem, que é o
+    // que faz o mesmo hook ficar calado em outro terminal.
+    cmd.env("TERMIAU_PAINEL", id.to_string());
+    cmd.env("TERMIAU_SOCK", &cfg.socket);
     cmd
 }
 
@@ -97,6 +138,7 @@ fn dirs_home() -> Option<String> {
 #[tauri::command]
 fn pty_spawn(
     state: State<'_, Ptys>,
+    cfg: State<'_, Config>,
     rows: u16,
     cols: u16,
     cwd: Option<String>,
@@ -107,7 +149,7 @@ fn pty_spawn(
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| e.to_string())?;
 
-    let child = pair.slave.spawn_command(shell(cwd)).map_err(|e| e.to_string())?;
+    let child = pair.slave.spawn_command(shell(cwd, id, &cfg)).map_err(|e| e.to_string())?;
     let killer = child.clone_killer();
     drop(pair.slave); // solta o lado escravo, senão nunca vemos o EOF
 
@@ -236,6 +278,108 @@ fn pty_close_all(state: State<'_, Ptys>) {
     }
 }
 
+/// Escuta os eventos que os hooks do Claude Code mandam e entrega pra webview.
+/// Um socket unix, uma conexão por evento: o hook escreve um JSON e fecha.
+///
+/// Por que socket e não sequência de escape pela própria saída do painel: a
+/// segunda seria mais elegante (a identidade do painel viria de graça), mas o
+/// hook e o Claude Code escrevem no mesmo tty ao mesmo tempo, e um `delta` de
+/// alguns KB passa do tamanho em que a escrita deixa de ser atômica — o risco é
+/// picar uma sequência do próprio Claude e sujar a tela.
+fn ouvir_hooks(app: AppHandle, caminho: PathBuf) {
+    let _ = std::fs::remove_file(&caminho);
+    limpar_sockets_orfaos(&caminho);
+    let ouvinte = match UnixListener::bind(&caminho) {
+        Ok(l) => l,
+        Err(e) => return eprintln!("[termiau] não consegui abrir {caminho:?}: {e}"),
+    };
+
+    std::thread::spawn(move || {
+        for conexao in ouvinte.incoming() {
+            let Ok(fluxo) = conexao else { continue };
+            let app = app.clone();
+            // Uma thread por evento: um hook lento não pode segurar a fila dos outros.
+            std::thread::spawn(move || {
+                let mut texto = String::new();
+                // Teto pra um payload absurdo não virar memória sem fim.
+                if fluxo.take(256 * 1024).read_to_string(&mut texto).is_err() {
+                    return;
+                }
+                if !texto.trim().is_empty() {
+                    let _ = app.emit("claude://evento", texto);
+                }
+            });
+        }
+    });
+}
+
+/// Sobra um socket por execução que morreu sem sair limpo (um `kill`, um crash).
+/// Como o nome carrega o pid, dá pra saber quais não têm mais dono.
+fn limpar_sockets_orfaos(atual: &PathBuf) {
+    let Some(dir) = atual.parent() else { return };
+    let Ok(entradas) = std::fs::read_dir(dir) else { return };
+    for e in entradas.flatten() {
+        let caminho = e.path();
+        if caminho == *atual {
+            continue;
+        }
+        let Some(pid) = caminho
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_prefix("termiau-"))
+            .and_then(|n| n.strip_suffix(".sock"))
+            .and_then(|n| n.parse::<i32>().ok())
+        else {
+            continue;
+        };
+        // Sinal 0 não faz nada: só pergunta se o processo ainda existe.
+        if unsafe { libc::kill(pid, 0) } != 0 {
+            let _ = std::fs::remove_file(&caminho);
+        }
+    }
+}
+
+/// Fala um texto com o Fala Cláudio. `--nao-esperar` devolve na hora: a fila é
+/// dele, e segurar aqui travaria o evento seguinte.
+#[tauri::command]
+fn falar(cfg: State<'_, Config>, texto: String) {
+    let _ = Command::new(&cfg.fala)
+        .args(["--nao-esperar", "--"])
+        .arg(texto)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
+/// Cala o que está sendo falado e esvazia a fila.
+#[tauri::command]
+fn calar(cfg: State<'_, Config>) {
+    let _ = Command::new(&cfg.fala).arg("--parar").stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+}
+
+/// Uma frase do que o Claude acabou de dizer, pra ser ouvida em vez de lida.
+/// `disableAllHooks` é o que impede a recursão: sem isso este `claude` dispararia
+/// o hook de novo e pediria um resumo do resumo, sem fim.
+#[tauri::command]
+async fn resumir(cfg: State<'_, Config>, texto: String) -> Result<String, String> {
+    let claude = cfg.claude.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let saida = Command::new(claude)
+            .args(["-p", "--model", "haiku", "--settings", r#"{"disableAllHooks":true}"#])
+            .arg(format!(
+                "Resuma em UMA frase curta, no maximo 20 palavras, em portugues do Brasil, \
+                 para ser ouvida em voz alta. Diga o que foi feito e, se houver, o que eu \
+                 preciso decidir. Sem markdown, sem listas, sem nomes de arquivo, comandos \
+                 ou caminhos. Responda so a frase. Texto: {texto}"
+            ))
+            .output()
+            .map_err(|e| e.to_string())?;
+        Ok(String::from_utf8_lossy(&saida.stdout).trim().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// O menu padrão do Tauri reserva ⌘W para "Close Window" e o menu do macOS
 /// consome o atalho antes da webview — a aba nunca via a tecla. Trocamos o menu
 /// inteiro para que ⌘T e ⌘W pertençam às abas; os itens nativos de Editar
@@ -308,6 +452,9 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            let cfg = Config::default();
+            ouvir_hooks(app.handle().clone(), cfg.socket.clone());
+            app.manage(cfg);
             app.manage(Ptys::default());
             montar_menu(app.handle())?;
             Ok(())
@@ -328,8 +475,18 @@ pub fn run() {
             pty_cwd,
             pty_close,
             pty_close_all,
+            falar,
+            calar,
+            resumir,
             js_log
         ])
-        .run(tauri::generate_context!())
-        .expect("erro ao subir o TermIAu");
+        .build(tauri::generate_context!())
+        .expect("erro ao montar o TermIAu")
+        .run(|app, evento| {
+            // O socket é um arquivo de verdade; sem isto ficaria um por execução
+            // no diretório temporário.
+            if let tauri::RunEvent::Exit = evento {
+                let _ = std::fs::remove_file(&app.state::<Config>().socket);
+            }
+        });
 }

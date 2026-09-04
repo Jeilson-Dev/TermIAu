@@ -200,3 +200,40 @@ body {
   background: #2b2f37;
   color: #d5d8de;
 }
+
+
+/* ---------- sinais das sessões do Claude ---------- */
+
+/* Bolinha antes do título da aba. Sem sessão fica transparente, mas ocupa o
+   mesmo espaço: o título não dança quando o Claude começa ou termina. */
+.tab-sinal {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+/* Trabalhando: presente, sem chamar. É informação de canto de olho. */
+.tab[data-claude="trabalhando"] .tab-sinal {
+  background: #4d5563;
+}
+
+/* Esperando por você: a cor da patinha, piscando. */
+.tab[data-claude="esperando"] .tab-sinal {
+  background: #d97757;
+  animation: termiau-pulso 1.1s ease-in-out infinite;
+}
+
+@keyframes termiau-pulso {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+/* No painel, `outline` e não `box-shadow`: o box-shadow já é do painel em foco,
+   e os dois podem valer ao mesmo tempo — o painel que espera pode ser o focado. */
+.folha.esperando {
+  outline: 1px solid #d97757;
+  outline-offset: -1px;
+  animation: termiau-pulso 1.6s ease-in-out infinite;
+}

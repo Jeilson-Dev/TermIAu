@@ -2,10 +2,13 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Permissões da janela principal do TermIAu",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-close",
-    "core:window:allow-set-title"
+    "core:window:allow-set-title",
+    "core:window:allow-set-badge-count"
   ]
 }

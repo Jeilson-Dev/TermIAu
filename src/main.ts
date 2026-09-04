@@ -52,6 +52,15 @@ type Folha = {
   /// O nó continua apontando pros pais depois de arrancado, então subir a árvore
   /// não distingue um painel morto de um vivo. Esta marca distingue.
   morta?: boolean;
+  /// Presente enquanto houver uma sessão do Claude Code rodando neste painel.
+  claude?: SessaoClaude;
+};
+
+type SessaoClaude = {
+  /// Como a voz chama este painel. É o nome da pasta, não "painel 2": ouvir
+  /// "o MOBILE precisa da sua permissão" diz onde ir; um número, não.
+  nome: string;
+  estado: "ocioso" | "trabalhando" | "esperando";
 };
 
 /// Um corte: dois filhos e a fatia que cabe ao primeiro. Aninhando estes nós
@@ -89,7 +98,9 @@ let ocupado = false;
 function nossoAtalho(e: KeyboardEvent): boolean {
   if (!e.metaKey) return false;
   if (e.altKey) return e.code.startsWith("Arrow");
-  if (e.shiftKey) return e.code === "BracketLeft" || e.code === "BracketRight";
+  if (e.shiftKey) {
+    return e.code === "BracketLeft" || e.code === "BracketRight" || e.code === "KeyA";
+  }
   return e.key === "k" || /^[1-9]$/.test(e.key);
 }
 
@@ -162,6 +173,9 @@ function focar(folha: Folha) {
   folha.el.classList.add("focada");
   folha.term.focus();
   rotular(aba);
+  // Olhar pro painel é atender: o aviso já cumpriu o papel dele.
+  if (folha.claude?.estado === "esperando") folha.claude.estado = "ocioso";
+  pintar();
 }
 
 function rotular(aba: Aba) {
@@ -287,13 +301,16 @@ async function novaAba() {
 
     const chip = document.createElement("div");
     chip.className = "tab";
+    // Bolinha de estado do Claude; fica transparente enquanto não houver sessão.
+    const sinal = document.createElement("span");
+    sinal.className = "tab-sinal";
     const rotulo = document.createElement("span");
     rotulo.className = "tab-titulo";
     rotulo.textContent = folha.titulo;
     const fechar = document.createElement("span");
     fechar.className = "tab-fechar";
     fechar.textContent = "✕";
-    chip.append(rotulo, fechar);
+    chip.append(sinal, rotulo, fechar);
     barra.appendChild(chip);
 
     const aba: Aba = { corpo, chip, rotulo, raiz: folha, foco: folha };
@@ -447,6 +464,7 @@ function fecharFolha(folha: Folha, opts: { jaMorto?: boolean } = {}) {
 
   medir(aba);
   sincronizar(aba);
+  pintar();
   // O foco estava no painel que morreu: cai no vizinho que ocupou o lugar.
   if (aba.foco === folha) focar(folhas(irmao).next().value as Folha);
   // Sobreviveu, mas a promoção moveu o elemento dele no DOM e o textarea ficou
@@ -468,6 +486,7 @@ function fecharAba(aba: Aba) {
     return;
   }
   sincronizarBarra();
+  pintar();
   // Foco vai pra vizinha da direita; se era a última, pra da esquerda.
   if (ativa === aba) ativar(abas[Math.min(i, abas.length - 1)]);
 }
@@ -512,6 +531,176 @@ function irParaAba(delta: number) {
   ativar(abas[(i + delta + abas.length) % abas.length]);
 }
 
+// ---------- sessões do Claude ----------
+
+/// O que chega dos hooks. `painel` é posto pelo termiau-evento.sh a partir do
+/// ambiente do shell; o resto vem do Claude Code como está.
+type EventoClaude = {
+  painel: number;
+  hook_event_name: string;
+  cwd?: string;
+  message?: string;
+  title?: string;
+  delta?: string;
+  message_id?: string;
+  index?: number;
+  final?: boolean;
+};
+
+/// Acima disto, em vez de ler a mensagem inteira em voz alta, pedimos uma frase.
+const LIMITE_RESUMO = 440;
+/// Teto do que se fala de uma vez. Passar disso vira monólogo.
+const MAX_FALA = 220;
+
+/// Pedaços de mensagem sendo remontados, por `message_id`.
+const remontagem = new Map<string, Map<number, string>>();
+
+function folhaPorPainel(id: number): Folha | undefined {
+  for (const a of abas) for (const f of folhas(a.raiz)) if (f.id === id) return f;
+  return undefined;
+}
+
+function* sessoes(): Generator<Folha> {
+  for (const a of abas) for (const f of folhas(a.raiz)) if (f.claude) yield f;
+}
+
+/// Redesenha os sinais de estado: bolinha em cada aba, contorno no painel que
+/// espera, e o badge do Dock com quantos esperam — que é o que se vê com o app
+/// inteiro em segundo plano.
+function pintar() {
+  let esperando = 0;
+  for (const aba of abas) {
+    let sinal = "";
+    for (const f of folhas(aba.raiz)) {
+      const estado = f.claude?.estado;
+      f.el.classList.toggle("esperando", estado === "esperando");
+      if (estado === "esperando") {
+        esperando++;
+        sinal = "esperando";
+      } else if (estado === "trabalhando" && sinal !== "esperando") {
+        sinal = "trabalhando";
+      }
+    }
+    aba.chip.dataset.claude = sinal;
+  }
+  janela.setBadgeCount(esperando || undefined).catch(() => {});
+}
+
+/// Fala, dizendo de quem é a vez quando há mais de uma sessão aberta. Com uma
+/// só não há a quem confundir, e o nome vira ruído em toda frase.
+function anunciar(folha: Folha, frase: string) {
+  const texto = frase.trim();
+  if (!texto) return;
+  let vivas = 0;
+  for (const _ of sessoes()) vivas++;
+  const quem = vivas > 1 && folha.claude ? `${folha.claude.nome}: ` : "";
+  invoke("falar", { texto: quem + texto }).catch((e) => jlog(`falar: ${e}`));
+}
+
+/// Tira do texto o que é marcação para os olhos e não diz nada em voz alta.
+function paraOuvido(t: string): string {
+  return t
+    .replace(/`+/g, "")
+    .replace(/\*+/g, "")
+    .replace(/^#+\s*/gm, "")
+    .replace(/^\s*[-+]\s+/gm, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/// Espera uma condição sem travar nada; devolve mesmo se ela não vier.
+function aguardar(pronto: () => boolean, limite: number): Promise<void> {
+  return new Promise((resolve) => {
+    const fim = Date.now() + limite;
+    const tenta = () =>
+      pronto() || Date.now() > fim ? resolve() : setTimeout(tenta, 50);
+    tenta();
+  });
+}
+
+/// O MessageDisplay chega em pedaços, um evento por `delta`. Só dá pra falar
+/// quando a mensagem fecha — e como cada hook é um processo próprio, o pedaço
+/// marcado como último pode chegar antes de um do meio.
+async function remontar(folha: Folha, ev: EventoClaude) {
+  if (!ev.message_id) return;
+  let pedacos = remontagem.get(ev.message_id);
+  if (!pedacos) remontagem.set(ev.message_id, (pedacos = new Map()));
+  if (ev.delta) pedacos.set(ev.index ?? 0, ev.delta);
+  if (!ev.final) return;
+
+  const total = (ev.index ?? 0) + 1;
+  await aguardar(() => pedacos.size >= total, 2000);
+  remontagem.delete(ev.message_id);
+
+  const inteiro = paraOuvido(
+    [...pedacos.entries()].sort(([a], [b]) => a - b).map(([, t]) => t).join(""),
+  );
+  if (!inteiro) return;
+
+  // Mensagem curta se fala como veio; longa, o Haiku destila numa frase.
+  const frase =
+    inteiro.length <= LIMITE_RESUMO
+      ? inteiro
+      : paraOuvido(await invoke<string>("resumir", { texto: inteiro }).catch(() => ""));
+
+  anunciar(folha, frase.slice(0, MAX_FALA));
+}
+
+/// As mensagens do Claude Code vêm em inglês; as recorrentes viram frase nossa,
+/// o resto se fala como veio.
+function aviso(msg: string): string {
+  if (/permission|approve/i.test(msg)) return "precisa da sua permissão";
+  if (/waiting|idle/i.test(msg)) return "está esperando você";
+  return paraOuvido(msg).slice(0, MAX_FALA);
+}
+
+function receber(ev: EventoClaude) {
+  const folha = folhaPorPainel(ev.painel);
+  if (!folha) return; // o painel fechou antes do evento chegar
+
+  // O nome da pasta é o que a voz usa e o que aparece na aba.
+  const nome = ev.cwd?.split("/").filter(Boolean).pop() || `painel ${ev.painel}`;
+  folha.claude = { nome, estado: folha.claude?.estado ?? "ocioso" };
+
+  switch (ev.hook_event_name) {
+    case "UserPromptSubmit":
+      folha.claude.estado = "trabalhando";
+      break;
+    case "PermissionRequest":
+      folha.claude.estado = "esperando";
+      anunciar(folha, "precisa da sua permissão");
+      break;
+    case "Notification":
+      folha.claude.estado = "esperando";
+      anunciar(folha, aviso(ev.message || ev.title || ""));
+      break;
+    case "MessageDisplay":
+      remontar(folha, ev);
+      return; // o estado não muda; pintar sairia à toa a cada pedaço
+    case "SessionEnd":
+      folha.claude = undefined;
+      break;
+  }
+  pintar();
+}
+
+/// Pula pro próximo painel que está esperando, em qualquer aba. Repetir o
+/// atalho percorre todos, e não fica preso no primeiro.
+function irParaEsperando() {
+  const fila: { aba: Aba; folha: Folha }[] = [];
+  for (const aba of abas) {
+    for (const f of folhas(aba.raiz)) {
+      if (f.claude?.estado === "esperando") fila.push({ aba, folha: f });
+    }
+  }
+  if (!fila.length) return;
+
+  const atual = fila.findIndex((x) => x.folha === ativa?.foco);
+  const alvo = fila[(atual + 1) % fila.length];
+  if (alvo.aba !== ativa) ativar(alvo.aba);
+  focar(alvo.folha);
+}
+
 // ---------- teclado ----------
 
 window.addEventListener("keydown", (e) => {
@@ -523,7 +712,10 @@ window.addEventListener("keydown", (e) => {
     if (alvo) focar(alvo);
     return;
   }
-  if (e.shiftKey) return irParaAba(e.code === "BracketRight" ? 1 : -1);
+  if (e.shiftKey) {
+    if (e.code === "KeyA") return irParaEsperando();
+    return irParaAba(e.code === "BracketRight" ? 1 : -1);
+  }
 
   if (e.key === "k") return ativa?.foco.term.clear();
 
@@ -549,6 +741,16 @@ async function iniciar() {
     if (!focada) ativa.foco.term.blur();
     // Se um clique já devolveu o teclado a um painel, não roubamos de volta.
     else if (document.activeElement?.tagName !== "TEXTAREA") ativa.foco.term.focus();
+  });
+
+  // Os hooks do Claude Code entram por aqui, via socket unix (ver ouvir_hooks
+  // no Rust e hooks/termiau-evento.sh).
+  await listen<string>("claude://evento", (e) => {
+    try {
+      receber(JSON.parse(e.payload) as EventoClaude);
+    } catch (err) {
+      jlog(`evento do claude ilegível: ${err}`);
+    }
   });
 
   // ⌘T, ⌘D, ⌘⇧D e ⌘W chegam por aqui: quem recebe a tecla é o menu nativo.
