@@ -1,3 +1,6 @@
+[workspace]
+members = ["crates/fala_nucleo"]
+
 [package]
 name = "termiau"
 version = "0.1.0"
@@ -15,6 +18,18 @@ tauri = { version = "2", features = [] }
 portable-pty = "0.9"
 base64 = "0.22"
 libc = "0.2"
+
+# Transcrição local (o antigo Escuta). O whisper-rs compila o whisper.cpp com
+# Metal — é o que faz a primeira build demorar.
+anyhow = "1"
+cpal = "0.18"
+serde = { version = "1", features = ["derive"] }
+whisper-rs = { version = "0.16.0", features = ["metal"] }
+ureq = "3.2"
+
+# Voz (o antigo Fala Cláudio). Traz o espeak-ng e o ONNX Runtime junto —
+# é o outro motivo de a primeira build demorar.
+fala_nucleo = { path = "crates/fala_nucleo" }
 
 [profile.release]
 opt-level = "s"

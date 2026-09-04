@@ -237,3 +237,49 @@ body {
   outline-offset: -1px;
   animation: termiau-pulso 1.6s ease-in-out infinite;
 }
+
+
+/* ---------- faixa da voz ---------- */
+
+#voz {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #0f1114;
+  border-top: 1px solid #23262c;
+  font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  /* Cinza: o parcial é palpite, e ainda vai mudar enquanto você fala. */
+  color: #7d838f;
+}
+
+#voz[hidden] {
+  display: none;
+}
+
+.voz-nivel {
+  flex: none;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: #23262c;
+  overflow: hidden;
+}
+
+/* A barra é o único sinal de que o microfone está mesmo aberto — o parcial
+   fica parado enquanto você não fala, e parado não distingue ligado de travado. */
+.voz-nivel > span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: #d97757;
+  transition: width 60ms linear;
+}
+
+.voz-texto {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}

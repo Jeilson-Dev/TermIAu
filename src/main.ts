@@ -594,7 +594,10 @@ function anunciar(folha: Folha, frase: string) {
   let vivas = 0;
   for (const _ of sessoes()) vivas++;
   const quem = vivas > 1 && folha.claude ? `${folha.claude.nome}: ` : "";
-  invoke("falar", { texto: quem + texto }).catch((e) => jlog(`falar: ${e}`));
+  // O chamador escolhe a voz: cada projeto ganha uma do rodízio e fica com ela.
+  // É a segunda pista de origem, e essa não custa uma palavra em cada frase.
+  invoke("falar", { texto: quem + texto, chamador: folha.claude?.nome })
+    .catch((e) => jlog(`falar: ${e}`));
 }
 
 /// Tira do texto o que é marcação para os olhos e não diz nada em voz alta.
@@ -701,6 +704,100 @@ function irParaEsperando() {
   focar(alvo.folha);
 }
 
+// ---------- escuta: falar em vez de digitar ----------
+
+const voz = document.getElementById("voz") as HTMLDivElement;
+const vozNivel = voz.querySelector(".voz-nivel > span") as HTMLSpanElement;
+const vozTexto = voz.querySelector(".voz-texto") as HTMLSpanElement;
+
+let escutando = false;
+/// Segura um segundo ⌘⇧E enquanto o modelo baixa — são centenas de MB.
+let preparando = false;
+
+/// A faixa cabe uma linha. Mostrar o começo de uma frase longa esconderia
+/// justamente o que você acabou de falar, então corta pela frente.
+function mostrarVoz(texto: string) {
+  vozTexto.textContent = texto.length > 140 ? `…${texto.slice(-140)}` : texto;
+}
+
+function fecharVoz() {
+  voz.hidden = true;
+  vozNivel.style.width = "0";
+  vozTexto.textContent = "";
+  // A faixa ocupa espaço de verdade: sumindo, os painéis recuperam as linhas.
+  if (ativa) {
+    medir(ativa);
+    sincronizar(ativa);
+  }
+}
+
+async function alternarEscuta() {
+  if (preparando) return;
+  if (escutando) {
+    escutando = false;
+    await invoke("escuta_parar").catch((e) => jlog(`escuta_parar: ${e}`));
+    fecharVoz();
+    return;
+  }
+
+  voz.hidden = false;
+  if (ativa) {
+    medir(ativa);
+    sincronizar(ativa);
+  }
+
+  try {
+    preparando = true;
+    if (!(await invoke<boolean>("escuta_modelo_pronto"))) {
+      mostrarVoz("baixando o modelo de transcrição (466 MB), uma vez só…");
+      await invoke("escuta_baixar_modelo");
+    }
+    mostrarVoz("escutando…");
+    await invoke("escuta_comecar");
+    escutando = true;
+  } catch (e) {
+    mostrarVoz(`não consegui escutar: ${e}`);
+    setTimeout(fecharVoz, 4000);
+  } finally {
+    preparando = false;
+  }
+}
+
+async function ligarEscuta() {
+  // Parcial: o palpite enquanto você fala, reavaliado a cada 800 ms.
+  await listen<string>("escuta://parcial", (e) => mostrarVoz(e.payload));
+
+  // Final: o trecho fechou. Vai para o painel em foco AGORA, não para o que
+  // estava em foco quando você começou a falar — é o que digitar faria.
+  await listen<string>("escuta://final", (e) => {
+    const texto = e.payload.trim();
+    if (!texto || !ativa) return;
+    // Espaço no fim: dois trechos seguidos grudariam numa palavra só.
+    invoke("pty_write", { id: ativa.foco.id, data: `${texto} ` })
+      .catch((err) => jlog(`pty_write da voz: ${err}`));
+    mostrarVoz("escutando…");
+  });
+
+  // O parcial fica parado enquanto você não fala; é a barra que mostra que o
+  // microfone está aberto de verdade.
+  await listen<number>("escuta://nivel", (e) => {
+    vozNivel.style.width = `${Math.min(100, e.payload * 320)}%`;
+  });
+
+  await listen<number>("escuta://progresso", (e) => {
+    mostrarVoz(`baixando o modelo de transcrição… ${Math.round(e.payload * 100)}%`);
+  });
+
+  await listen<string>("escuta://erro", (e) => {
+    escutando = false;
+    mostrarVoz(`erro na escuta: ${e.payload}`);
+    setTimeout(fecharVoz, 4000);
+  });
+
+  await listen("menu://escutar", () => alternarEscuta());
+  await listen("menu://calar", () => invoke("calar").catch((e) => jlog(`calar: ${e}`)));
+}
+
 // ---------- teclado ----------
 
 window.addEventListener("keydown", (e) => {
@@ -752,6 +849,8 @@ async function iniciar() {
       jlog(`evento do claude ilegível: ${err}`);
     }
   });
+
+  await ligarEscuta();
 
   // ⌘T, ⌘D, ⌘⇧D e ⌘W chegam por aqui: quem recebe a tecla é o menu nativo.
   await listen("menu://nova-aba", () => novaAba());

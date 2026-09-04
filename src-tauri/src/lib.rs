@@ -1,9 +1,11 @@
+mod escuta;
+
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::process::Command;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use base64::Engine;
@@ -40,7 +42,6 @@ struct Ptys {
 /// ou `claude` pelo nome só funcionaria quando aberto de um terminal.
 struct Config {
     socket: PathBuf,
-    fala: PathBuf,
     claude: PathBuf,
 }
 
@@ -61,7 +62,6 @@ impl Default for Config {
             // O pid no nome deixa duas janelas do TermIAu conviverem sem se
             // roubarem eventos; o hook descobre o caminho pelo ambiente do painel.
             socket: std::env::temp_dir().join(format!("termiau-{}.sock", std::process::id())),
-            fala: achar("fala_claudio", &["~/.cargo/bin/fala_claudio", "/usr/local/bin/fala_claudio"]),
             claude: achar("claude", &["~/.local/bin/claude", "/usr/local/bin/claude", "~/.claude/local/claude"]),
         }
     }
@@ -339,22 +339,96 @@ fn limpar_sockets_orfaos(atual: &PathBuf) {
     }
 }
 
-/// Fala um texto com o Fala Cláudio. `--nao-esperar` devolve na hora: a fila é
-/// dele, e segurar aqui travaria o evento seguinte.
-#[tauri::command]
-fn falar(cfg: State<'_, Config>, texto: String) {
-    let _ = Command::new(&cfg.fala)
-        .args(["--nao-esperar", "--"])
-        .arg(texto)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn();
+/// A voz. O modelo do Kokoro custa segundos para carregar e é preciso um dono
+/// fixo para ele — daí uma thread própria, que nasce com o app e vive falando o
+/// que a fila mandar.
+struct Voz {
+    fila: std::sync::mpsc::Sender<Pedido>,
+    /// Pid do `afplay` em curso, 0 quando ninguém fala. É por ele que se cala.
+    tocando: Arc<AtomicU32>,
+    /// Sobe a cada "cala a boca". Um pedido enfileirado antes disso perdeu a
+    /// validade — sem esta conta, esvaziar a fila com uma marca booleana
+    /// derrubaria também o próximo pedido legítimo a chegar.
+    geracao: Arc<AtomicU64>,
 }
 
-/// Cala o que está sendo falado e esvazia a fila.
+struct Pedido {
+    texto: String,
+    /// Quem está falando. Cada chamador ganha uma voz do rodízio e a mantém,
+    /// então dá pra saber de qual projeto veio o aviso sem ouvir o nome.
+    chamador: Option<String>,
+    geracao: u64,
+}
+
+fn abrir_voz() -> Voz {
+    let (fila, pedidos) = std::sync::mpsc::channel::<Pedido>();
+    let tocando = Arc::new(AtomicU32::new(0));
+    let geracao = Arc::new(AtomicU64::new(0));
+
+    let tocando_thread = tocando.clone();
+    let geracao_thread = geracao.clone();
+    std::thread::spawn(move || {
+        let mut falador = match fala_nucleo::Falador::novo() {
+            Ok(f) => f,
+            Err(e) => {
+                return eprintln!(
+                    "[termiau] sem voz: {e}. Os pesos do Kokoro moram em \
+                     ~/Library/Application Support/fala_claudio/modelos."
+                );
+            }
+        };
+        let mut config = fala_nucleo::Config::carregar();
+
+        for pedido in pedidos {
+            if pedido.geracao < geracao_thread.load(Ordering::SeqCst) {
+                continue; // calado antes de chegar a vez
+            }
+
+            if let Some(chave) = &pedido.chamador {
+                if let Some((voz, nova)) = config.voz_do_chamador(chave) {
+                    config.usar_voz(&voz);
+                    // Só grava quando o rodízio escolheu uma voz nova: é o que
+                    // faz o mesmo projeto soar igual amanhã.
+                    if nova {
+                        let _ = config.salvar();
+                    }
+                }
+            }
+
+            // Uma fala por vez na máquina inteira, por cadeado de arquivo —
+            // vale também se o CLI antigo ainda existir por aqui.
+            let _palco = fala_nucleo::palco::Palco::subir();
+            match falador.falar(&pedido.texto, &config) {
+                Ok(mut fala) => {
+                    tocando_thread.store(fala.processo.id(), Ordering::SeqCst);
+                    let _ = fala.processo.wait();
+                    tocando_thread.store(0, Ordering::SeqCst);
+                }
+                Err(e) => eprintln!("[termiau] não consegui falar: {e}"),
+            }
+        }
+    });
+
+    Voz { fila, tocando, geracao }
+}
+
+/// Põe um texto na fila da voz. Devolve na hora: sintetizar e tocar levam
+/// segundos, e o evento seguinte não pode esperar por isso.
 #[tauri::command]
-fn calar(cfg: State<'_, Config>) {
-    let _ = Command::new(&cfg.fala).arg("--parar").stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+fn falar(voz: State<'_, Voz>, texto: String, chamador: Option<String>) {
+    let geracao = voz.geracao.load(Ordering::SeqCst);
+    let _ = voz.fila.send(Pedido { texto, chamador, geracao });
+}
+
+/// Cala o que está tocando e descarta o que ainda não foi falado.
+#[tauri::command]
+fn calar(voz: State<'_, Voz>) {
+    voz.geracao.fetch_add(1, Ordering::SeqCst);
+    let pid = voz.tocando.load(Ordering::SeqCst);
+    if pid != 0 {
+        // O `afplay` é um processo só nosso; derrubá-lo é o corte da fala.
+        unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+    }
 }
 
 /// Uma frase do que o Claude acabou de dizer, pra ser ouvida em vez de lida.
@@ -378,6 +452,154 @@ async fn resumir(cfg: State<'_, Config>, texto: String) -> Result<String, String
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+// ---------- escuta: transcrição da fala ----------
+
+/// Equilíbrio recomendado para português — 466 MB. Os outros do catálogo
+/// continuam em `escuta::model` para quando houver uma tela de ajustes.
+const MODELO: &str = "small";
+const IDIOMA: &str = "pt";
+
+#[derive(Default)]
+struct Escuta {
+    /// Marcada para pedir que as três threads da sessão parem.
+    parar: Mutex<Option<Arc<AtomicBool>>>,
+}
+
+fn dir_dados(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path().app_data_dir().map_err(|e| format!("sem diretório de dados: {e}"))
+}
+
+/// Onde está o modelo. Procura primeiro o nosso e depois o do app Escuta, que
+/// era um projeto à parte: quem já baixou 466 MB lá não precisa baixar de novo.
+fn caminho_modelo(app: &AppHandle) -> Result<PathBuf, String> {
+    let nosso = escuta::model::path_for(&dir_dados(app)?, MODELO);
+    if nosso.exists() {
+        return Ok(nosso);
+    }
+    let herdado = dirs_home()
+        .map(PathBuf::from)
+        .map(|h| h.join("Library/Application Support/ai.dimenso.escuta/models"))
+        .map(|d| d.join(format!("ggml-{MODELO}.bin")));
+    match herdado {
+        Some(p) if p.exists() => Ok(p),
+        _ => Ok(nosso), // não existe ainda; o caminho é onde o download vai cair
+    }
+}
+
+#[tauri::command]
+fn escuta_modelo_pronto(app: AppHandle) -> Result<bool, String> {
+    Ok(caminho_modelo(&app)?.exists())
+}
+
+/// Baixa o modelo, contando o progresso em `escuta://progresso` (0 a 1).
+#[tauri::command]
+async fn escuta_baixar_modelo(app: AppHandle) -> Result<(), String> {
+    let dir = dir_dados(&app)?;
+    std::fs::create_dir_all(escuta::model::dir(&dir)).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let aviso = app.clone();
+        escuta::model::download(&dir, MODELO, move |frac, _, _| {
+            let _ = aviso.emit("escuta://progresso", frac);
+        })
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Liga o microfone. Três threads: captura, medidor de nível e transcrição —
+/// o `cpal::Stream` tem que viver inteiro na thread que o abriu.
+#[tauri::command]
+fn escuta_comecar(app: AppHandle, state: State<'_, Escuta>) -> Result<(), String> {
+    let mut guarda = state.parar.lock().unwrap();
+    // Uma sessão que morreu sozinha (microfone sumiu, modelo corrompido) deixa
+    // a marca para trás; limpa antes de decidir se ainda estamos escutando.
+    if guarda.as_ref().is_some_and(|p| p.load(Ordering::Relaxed)) {
+        *guarda = None;
+    }
+    if guarda.is_some() {
+        return Err("já estou escutando".into());
+    }
+
+    let modelo = caminho_modelo(&app)?;
+    if !modelo.exists() {
+        return Err("o modelo ainda não foi baixado".into());
+    }
+
+    let parar = Arc::new(AtomicBool::new(false));
+    let (audio_tx, audio_rx) = std::sync::mpsc::channel::<Vec<f32>>();
+    let (nivel_tx, nivel_rx) = std::sync::mpsc::channel::<f32>();
+
+    // 1) captura
+    {
+        let parar = parar.clone();
+        let app = app.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = escuta::audio::capture(None, audio_tx, nivel_tx, parar.clone()) {
+                let _ = app.emit("escuta://erro", e.to_string());
+                parar.store(true, Ordering::Relaxed);
+                let _ = app.emit("escuta://estado", "parado");
+            }
+        });
+    }
+
+    // 2) medidor: agrega o pico e emite ~20x por segundo, senão seria um evento
+    //    por buffer de áudio.
+    {
+        let parar = parar.clone();
+        let app = app.clone();
+        std::thread::spawn(move || {
+            while !parar.load(Ordering::Relaxed) {
+                let mut pico = 0.0f32;
+                let limite = std::time::Instant::now() + std::time::Duration::from_millis(50);
+                while std::time::Instant::now() < limite {
+                    match nivel_rx.recv_timeout(std::time::Duration::from_millis(50)) {
+                        Ok(v) => pico = pico.max(v),
+                        Err(_) => break,
+                    }
+                }
+                let _ = app.emit("escuta://nivel", pico);
+            }
+            let _ = app.emit("escuta://nivel", 0.0);
+        });
+    }
+
+    // 3) transcrição
+    {
+        let parar = parar.clone();
+        let app = app.clone();
+        let caminho = modelo.to_string_lossy().into_owned();
+        std::thread::spawn(move || {
+            let motor = match escuta::stt::Engine::load(&caminho, IDIOMA) {
+                Ok(m) => m,
+                Err(e) => {
+                    let _ = app.emit("escuta://erro", e.to_string());
+                    parar.store(true, Ordering::Relaxed);
+                    let _ = app.emit("escuta://estado", "parado");
+                    return;
+                }
+            };
+            escuta::stt::run(motor, audio_rx, parar, |ev| match ev {
+                escuta::stt::Event::Partial(t) => { let _ = app.emit("escuta://parcial", t); }
+                escuta::stt::Event::Final(t) => { let _ = app.emit("escuta://final", t); }
+                escuta::stt::Event::Status(s) => { let _ = app.emit("escuta://estado", s); }
+                escuta::stt::Event::Error(e) => { let _ = app.emit("escuta://erro", e); }
+            });
+        });
+    }
+
+    *guarda = Some(parar);
+    Ok(())
+}
+
+#[tauri::command]
+fn escuta_parar(state: State<'_, Escuta>) {
+    if let Some(parar) = state.parar.lock().unwrap().take() {
+        parar.store(true, Ordering::Relaxed);
+    }
 }
 
 /// O menu padrão do Tauri reserva ⌘W para "Close Window" e o menu do macOS
@@ -434,6 +656,16 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
         ],
     )?;
 
+    let voz = Submenu::with_items(
+        app,
+        "Voz",
+        true,
+        &[
+            &MenuItem::with_id(app, "escutar", "Escutar", true, Some("CmdOrCtrl+Shift+E"))?,
+            &MenuItem::with_id(app, "calar", "Calar a Fala", true, Some("CmdOrCtrl+Shift+S"))?,
+        ],
+    )?;
+
     let janela = Submenu::with_items(
         app,
         "Janela",
@@ -444,7 +676,7 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
         ],
     )?;
 
-    app.set_menu(Menu::with_items(app, &[&sobre, &arquivo, &editar, &janela])?)?;
+    app.set_menu(Menu::with_items(app, &[&sobre, &arquivo, &editar, &voz, &janela])?)?;
     Ok(())
 }
 
@@ -456,6 +688,10 @@ pub fn run() {
             ouvir_hooks(app.handle().clone(), cfg.socket.clone());
             app.manage(cfg);
             app.manage(Ptys::default());
+            app.manage(Escuta::default());
+            app.manage(abrir_voz());
+            // Sem isto o whisper.cpp despeja o log dele na saída do processo.
+            whisper_rs::install_logging_hooks();
             montar_menu(app.handle())?;
             Ok(())
         })
@@ -465,6 +701,8 @@ pub fn run() {
             "dividir-lado" => { let _ = app.emit("menu://dividir-lado", ()); }
             "dividir-abaixo" => { let _ = app.emit("menu://dividir-abaixo", ()); }
             "fechar" => { let _ = app.emit("menu://fechar", ()); }
+            "escutar" => { let _ = app.emit("menu://escutar", ()); }
+            "calar" => { let _ = app.emit("menu://calar", ()); }
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
@@ -478,6 +716,10 @@ pub fn run() {
             falar,
             calar,
             resumir,
+            escuta_modelo_pronto,
+            escuta_baixar_modelo,
+            escuta_comecar,
+            escuta_parar,
             js_log
         ])
         .build(tauri::generate_context!())
