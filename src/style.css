@@ -1,0 +1,202 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #14161a;
+}
+
+body {
+  /* Coluna: a barra de abas ocupa o que precisa, o terminal fica com o resto.
+     Sem isto o #panes com height:100% empurraria a barra pra fora da janela. */
+  display: flex;
+  flex-direction: column;
+}
+
+#panes {
+  flex: 1;
+  min-height: 0; /* senão o conteúdo do xterm impede a coluna de encolher */
+  position: relative;
+}
+
+/* Uma por aba; só a ativa fica visível. Escondemos com display:none — as
+   inativas ficam com dimensão zero e por isso são remedidas ao voltar. */
+.aba {
+  height: 100%;
+}
+
+.aba[hidden] {
+  display: none;
+}
+
+/* Um corte: primeiro filho, divisor, segundo filho. Quem escreve os tracks é o
+   `aplicarFracao` em src/main.ts, porque a fatia muda ao arrastar o divisor. */
+.divisao {
+  display: grid;
+  height: 100%;
+}
+
+/* Itens de grid não encolhem além do conteúdo por padrão, e o conteúdo aqui é
+   um terminal: sem isto um painel espremido empurraria o vizinho pra fora. */
+.divisao > * {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* O painel em si. O padding é o mesmo que o terminal inteiro tinha antes de
+   existir divisão — com um painel só, nada mudou de lugar. */
+.folha {
+  height: 100%;
+  padding: 6px 4px 4px 8px;
+  box-sizing: border-box;
+}
+
+.divisor {
+  background: #23262c;
+}
+
+.divisor.lado {
+  cursor: col-resize;
+}
+
+.divisor.abaixo {
+  cursor: row-resize;
+}
+
+/* Qual painel tem o teclado. Só aparece quando há mais de um: com um só, o
+   contorno seria uma moldura permanente em volta da janela inteira. */
+.aba.dividida .folha.focada {
+  box-shadow: inset 0 0 0 1px #333944;
+}
+
+/* Cursor: patinha no lugar do bloco.
+   Depende do renderer DOM do xterm — é o ativo porque não carregamos
+   os addons webgl/canvas. Se um dia carregar, o cursor volta a ser bloco.
+
+   São dois pseudo-elementos: o ::before tapa a célula e o ::after desenha a
+   patinha por cima. Um só não resolve — a caixa da patinha é mais larga que a
+   célula (veja o `inset` abaixo) e um fundo opaco nela vazaria para os vizinhos. */
+.xterm .xterm-cursor-block {
+  position: relative;
+  background-color: transparent !important;
+  border-color: transparent !important;
+  /* O xterm pinta a letra sob o cursor com a cor do fundo (bloco invertido).
+     Devolvemos a cor do texto: é ela que reaparece quando a patinha pisca. */
+  color: #d5d8de !important;
+}
+
+/* Tapa a letra: a patinha tem vãos entre os dedinhos e o glifo aparecia neles.
+   A cor é a do fundo do terminal — a mesma do tema em src/main.ts. */
+.xterm .xterm-cursor-block::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #14161a;
+}
+
+/* A patinha, por cima do ::before. Pseudo-elemento posicionado pinta acima do
+   texto do elemento, então ela cobre o glifo sem depender de z-index. */
+.xterm .xterm-cursor-block::after {
+  content: "";
+  position: absolute;
+  /* A célula é estreita e alta. Alargando um pouco a caixa, o `contain`
+     deixa de ser limitado pela largura sem estourar a altura da linha. */
+  inset: 14% -22%;
+  background: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Cg%20fill='%23d97757'%3E%3Cellipse%20cx='19'%20cy='47'%20rx='10'%20ry='13'%20transform='rotate%28-20%2019%2047%29'/%3E%3Cellipse%20cx='40'%20cy='29'%20rx='11'%20ry='14.5'%20transform='rotate%28-7%2040%2029%29'/%3E%3Cellipse%20cx='63'%20cy='29'%20rx='11'%20ry='14.5'%20transform='rotate%287%2063%2029%29'/%3E%3Cellipse%20cx='84'%20cy='47'%20rx='10'%20ry='13'%20transform='rotate%2820%2084%2047%29'/%3E%3Cellipse%20cx='51'%20cy='76'%20rx='25'%20ry='19.5'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+/* `step-end`: alterna entre visível e ausente, sem meio-termo translúcido. */
+@keyframes termiau-paw-blink {
+  0%, 49% { opacity: 1; visibility: visible; }
+  50%, 100% { opacity: 0; visibility: hidden; }
+}
+
+/* Os dois somem juntos — é o sumiço do tapa-letra que revela o glifo de volta.
+   Animações separadas, mesma duração e mesmo início: ficam em fase.
+
+   `.xterm-focus` é o xterm marcando qual terminal tem o teclado. Sem esse
+   degrau a patinha piscaria em todo painel aberto, e não só naquele em que se
+   está digitando — que é o que o piscar quer dizer. */
+.xterm .xterm-focus .xterm-cursor-block.xterm-cursor-blink::before,
+.xterm .xterm-focus .xterm-cursor-block.xterm-cursor-blink::after {
+  animation: termiau-paw-blink 1.2s step-end infinite;
+}
+
+
+/* ---------- barra de abas ---------- */
+
+#tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  background: #0f1114;
+  border-bottom: 1px solid #23262c;
+  /* A barra não pode encolher nem rolar junto: com muitas abas elas é que
+     espremem, como no Terminal.app. */
+  flex: none;
+  overflow: hidden;
+}
+
+#tabs[hidden] {
+  display: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* min-width:0 libera o flex a espremer; o basis dá o tamanho "cheio" que
+     cada aba tenta ocupar enquanto sobra espaço. */
+  flex: 1 1 180px;
+  min-width: 0;
+  max-width: 220px;
+  padding: 6px 8px 6px 10px;
+  font: 12px/1 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  color: #7d838f;
+  background: #16181d;
+  border: none;
+  border-top: 2px solid transparent;
+  cursor: default;
+  user-select: none;
+}
+
+.tab:hover {
+  color: #a5abb7;
+}
+
+.tab.ativa {
+  color: #d5d8de;
+  background: #14161a;
+  border-top-color: #d97757;
+}
+
+.tab-titulo {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-fechar {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  line-height: 15px;
+  text-align: center;
+  color: #6b717c;
+  /* Invisível até o mouse chegar na aba: um X em cada aba o tempo todo
+     compete com o título pela atenção. */
+  opacity: 0;
+}
+
+.tab:hover .tab-fechar,
+.tab.ativa .tab-fechar {
+  opacity: 1;
+}
+
+.tab-fechar:hover {
+  background: #2b2f37;
+  color: #d5d8de;
+}
