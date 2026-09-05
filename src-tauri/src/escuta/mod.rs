@@ -15,5 +15,7 @@
 
 pub mod audio;
 pub mod model;
-pub mod resample;
+// Mora no fala_nucleo: a voz também reamostra, do Kokoro para a placa de som,
+// e um reamostrador copiado é um que conserta pela metade.
+pub use fala_nucleo::resample;
 pub mod stt;

@@ -20,6 +20,18 @@ const SILENCE_TO_COMMIT: Duration = Duration::from_millis(700);
 const MAX_SEGMENT: usize = SAMPLE_RATE * 14;
 /// Abaixo disso consideramos silêncio.
 const SILENCE_RMS: f32 = 0.006;
+/// Quadro de 20 ms: a unidade em que perguntamos "tem voz aqui?".
+const QUADRO: usize = SAMPLE_RATE / 50;
+/// Fração mínima do trecho com energia de fala para valer rodar o modelo.
+/// Era só o RMS do trecho inteiro, e é por isso que a alucinação passava: 14 s
+/// de silêncio com uma batida de tecla no meio têm média acima do limiar, e o
+/// Whisper preenche o vazio com o que mais viu no treino — legenda de YouTube
+/// pedindo like e inscrição.
+const MIN_FRACAO_FALA: f32 = 0.08;
+/// E um piso absoluto: menos de 250 ms de voz não é palavra nenhuma.
+const MIN_MS_FALA: usize = 250;
+/// Folga que fica em volta da fala ao cortar as pontas, em quadros.
+const FOLGA_QUADROS: usize = 3;
 
 pub enum Event {
     Partial(String),
@@ -99,6 +111,34 @@ impl Engine {
     }
 }
 
+/// Dobra acento e caixa e joga fora pontuação: a alucinação chega enfeitada e
+/// diferente a cada vez ("Não se esqueça de se inscrever no canal!"), então a
+/// comparação tem que ser sobre uma forma só.
+fn normalizar(s: &str) -> String {
+    let mut fora = String::with_capacity(s.len());
+    let mut espaco = true;
+    for c in s.chars() {
+        let c = match c.to_lowercase().next().unwrap_or(c) {
+            'á' | 'à' | 'ã' | 'â' | 'ä' => 'a',
+            'é' | 'ê' | 'è' | 'ë' => 'e',
+            'í' | 'ì' | 'î' | 'ï' => 'i',
+            'ó' | 'ô' | 'õ' | 'ò' | 'ö' => 'o',
+            'ú' | 'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            'ñ' => 'n',
+            outro => outro,
+        };
+        if c.is_alphanumeric() {
+            fora.push(c);
+            espaco = false;
+        } else if !espaco {
+            fora.push(' ');
+            espaco = true;
+        }
+    }
+    fora.trim().to_string()
+}
+
 /// Remove marcadores ([MÚSICA], (risos)) e alucinações típicas de silêncio.
 fn clean(s: &str) -> String {
     let mut t = s.trim().to_string();
@@ -114,24 +154,66 @@ fn clean(s: &str) -> String {
     }
 
     let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
-    let key = t.to_lowercase();
-    let key = key.trim_matches(|c: char| !c.is_alphanumeric());
+    let key = normalizar(&t);
 
-    // o Whisper produz estas frases sozinho quando ouve só silêncio
+    // Frase curta e sozinha: o Whisper devolve estas quando ouve só silêncio.
+    // Igualdade exata, porque "obrigado" no meio de uma frase é fala de verdade.
     const LIXO: [&str; 9] = [
         "you", "thank you", "obrigado", "obrigada", "tchau",
-        "legendas pela comunidade amara.org", "amara.org",
-        "legendas pela comunidade", "subtitles by the amara.org community",
+        "legendas pela comunidade amara org", "amara org",
+        "legendas pela comunidade", "subtitles by the amara org community",
     ];
-    if key.is_empty() || LIXO.contains(&key) {
+    if key.is_empty() || LIXO.contains(&key.as_str()) {
         return String::new();
     }
+
+    // O treino do Whisper em português é cheio de legenda de YouTube, e o vídeo
+    // médio termina pedindo like e inscrição. Estas ele inventa em cima de
+    // silêncio e de ruído de ventilador, sempre com uma redação diferente —
+    // por isso casamos por conteúdo, não por igualdade. O preço é não dar para
+    // ditar estas frases de propósito, e ditar "deixa o like" para um shell não
+    // é caso de uso que exista.
+    const ISCAS: [&str; 24] = [
+        "inscreva se no canal", "se inscreva no canal", "inscrever no canal",
+        "se inscrever no canal", "nao se esqueca de se inscrever",
+        "esqueca de se inscrever", "se inscreve no canal",
+        "deixe o seu like", "deixa o seu like", "deixe seu like",
+        "deixa seu like", "deixe um like", "deixa um like", "deixa o like",
+        "deixe o like", "ative o sininho", "ativa o sininho",
+        "obrigado por assistir", "obrigada por assistir",
+        "ate o proximo video", "compartilhe o video", "curta o video",
+        "like and subscribe", "dont forget to subscribe",
+    ];
+    if ISCAS.iter().any(|isca| key.contains(isca)) {
+        return String::new();
+    }
+
     t
 }
 
 #[cfg(test)]
 mod tests {
-    use super::clean;
+    use super::{clean, normalizar};
+
+    #[test]
+    fn a_isca_do_youtube_nao_passa() {
+        // Todas estas o Whisper entregou em cima de silêncio, em algum momento.
+        for frase in [
+            "Se inscreva no canal e deixe o seu like!",
+            "Não se esqueça de se inscrever no canal.",
+            "Inscreva-se no canal, ative o sininho.",
+            "Obrigado por assistir, até o próximo vídeo!",
+            "deixa o like aí galera",
+        ] {
+            assert_eq!(clean(frase), "", "passou: {frase}");
+        }
+    }
+
+    #[test]
+    fn normalizar_dobra_acento_e_pontuacao() {
+        assert_eq!(normalizar("Inscreva-se, JÁ!"), "inscreva se ja");
+        assert_eq!(normalizar("  ação   ç  "), "acao c");
+    }
 
     #[test]
     fn tira_marcadores_e_alucinacoes() {
@@ -147,6 +229,56 @@ mod tests {
     fn preserva_fala_de_verdade() {
         let s = "obrigado pela ajuda, vou revisar hoje";
         assert_eq!(clean(s), s);
+        // "like" e "canal" fora do bordão continuam passando.
+        let s = "gostei do canal de áudio novo";
+        assert_eq!(clean(s), s);
+    }
+}
+
+#[cfg(test)]
+mod portao {
+    use super::*;
+
+    /// Trecho de `ms` milissegundos, com fala nos milissegundos de `fala`.
+    fn trecho(ms: usize, fala: std::ops::Range<usize>) -> Vec<f32> {
+        (0..SAMPLE_RATE * ms / 1000)
+            .map(|i| {
+                let t = i * 1000 / SAMPLE_RATE;
+                // Onda bem acima do limiar onde há fala; zero no resto.
+                if fala.contains(&t) { if i % 2 == 0 { 0.3 } else { -0.3 } } else { 0.0 }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn silencio_com_um_estalo_nao_abre_o_portao() {
+        // O caso da alucinação: 14 s de nada com 40 ms de barulho no meio.
+        let a = trecho(14_000, 7_000..7_040);
+        assert!(super::rms(&a) >= SILENCE_RMS, "o portão antigo abriria aqui");
+        assert!(!tem_fala(&a), "o portão novo tem que fechar");
+    }
+
+    #[test]
+    fn meio_segundo_de_fala_abre_o_portao() {
+        assert!(tem_fala(&trecho(2_000, 500..1_000)));
+    }
+
+    #[test]
+    fn silencio_puro_nao_abre_o_portao() {
+        assert!(!tem_fala(&trecho(3_000, 0..0)));
+        assert!(recortar(&trecho(3_000, 0..0)).is_empty());
+    }
+
+    #[test]
+    fn recorte_tira_as_pontas_e_guarda_a_fala() {
+        let a = trecho(5_000, 2_000..2_500);
+        let corte = recortar(&a);
+        // Sobra a fala mais a folga das duas pontas, não os 5 s.
+        let esperado = SAMPLE_RATE * 500 / 1000 + 2 * FOLGA_QUADROS * QUADRO;
+        assert!(corte.len() <= esperado, "cortou de menos: {}", corte.len());
+        assert!(corte.len() >= SAMPLE_RATE * 500 / 1000, "cortou fala: {}", corte.len());
+        // E o que sobrou ainda é fala aos olhos do portão.
+        assert!(tem_fala(corte));
     }
 }
 
@@ -155,6 +287,31 @@ fn rms(x: &[f32]) -> f32 {
         return 0.0;
     }
     (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt()
+}
+
+/// Vale rodar o modelo neste trecho? Conta quadros com voz em vez de olhar o
+/// RMS da média: um estalo de 40 ms perdido em silêncio levanta a média o
+/// bastante para o portão antigo abrir, e o que sai de lá é alucinação.
+fn tem_fala(audio: &[f32]) -> bool {
+    let total = audio.len() / QUADRO;
+    if total == 0 {
+        return false;
+    }
+    let com_voz = audio.chunks_exact(QUADRO).filter(|q| rms(q) >= SILENCE_RMS).count();
+    com_voz * 20 >= MIN_MS_FALA && com_voz as f32 / total as f32 >= MIN_FRACAO_FALA
+}
+
+/// Corta o silêncio das pontas, deixando uma folga. O rabo de silêncio é o
+/// convite para a alucinação: o modelo segue "transcrevendo" o que não tem, e
+/// preenche com legenda de vídeo. O silêncio do meio fica — é pausa entre
+/// palavras, e tirá-lo colaria frases que não foram ditas juntas.
+fn recortar(audio: &[f32]) -> &[f32] {
+    let voz: Vec<bool> = audio.chunks_exact(QUADRO).map(|q| rms(q) >= SILENCE_RMS).collect();
+    let Some(a) = voz.iter().position(|&v| v) else { return &[] };
+    let b = voz.iter().rposition(|&v| v).unwrap_or(a);
+    let ini = a.saturating_sub(FOLGA_QUADROS) * QUADRO;
+    let fim = ((b + 1 + FOLGA_QUADROS) * QUADRO).min(audio.len());
+    &audio[ini..fim]
 }
 
 /// Laço principal: consome áudio até o sinal de parada.
@@ -202,9 +359,9 @@ pub fn run(
             || pending.len() >= MAX_SEGMENT;
 
         if commit {
-            // só roda o modelo se houve som de verdade no trecho
-            if rms(&pending) >= SILENCE_RMS {
-                match engine.transcribe(&pending) {
+            // só roda o modelo se houve fala de verdade no trecho
+            if tem_fala(&pending) {
+                match engine.transcribe(recortar(&pending)) {
                     Ok(t) if !t.is_empty() => emit(Event::Final(t)),
                     Ok(_) => emit(Event::Partial(String::new())),
                     Err(e) => emit(Event::Error(e.to_string())),
@@ -217,8 +374,8 @@ pub fn run(
             silence_since = None;
             last_partial = Instant::now();
         } else if last_partial.elapsed() >= PARTIAL_EVERY && pending.len() >= MIN_SAMPLES {
-            if rms(&pending) >= SILENCE_RMS {
-                if let Ok(t) = engine.transcribe(&pending) {
+            if tem_fala(&pending) {
+                if let Ok(t) = engine.transcribe(recortar(&pending)) {
                     if t != last_partial_text {
                         last_partial_text = t.clone();
                         emit(Event::Partial(t));
@@ -230,8 +387,8 @@ pub fn run(
     }
 
     // fecha o que sobrou no buffer
-    if pending.len() >= MIN_SAMPLES / 2 && rms(&pending) >= SILENCE_RMS {
-        if let Ok(t) = engine.transcribe(&pending) {
+    if pending.len() >= MIN_SAMPLES / 2 && tem_fala(&pending) {
+        if let Ok(t) = engine.transcribe(recortar(&pending)) {
             if !t.is_empty() {
                 emit(Event::Final(t));
             }

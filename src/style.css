@@ -246,7 +246,11 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  /* Altura fixa, e a faixa nunca sai da coluna: o espaço é reservado mesmo
+     calada. Era o hidden que fazia os painéis se remedirem a cada ⌘E. */
+  height: 30px;
+  padding: 0 10px;
+  box-sizing: border-box;
   background: #0f1114;
   border-top: 1px solid #23262c;
   font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
@@ -254,27 +258,34 @@ body {
   color: #7d838f;
 }
 
-#voz[hidden] {
-  display: none;
-}
-
-.voz-nivel {
+/* A onda é o único sinal de que o microfone está mesmo aberto — o parcial fica
+   parado enquanto você não fala, e parado não distingue ligado de travado.
+   Cada barrinha é um instante: chegam ~20 por segundo, as novas pela direita. */
+.voz-onda {
   flex: none;
-  width: 36px;
-  height: 4px;
-  border-radius: 2px;
-  background: #23262c;
-  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  width: 65px;
+  height: 14px;
+  /* Calada a faixa fica vazia, mas o lugar da onda continua ocupado: o texto
+     começa na mesma coluna com o microfone aberto ou fechado. */
+  opacity: 0;
+  transition: opacity 140ms linear;
 }
 
-/* A barra é o único sinal de que o microfone está mesmo aberto — o parcial
-   fica parado enquanto você não fala, e parado não distingue ligado de travado. */
-.voz-nivel > span {
-  display: block;
-  width: 0;
+#voz.escutando .voz-onda {
+  opacity: 1;
+}
+
+.voz-onda > span {
+  flex: 1;
   height: 100%;
+  border-radius: 1px;
   background: #d97757;
-  transition: width 60ms linear;
+  /* Espelhada no meio: scaleY cresce dos dois lados a partir do centro. */
+  transform: scaleY(0.06);
+  transition: transform 80ms linear;
 }
 
 .voz-texto {

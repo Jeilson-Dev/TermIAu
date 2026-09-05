@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "app:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
+    "app:build:dev": "tauri build --config src-tauri/tauri.dev.conf.json --bundles app",
+    "app:build": "tauri build",
+    "app:instalar:dev": "./scripts/instalar.sh dev",
+    "app:instalar": "./scripts/instalar.sh prod"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

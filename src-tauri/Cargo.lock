@@ -1000,6 +1000,7 @@ name = "fala_nucleo"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cpal",
  "dirs 5.0.1",
  "espeak-rs-sys",
  "hex",

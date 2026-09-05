@@ -8,10 +8,12 @@
     <!-- A barra só aparece com duas ou mais abas; com uma, é ruído. -->
     <div id="tabs" hidden></div>
     <div id="panes"></div>
-    <!-- Faixa da voz: some quando não há nada a dizer, e é ela que ocupa
-         espaço de verdade — os painéis encolhem e se remedem sozinhos. -->
-    <div id="voz" hidden>
-      <span class="voz-nivel"><span></span></span>
+    <!-- Faixa da voz: o espaço é reservado sempre. Aparecer e desaparecer
+         faria os painéis encolherem e crescerem a cada ⌘E — o terminal
+         inteiro pulava. Vazia ela é só uma linha escura no rodapé.
+         As barrinhas da onda quem cria é o src/main.ts. -->
+    <div id="voz">
+      <span class="voz-onda" aria-hidden="true"></span>
       <span class="voz-texto"></span>
     </div>
     <script type="module" src="/src/main.ts"></script>

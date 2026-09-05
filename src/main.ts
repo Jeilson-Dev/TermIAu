@@ -262,8 +262,10 @@ async function criarFolha(
   // não teria ninguém ouvindo e o começo do prompt se perderia.
   await invoke("pty_attach", { id });
 
-  // tela -> PTY
+  // tela -> PTY. `onData` é entrada do usuário: o ditado entra por `pty_write`
+  // direto e não passa por aqui, então digitar é distinguível de falar.
   term.onData((data) => {
+    cancelarEnvio();
     invoke("pty_write", { id, data }).catch((e) => jlog(`pty_write: ${e}`));
   });
   // O prompt (p10k, zsh) publica o diretório por OSC; é o título da aba.
@@ -704,15 +706,126 @@ function irParaEsperando() {
   focar(alvo.folha);
 }
 
+// ---------- envio automático ----------
+
+/// Depois de você parar de falar, o ditado vai sozinho.
+const ESPERA_ENVIO_MS = 5000;
+/// O mesmo limiar que abaixa a voz do lado do Rust (LIMIAR_MIC). Se os dois
+/// divergirem, a onda mostraria "falando" enquanto a contagem conta silêncio.
+const LIMIAR_FALA = 0.1;
+/// Enquanto a última sílaba for recente, a faixa mostra o parcial e não a
+/// contagem — senão os dois brigariam pela mesma linha a cada 200 ms.
+const PARCIAL_MANDA_MS = 800;
+
+/// O Enter marcado: o painel que recebeu o ditado e quando ele vai.
+let envio: { folha: Folha; em: number } | undefined;
+let pulso: ReturnType<typeof setInterval> | undefined;
+let ultimaFala = 0;
+
+function pararPulso() {
+  clearInterval(pulso);
+  pulso = undefined;
+}
+
+/// Quem manda na faixa: enquanto a última sílaba for recente, o parcial; a
+/// partir daí, a contagem. Os dois lados perguntam a MESMA coisa — se cada um
+/// decidisse por conta, o parcial (que chega mesmo no silêncio, às vezes vazio)
+/// e o pulso de 200 ms escreveriam por cima um do outro e a linha piscaria.
+function parcialMandaNaFaixa() {
+  return !envio || Date.now() - ultimaFala <= PARCIAL_MANDA_MS;
+}
+
+/// Fecha a faixa, ou volta ao parcial, conforme o microfone esteja aberto.
+function encerrarContagem() {
+  pararPulso();
+  if (escutando) mostrarVoz("escutando…");
+  else fecharVoz();
+}
+
+function agendarEnvio(folha: Folha) {
+  envio = { folha, em: Date.now() + ESPERA_ENVIO_MS };
+  if (!pulso) pulso = setInterval(baterEnvio, 200);
+}
+
+/// Voltou a falar: o Enter fica para depois.
+function adiarEnvio() {
+  if (envio) envio.em = Date.now() + ESPERA_ENVIO_MS;
+}
+
+/// Teclado tem a última palavra, e cancela de vez. Voltar a contar exige falar
+/// de novo: reagendar no primeiro pico do microfone desfaria a escolha de quem
+/// acabou de decidir digitar.
+function cancelarEnvio() {
+  if (!envio) return;
+  envio = undefined;
+  encerrarContagem();
+}
+
+function baterEnvio() {
+  if (!envio) return pararPulso();
+
+  // O painel pode ter fechado no meio da contagem.
+  if (envio.folha.morta) {
+    envio = undefined;
+    return encerrarContagem();
+  }
+
+  const falta = envio.em - Date.now();
+  if (falta > 0) {
+    if (!parcialMandaNaFaixa()) {
+      mostrarVoz(`↵ em ${Math.ceil(falta / 1000)}s — digite para cancelar`);
+    }
+    return;
+  }
+
+  const { folha } = envio;
+  envio = undefined;
+  invoke("pty_write", { id: folha.id, data: "\r" }).catch((e) => jlog(`envio: ${e}`));
+  encerrarContagem();
+}
+
 // ---------- escuta: falar em vez de digitar ----------
 
 const voz = document.getElementById("voz") as HTMLDivElement;
-const vozNivel = voz.querySelector(".voz-nivel > span") as HTMLSpanElement;
+const vozOnda = voz.querySelector(".voz-onda") as HTMLSpanElement;
 const vozTexto = voz.querySelector(".voz-texto") as HTMLSpanElement;
 
 let escutando = false;
-/// Segura um segundo ⌘⇧E enquanto o modelo baixa — são centenas de MB.
+/// Segura um segundo ⌘E enquanto o modelo baixa — são centenas de MB.
 let preparando = false;
+
+/// Microfone aberto sem ninguém falando é bateria e privacidade indo embora, e
+/// um Enter à espera de uma frase que não vem mais. Um minuto de silêncio e a
+/// escuta se desliga sozinha — ⌘E a traz de volta.
+const INATIVIDADE_MS = 60_000;
+let vigia: ReturnType<typeof setInterval> | undefined;
+
+/// Um instante por barrinha: a ~20 nivéis por segundo, são pouco mais de um
+/// segundo de história na tela. As novas entram pela direita.
+const ONDA_BARRAS = 22;
+/// O silêncio não apaga a onda: uma linha fina ainda diz "estou aberto".
+const ONDA_MINIMA = 0.06;
+const onda = new Array<number>(ONDA_BARRAS).fill(0);
+const ondaBarras = Array.from({ length: ONDA_BARRAS }, () => {
+  const barra = document.createElement("span");
+  vozOnda.appendChild(barra);
+  return barra;
+});
+
+function empurrarOnda(nivel: number) {
+  onda.shift();
+  onda.push(nivel);
+  for (let i = 0; i < ONDA_BARRAS; i++) {
+    // O mesmo ganho que a barra usava: fala normal enche a faixa sem estourar.
+    const altura = Math.max(ONDA_MINIMA, Math.min(1, onda[i] * 3.2));
+    ondaBarras[i].style.transform = `scaleY(${altura})`;
+  }
+}
+
+function limparOnda() {
+  onda.fill(0);
+  for (const barra of ondaBarras) barra.style.transform = `scaleY(${ONDA_MINIMA})`;
+}
 
 /// A faixa cabe uma linha. Mostrar o começo de uma frase longa esconderia
 /// justamente o que você acabou de falar, então corta pela frente.
@@ -720,30 +833,48 @@ function mostrarVoz(texto: string) {
   vozTexto.textContent = texto.length > 140 ? `…${texto.slice(-140)}` : texto;
 }
 
+/// Cala a faixa. O espaço dela fica: quem some é o conteúdo, não a linha.
 function fecharVoz() {
-  voz.hidden = true;
-  vozNivel.style.width = "0";
+  // Uma contagem em curso é a coisa mais importante na tela: um Enter está a
+  // caminho de um shell, e apagar o aviso é pior que ele ficar mais um segundo.
+  if (envio) return;
   vozTexto.textContent = "";
-  // A faixa ocupa espaço de verdade: sumindo, os painéis recuperam as linhas.
-  if (ativa) {
-    medir(ativa);
-    sincronizar(ativa);
-  }
+  voz.classList.remove("escutando");
+  limparOnda();
+}
+
+function pararVigia() {
+  clearInterval(vigia);
+  vigia = undefined;
+}
+
+/// Fecha o microfone. Sai daqui e do vigia da inatividade — os dois desligam
+/// pela mesma porta, para nenhum deixar o `escutando` mentindo.
+async function pararEscuta() {
+  escutando = false;
+  pararVigia();
+  voz.classList.remove("escutando");
+  limparOnda();
+  await invoke("escuta_parar").catch((e) => jlog(`escuta_parar: ${e}`));
+}
+
+/// Um minuto calado e o microfone fecha. Uma contagem em curso não atrasa nada:
+/// ela vive 5 s, muito dentro da folga, e a última fala é recente por definição.
+async function baterInatividade() {
+  if (!escutando) return pararVigia();
+  if (Date.now() - ultimaFala < INATIVIDADE_MS) return;
+  await pararEscuta();
+  // A faixa avisa por que emudeceu: silêncio sem explicação é igual a travado.
+  mostrarVoz("escuta desligada — um minuto sem falar (⌘E para voltar)");
+  setTimeout(fecharVoz, 5000);
 }
 
 async function alternarEscuta() {
   if (preparando) return;
   if (escutando) {
-    escutando = false;
-    await invoke("escuta_parar").catch((e) => jlog(`escuta_parar: ${e}`));
+    await pararEscuta();
     fecharVoz();
     return;
-  }
-
-  voz.hidden = false;
-  if (ativa) {
-    medir(ativa);
-    sincronizar(ativa);
   }
 
   try {
@@ -755,6 +886,10 @@ async function alternarEscuta() {
     mostrarVoz("escutando…");
     await invoke("escuta_comecar");
     escutando = true;
+    voz.classList.add("escutando");
+    // Zerado, `ultimaFala` é 1970: o vigia mataria a escuta no primeiro tique.
+    ultimaFala = Date.now();
+    if (!vigia) vigia = setInterval(baterInatividade, 1000);
   } catch (e) {
     mostrarVoz(`não consegui escutar: ${e}`);
     setTimeout(fecharVoz, 4000);
@@ -765,7 +900,9 @@ async function alternarEscuta() {
 
 async function ligarEscuta() {
   // Parcial: o palpite enquanto você fala, reavaliado a cada 800 ms.
-  await listen<string>("escuta://parcial", (e) => mostrarVoz(e.payload));
+  await listen<string>("escuta://parcial", (e) => {
+    if (parcialMandaNaFaixa()) mostrarVoz(e.payload);
+  });
 
   // Final: o trecho fechou. Vai para o painel em foco AGORA, não para o que
   // estava em foco quando você começou a falar — é o que digitar faria.
@@ -773,15 +910,21 @@ async function ligarEscuta() {
     const texto = e.payload.trim();
     if (!texto || !ativa) return;
     // Espaço no fim: dois trechos seguidos grudariam numa palavra só.
-    invoke("pty_write", { id: ativa.foco.id, data: `${texto} ` })
+    const folha = ativa.foco;
+    invoke("pty_write", { id: folha.id, data: `${texto} ` })
       .catch((err) => jlog(`pty_write da voz: ${err}`));
-    mostrarVoz("escutando…");
+    // Daqui pra frente silêncio vale como "acabei": a contagem começa.
+    agendarEnvio(folha);
   });
 
-  // O parcial fica parado enquanto você não fala; é a barra que mostra que o
+  // O parcial fica parado enquanto você não fala; é a onda que mostra que o
   // microfone está aberto de verdade.
   await listen<number>("escuta://nivel", (e) => {
-    vozNivel.style.width = `${Math.min(100, e.payload * 320)}%`;
+    empurrarOnda(e.payload);
+    if (e.payload > LIMIAR_FALA) {
+      ultimaFala = Date.now();
+      adiarEnvio();
+    }
   });
 
   await listen<number>("escuta://progresso", (e) => {
@@ -790,12 +933,30 @@ async function ligarEscuta() {
 
   await listen<string>("escuta://erro", (e) => {
     escutando = false;
+    pararVigia();
+    voz.classList.remove("escutando");
+    limparOnda();
     mostrarVoz(`erro na escuta: ${e.payload}`);
     setTimeout(fecharVoz, 4000);
   });
 
   await listen("menu://escutar", () => alternarEscuta());
-  await listen("menu://calar", () => invoke("calar").catch((e) => jlog(`calar: ${e}`)));
+
+  // Ctrl+Espaço liga e desliga a voz. Sem indicador fixo em lugar nenhum, então
+  // a própria faixa diz como ficou e depois se cala — o silêncio de uma voz
+  // desligada é indistinguível do silêncio de uma que não tinha nada a dizer.
+  await listen("menu://voz", async () => {
+    try {
+      const ligada = await invoke<boolean>("voz_alternar");
+      // A faixa já tem dono: o parcial, ou uma contagem que não pode ser
+      // tapada por um aviso passageiro.
+      if (escutando || envio) return;
+      mostrarVoz(ligada ? "voz ligada" : "voz desligada");
+      setTimeout(fecharVoz, 1800);
+    } catch (e) {
+      jlog(`voz_alternar: ${e}`);
+    }
+  });
 }
 
 // ---------- teclado ----------

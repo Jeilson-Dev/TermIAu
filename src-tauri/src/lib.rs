@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use base64::Engine;
@@ -339,13 +339,84 @@ fn limpar_sockets_orfaos(atual: &PathBuf) {
     }
 }
 
+/// Pico do microfone a partir do qual se considera que você está falando. A
+/// faixa no rodapé mostra esse mesmo pico — a barra dela enche perto de 0,3.
+const LIMIAR_MIC: f32 = 0.10;
+/// Depois da última sílaba ainda conta como fala por este tempo. Sem isto a
+/// voz subiria e desceria entre as suas palavras, que é pior que não abaixar.
+const SEGURA_ABAFADO_MS: u64 = 900;
+/// Quanto do volume sobra enquanto você fala.
+const ABAFAR_PARA: u16 = 50; // por cento
+
+/// Quando o microfone ouviu você por último. A escuta escreve, a voz lê — é o
+/// que faz a fala abaixar enquanto você dita.
+///
+/// Relógio de epoch em ms nas duas pontas, para não precisar combinar uma
+/// origem entre threads que nascem em momentos diferentes.
+#[derive(Default, Clone)]
+struct Atividade {
+    /// Quando o microfone ouviu você por último.
+    ultima: Arc<AtomicU64>,
+}
+
+impl Atividade {
+    fn agora_ms() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
+
+    fn marcar(&self) {
+        self.ultima.store(Self::agora_ms(), Ordering::Relaxed);
+    }
+
+    fn falando(&self) -> bool {
+        let ultima = self.ultima.load(Ordering::Relaxed);
+        ultima != 0 && Self::agora_ms().saturating_sub(ultima) < SEGURA_ABAFADO_MS
+    }
+
+}
+
+#[cfg(test)]
+mod testes_atividade {
+    use super::*;
+
+    #[test]
+    fn sem_microfone_a_voz_nao_abaixa() {
+        assert!(!Atividade::default().falando(), "nunca ouviu ninguém");
+    }
+
+    #[test]
+    fn a_retencao_expira() {
+        let a = Atividade::default();
+        // Como se a última sílaba tivesse sido um pouco antes da janela.
+        a.ultima.store(
+            Atividade::agora_ms() - SEGURA_ABAFADO_MS - 1,
+            Ordering::Relaxed,
+        );
+        assert!(!a.falando());
+    }
+
+    #[test]
+    fn dentro_da_retencao_ainda_conta() {
+        let a = Atividade::default();
+        // O vão entre duas palavras: silêncio, mas você não terminou de falar.
+        a.ultima.store(Atividade::agora_ms() - SEGURA_ABAFADO_MS / 2, Ordering::Relaxed);
+        assert!(a.falando());
+    }
+}
+
 /// A voz. O modelo do Kokoro custa segundos para carregar e é preciso um dono
 /// fixo para ele — daí uma thread própria, que nasce com o app e vive falando o
 /// que a fila mandar.
 struct Voz {
     fila: std::sync::mpsc::Sender<Pedido>,
-    /// Pid do `afplay` em curso, 0 quando ninguém fala. É por ele que se cala.
-    tocando: Arc<AtomicU32>,
+    /// Desligada: nada entra na fila. Não é só silêncio — é não sintetizar.
+    muda: Arc<AtomicBool>,
+    /// Levantado para cortar a fala em curso. A thread da voz o abaixa antes de
+    /// cada frase. Era o pid do `afplay`, de quando calar era matar um processo.
+    cortar: Arc<AtomicBool>,
     /// Sobe a cada "cala a boca". Um pedido enfileirado antes disso perdeu a
     /// validade — sem esta conta, esvaziar a fila com uma marca booleana
     /// derrubaria também o próximo pedido legítimo a chegar.
@@ -360,12 +431,13 @@ struct Pedido {
     geracao: u64,
 }
 
-fn abrir_voz() -> Voz {
+fn abrir_voz(atividade: Atividade) -> Voz {
     let (fila, pedidos) = std::sync::mpsc::channel::<Pedido>();
-    let tocando = Arc::new(AtomicU32::new(0));
+    let cortar = Arc::new(AtomicBool::new(false));
     let geracao = Arc::new(AtomicU64::new(0));
+    let muda = Arc::new(AtomicBool::new(false));
 
-    let tocando_thread = tocando.clone();
+    let cortar_thread = cortar.clone();
     let geracao_thread = geracao.clone();
     std::thread::spawn(move || {
         let mut falador = match fala_nucleo::Falador::novo() {
@@ -395,40 +467,64 @@ fn abrir_voz() -> Voz {
                 }
             }
 
+            // O volume não é decidido aqui: é uma pergunta que a placa de som
+            // refaz a cada bloco, ~10 ms. Enquanto a frase toca, você começar a
+            // falar a derruba pela metade, e parar a traz de volta — a decisão
+            // antiga, tomada uma vez no começo da frase, nunca pegava o caso
+            // que importa, que é você falando POR CIMA da voz.
+            let cheio = config.volume.min(100) as f32 / 100.0;
+            let abafado = cheio * ABAFAR_PARA as f32 / 100.0;
+            let atividade_ganho = atividade.clone();
+            let ganho: fala_nucleo::audio::Ganho = Arc::new(move || {
+                if atividade_ganho.falando() { abafado } else { cheio }
+            });
+
+            // Zerado antes de cada frase: um corte da frase anterior não pode
+            // matar esta ao nascer.
+            cortar_thread.store(false, Ordering::SeqCst);
+
             // Uma fala por vez na máquina inteira, por cadeado de arquivo —
             // vale também se o CLI antigo ainda existir por aqui.
             let _palco = fala_nucleo::palco::Palco::subir();
-            match falador.falar(&pedido.texto, &config) {
-                Ok(mut fala) => {
-                    tocando_thread.store(fala.processo.id(), Ordering::SeqCst);
-                    let _ = fala.processo.wait();
-                    tocando_thread.store(0, Ordering::SeqCst);
-                }
+            match falador.falar_vivo(&pedido.texto, &config, ganho, cortar_thread.clone()) {
+                Ok(fala) => fala.reproducao.esperar(),
                 Err(e) => eprintln!("[termiau] não consegui falar: {e}"),
             }
         }
     });
 
-    Voz { fila, tocando, geracao }
+    Voz { fila, muda, cortar, geracao }
 }
 
 /// Põe um texto na fila da voz. Devolve na hora: sintetizar e tocar levam
 /// segundos, e o evento seguinte não pode esperar por isso.
 #[tauri::command]
 fn falar(voz: State<'_, Voz>, texto: String, chamador: Option<String>) {
+    if voz.muda.load(Ordering::SeqCst) {
+        return;
+    }
     let geracao = voz.geracao.load(Ordering::SeqCst);
     let _ = voz.fila.send(Pedido { texto, chamador, geracao });
 }
 
 /// Cala o que está tocando e descarta o que ainda não foi falado.
-#[tauri::command]
-fn calar(voz: State<'_, Voz>) {
+fn calar(voz: &Voz) {
     voz.geracao.fetch_add(1, Ordering::SeqCst);
-    let pid = voz.tocando.load(Ordering::SeqCst);
-    if pid != 0 {
-        // O `afplay` é um processo só nosso; derrubá-lo é o corte da fala.
-        unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+    // A reprodução mora na thread da voz e não atravessa até aqui; o que
+    // atravessa é este átomo, que o callback de áudio lê no bloco seguinte.
+    // Corte em menos de 10 ms, e sem processo nenhum para matar.
+    voz.cortar.store(true, Ordering::SeqCst);
+}
+
+/// Liga e desliga a voz; devolve como ficou. Desligar corta o que está tocando
+/// na hora — esperar a frase acabar não é o que se quer de um botão de mudo.
+#[tauri::command]
+fn voz_alternar(voz: State<'_, Voz>) -> bool {
+    let muda = !voz.muda.fetch_xor(true, Ordering::SeqCst);
+    if muda {
+        calar(&voz);
     }
+    !muda
 }
 
 /// Uma frase do que o Claude acabou de dizer, pra ser ouvida em vez de lida.
@@ -513,7 +609,11 @@ async fn escuta_baixar_modelo(app: AppHandle) -> Result<(), String> {
 /// Liga o microfone. Três threads: captura, medidor de nível e transcrição —
 /// o `cpal::Stream` tem que viver inteiro na thread que o abriu.
 #[tauri::command]
-fn escuta_comecar(app: AppHandle, state: State<'_, Escuta>) -> Result<(), String> {
+fn escuta_comecar(
+    app: AppHandle,
+    state: State<'_, Escuta>,
+    atividade: State<'_, Atividade>,
+) -> Result<(), String> {
     let mut guarda = state.parar.lock().unwrap();
     // Uma sessão que morreu sozinha (microfone sumiu, modelo corrompido) deixa
     // a marca para trás; limpa antes de decidir se ainda estamos escutando.
@@ -551,6 +651,7 @@ fn escuta_comecar(app: AppHandle, state: State<'_, Escuta>) -> Result<(), String
     {
         let parar = parar.clone();
         let app = app.clone();
+        let atividade = atividade.inner().clone();
         std::thread::spawn(move || {
             while !parar.load(Ordering::Relaxed) {
                 let mut pico = 0.0f32;
@@ -560,6 +661,11 @@ fn escuta_comecar(app: AppHandle, state: State<'_, Escuta>) -> Result<(), String
                         Ok(v) => pico = pico.max(v),
                         Err(_) => break,
                     }
+                }
+                // O mesmo pico serve pra duas coisas: desenhar a barra e
+                // dizer à voz que ela deve nascer baixa.
+                if pico > LIMIAR_MIC {
+                    atividade.marcar();
                 }
                 let _ = app.emit("escuta://nivel", pico);
             }
@@ -661,8 +767,14 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
         "Voz",
         true,
         &[
-            &MenuItem::with_id(app, "escutar", "Escutar", true, Some("CmdOrCtrl+Shift+E"))?,
-            &MenuItem::with_id(app, "calar", "Calar a Fala", true, Some("CmdOrCtrl+Shift+S"))?,
+            // ⌘E, e não Ctrl+Espaço como foi pedido primeiro: Control+Space já
+            // é da voz aqui embaixo, e no macOS ele ainda troca de fonte de
+            // entrada. ⌘E fica livre — o menu o consome antes da webview.
+            &MenuItem::with_id(app, "escutar", "Escutar", true, Some("CmdOrCtrl+E"))?,
+            // Control+Space, e não ⌘ como o resto: é a tecla que o usuário
+            // pediu. Atenção que o macOS a usa para trocar de fonte de entrada
+            // quando há mais de uma instalada.
+            &MenuItem::with_id(app, "voz", "Ligar e Desligar a Voz", true, Some("Control+Space"))?,
         ],
     )?;
 
@@ -689,7 +801,9 @@ pub fn run() {
             app.manage(cfg);
             app.manage(Ptys::default());
             app.manage(Escuta::default());
-            app.manage(abrir_voz());
+            let atividade = Atividade::default();
+            app.manage(abrir_voz(atividade.clone()));
+            app.manage(atividade);
             // Sem isto o whisper.cpp despeja o log dele na saída do processo.
             whisper_rs::install_logging_hooks();
             montar_menu(app.handle())?;
@@ -702,7 +816,7 @@ pub fn run() {
             "dividir-abaixo" => { let _ = app.emit("menu://dividir-abaixo", ()); }
             "fechar" => { let _ = app.emit("menu://fechar", ()); }
             "escutar" => { let _ = app.emit("menu://escutar", ()); }
-            "calar" => { let _ = app.emit("menu://calar", ()); }
+            "voz" => { let _ = app.emit("menu://voz", ()); }
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
@@ -714,8 +828,8 @@ pub fn run() {
             pty_close,
             pty_close_all,
             falar,
-            calar,
             resumir,
+            voz_alternar,
             escuta_modelo_pronto,
             escuta_baixar_modelo,
             escuta_comecar,
@@ -725,10 +839,20 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("erro ao montar o TermIAu")
         .run(|app, evento| {
-            // O socket é um arquivo de verdade; sem isto ficaria um por execução
-            // no diretório temporário.
             if let tauri::RunEvent::Exit = evento {
+                // O socket é um arquivo de verdade; sem isto ficaria um por
+                // execução no diretório temporário.
                 let _ = std::fs::remove_file(&app.state::<Config>().socket);
+
+                // E saímos sem passar pelos destrutores estáticos do C++. O
+                // ggml libera o device de Metal num deles e aborta no próprio
+                // assert quando sobra qualquer resource set vivo — e sobra,
+                // porque a thread do whisper ainda está de pé com o contexto na
+                // mão quando a janela fecha. Fechar o app imprimia um abort e 20
+                // linhas de backtrace (ggml-metal-device.m:608, llama.cpp#17869).
+                // Aqui não fica nada para limpar: o socket já saiu, e os shells
+                // recebem SIGHUP quando o kernel fecha os pty com o processo.
+                unsafe { libc::_exit(0) };
             }
         });
 }

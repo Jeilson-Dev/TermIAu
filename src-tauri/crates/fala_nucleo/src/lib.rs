@@ -4,7 +4,7 @@
 //! O caminho é sempre o mesmo:
 //!
 //! ```text
-//! texto -> fonemas (espeak-ng)  ->  Kokoro (ONNX)  ->  WAV  ->  afplay
+//! texto -> fonemas (espeak-ng)  ->  Kokoro (ONNX)  ->  WAV  ->  placa de som
 //! ```
 //!
 //! O passo caro é carregar o modelo, não sintetizar. Por isso [`Falador`] é
@@ -21,6 +21,7 @@ pub mod modelo;
 pub mod palco;
 pub mod pronuncia;
 pub mod protocolo;
+pub mod resample;
 pub mod vocab;
 pub mod vozes;
 
@@ -36,7 +37,7 @@ pub struct Falador {
     motor: kokoro::Kokoro,
 }
 
-/// Uma fala em andamento.
+/// Uma fala em andamento, tocada por um `afplay`.
 pub struct Fala {
     /// O WAV que está tocando (no cache ou num temporário).
     pub arquivo: PathBuf,
@@ -44,6 +45,14 @@ pub struct Fala {
     pub processo: Child,
     /// Se o áudio veio pronto do cache, sem passar pelo modelo.
     pub do_cache: bool,
+}
+
+/// Uma fala em andamento, tocada aqui dentro — com o volume ainda em disputa.
+pub struct FalaViva {
+    pub arquivo: PathBuf,
+    pub do_cache: bool,
+    /// Espere nela para saber quando a frase acabou.
+    pub reproducao: audio::Reproducao,
 }
 
 impl Falador {
@@ -65,11 +74,12 @@ impl Falador {
         self.motor.sintetizar(&fonemas, &config.mistura_efetiva(), config.velocidade)
     }
 
-    /// Sintetiza (ou aproveita o cache) e começa a tocar.
-    pub fn falar(&mut self, texto: &str, config: &Config) -> Result<Fala> {
-        let texto = preparar(texto, config.max_caracteres);
+    /// O WAV desta frase, do cache quando dá e do modelo quando não. Devolve
+    /// também as amostras: quem toca aqui dentro precisa delas, e no acerto de
+    /// cache elas voltam do disco.
+    fn audio_de(&mut self, texto: &str, config: &Config) -> Result<(PathBuf, bool, Vec<f32>)> {
         let chave = cache::chave(
-            &texto,
+            texto,
             &config.assinatura_da_voz(),
             config.velocidade,
             &config.assinatura_da_pronuncia(),
@@ -77,12 +87,12 @@ impl Falador {
 
         if config.cache {
             if let Some(arquivo) = cache::buscar(&chave) {
-                let processo = audio::tocar(&arquivo, config.volume)?;
-                return Ok(Fala { arquivo, processo, do_cache: true });
+                let (amostras, _) = audio::ler_wav(&arquivo)?;
+                return Ok((arquivo, true, amostras));
             }
         }
 
-        let amostras = self.amostras(&texto, config)?;
+        let amostras = self.amostras(texto, config)?;
         let arquivo = if config.cache {
             let destino = cache::caminho(&chave)?;
             audio::gravar(&destino, &amostras, TAXA_AMOSTRAGEM)?;
@@ -94,9 +104,35 @@ impl Falador {
             audio::gravar(&destino, &amostras, TAXA_AMOSTRAGEM)?;
             destino
         };
+        Ok((arquivo, false, amostras))
+    }
 
+    /// Sintetiza (ou aproveita o cache) e começa a tocar pelo `afplay`.
+    /// O volume sai de `config.volume` e não muda mais até a frase acabar.
+    pub fn falar(&mut self, texto: &str, config: &Config) -> Result<Fala> {
+        let texto = preparar(texto, config.max_caracteres);
+        let (arquivo, do_cache, _) = self.audio_de(&texto, config)?;
         let processo = audio::tocar(&arquivo, config.volume)?;
-        Ok(Fala { arquivo, processo, do_cache: false })
+        Ok(Fala { arquivo, processo, do_cache })
+    }
+
+    /// O mesmo, tocando aqui dentro, com o volume aberto a mudanças no meio da
+    /// frase — é assim que a voz abaixa quando você começa a falar por cima.
+    ///
+    /// Atenção: aqui o volume é TODO do `ganho`, `config.volume` incluído. Quem
+    /// chama compõe a conta inteira, porque só ele sabe por que estaria
+    /// abaixando. `parar` corta a frase no meio, de qualquer thread.
+    pub fn falar_vivo(
+        &mut self,
+        texto: &str,
+        config: &Config,
+        ganho: audio::Ganho,
+        parar: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<FalaViva> {
+        let texto = preparar(texto, config.max_caracteres);
+        let (arquivo, do_cache, amostras) = self.audio_de(&texto, config)?;
+        let reproducao = audio::tocar_aqui(&amostras, TAXA_AMOSTRAGEM, ganho, parar)?;
+        Ok(FalaViva { arquivo, do_cache, reproducao })
     }
 
     /// Sintetiza e grava num arquivo escolhido, sem tocar.
