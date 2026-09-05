@@ -62,6 +62,33 @@ npm run tauri build
 
 Os artefatos saem em `src-tauri/target/release/bundle/`.
 
+## Ligando a voz
+
+O TermIAu fala o que o Claude Code responde, mas só fala o que chega pelo
+socket dele — e quem escreve ali é um hook, que precisa estar registrado no
+`settings.json` do Claude Code:
+
+```bash
+./hooks/instalar.sh
+```
+
+O script copia o `termiau-evento.sh` para `~/.claude/hooks/` (e não aponta para
+o repo: ele pode estar num volume que não está montado quando o Claude roda),
+registra os cinco eventos que o app trata — `UserPromptSubmit`,
+`PermissionRequest`, `Notification`, `MessageDisplay`, `SessionEnd` — e guarda
+um backup do settings anterior. Rodar de novo é inofensivo.
+
+**Um sistema de voz por máquina.** O instalador também remove do settings
+qualquer hook que aponte para `~/.claude/hooks/fala/` — o sistema antigo, em
+que cada evento virava um `fala_claudio` próprio. Aqueles processos não passam
+pela fila do app, e três hooks assíncronos disparando juntos viram três vozes
+por cima umas das outras. Quem garante a vez aqui é a thread única da fila
+(`abrir_voz` no `lib.rs`) mais o `Palco`, um `flock` num arquivo fixo que vale
+entre processos.
+
+Sem o hook instalado o app sobe normal, com a fila vazia: as abas não mostram
+estado do Claude e nada é falado.
+
 ## Atalhos
 
 | Atalho | Ação |
@@ -77,6 +104,9 @@ index.html            casca da janela
 src/
   main.ts             xterm, addons e a ponte com os comandos do Tauri
   style.css           tema da janela e o cursor patinha
+hooks/
+  termiau-evento.sh   o hook: manda o evento do Claude pro socket do app
+  instalar.sh         registra o hook no settings.json do Claude Code
 src-tauri/
   src/lib.rs          PTY, comandos (pty_spawn/write/resize, js_log) e as threads
   src/main.rs         entrypoint
