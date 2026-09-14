@@ -4,6 +4,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import "@xterm/xterm/css/xterm.css";
 import "./style.css";
 
@@ -23,7 +24,13 @@ const OPCOES_TERM = {
   fontSize: 14,
   cursorBlink: true,
   allowProposedApi: true,
-  macOptionIsMeta: true,
+  // Option compõe caractere, não vira Meta: é o que faz ⌥C dar "ç" e ⌥E+E dar
+  // "é". Com Meta ligado o xterm mandava ESC+c pro shell e a letra sumia.
+  // O que se perde é ⌥+letra como atalho de readline (⌥F, ⌥B, ⌥.) — mas as
+  // teclas que importam continuam: o próprio xterm manda ESC b / ESC f no
+  // ⌥← e ⌥→, e ESC DEL no ⌥⌫, porque são teclas de código baixo e não passam
+  // pelo caminho de composição.
+  macOptionIsMeta: false,
   scrollback: 10_000,
   theme: {
     background: "#14161a",
@@ -959,6 +966,86 @@ async function ligarEscuta() {
   });
 }
 
+// ---------- caminhos: arrastar e colar arquivos ----------
+
+/// Caminho -> pedaço de linha de comando. Tudo que não for do conjunto seguro
+/// sai com contrabarra na frente, que é o que o Finder faz ao arrastar um
+/// arquivo pro Terminal.app: `/Users/eu/Meus Documentos` vira
+/// `/Users/eu/Meus\ Documentos` e continua legível e editável — com aspas em
+/// volta, não continuaria. Acento e emoji ficam como estão: byte alto não é
+/// especial para nenhum shell, e `Edi\ç\ão` seria feio à toa.
+const INSEGURO = /[^\w@%+=:,./\u0080-\uffff-]/g;
+
+function citar(caminho: string): string {
+  // Quebra de linha no nome é o único caso que a contrabarra não resolve: ela
+  // viraria continuação de linha. Aí as aspas simples valem a feiura.
+  if (/[\n\r]/.test(caminho)) return `'${caminho.replace(/'/g, "'\\''")}'`;
+  return caminho.replace(INSEGURO, (c) => `\\${c}`);
+}
+
+/// Vários arquivos viram vários argumentos. O espaço no fim é para o próximo
+/// arquivo (ou o resto do comando) não colar no anterior.
+const linhaDe = (caminhos: string[]) => caminhos.map(citar).join(" ") + " ";
+
+/// Entrega o texto ao painel pelo caminho de colagem do xterm, não por
+/// `pty_write` direto: é ele que embrulha em bracketed paste quando o programa
+/// do outro lado pediu. Sem isso o Claude Code (e o vim, e o zsh) receberiam a
+/// colagem como se cada caractere tivesse sido digitado.
+function colar(folha: Folha, texto: string) {
+  if (!texto) return;
+  folha.term.paste(texto);
+}
+
+/// Qual painel está sob o ponteiro. O arrasto não passa pelo DOM — quem avisa é
+/// o Tauri, e a posição vem em pixels físicos —, então a divisão pela escala da
+/// tela é por nossa conta. `devicePixelRatio` e não o `scaleFactor` guardado no
+/// início: a janela pode ter ido pra um monitor de outra densidade no meio.
+function folhaEm(p: { x: number; y: number }): Folha | undefined {
+  if (!ativa) return;
+  const alvo = document.elementFromPoint(p.x / devicePixelRatio, p.y / devicePixelRatio);
+  if (!alvo) return;
+  for (const f of folhas(ativa.raiz)) if (f.el.contains(alvo)) return f;
+}
+
+/// Arrastar um arquivo do Finder e soltar aqui escreve o caminho dele na linha,
+/// no painel sob o ponteiro — não no que está com o teclado.
+async function ligarArrastar() {
+  let marcada: Folha | undefined;
+  const marcar = (f?: Folha) => {
+    if (marcada === f) return;
+    marcada?.el.classList.remove("recebendo");
+    marcada = f;
+    marcada?.el.classList.add("recebendo");
+  };
+
+  await getCurrentWebview().onDragDropEvent(({ payload }) => {
+    if (payload.type === "leave") return marcar(undefined);
+    if (payload.type !== "drop") return marcar(folhaEm(payload.position));
+
+    // Soltar fora de um painel (na barra de abas, na faixa da voz) ainda tem um
+    // destino óbvio: o painel que está com o teclado.
+    const folha = folhaEm(payload.position) ?? ativa?.foco;
+    marcar(undefined);
+    if (!folha) return;
+    // Soltar num painel também é escolhê-lo — o caminho aparece onde o cursor
+    // está, e é ali que o resto do comando vai ser digitado.
+    focar(folha);
+    colar(folha, linhaDe(payload.paths));
+  });
+}
+
+/// ⌘⇧V: o que está na área de transferência entra como caminho. O ⌘V comum cola
+/// o texto que o Finder deixou junto — o *nome* do arquivo, sem pasta nenhuma,
+/// que não serve de argumento. Sem arquivo na área, cola o texto e pronto: uma
+/// tecla que não faz nada parece uma tecla quebrada.
+async function colarCaminho() {
+  if (!ativa) return;
+  const area = await invoke<{ arquivos: string[]; texto: string | null }>("area_colar");
+  const folha = ativa.foco;
+  if (area.arquivos.length) colar(folha, linhaDe(area.arquivos));
+  else if (area.texto) colar(folha, area.texto);
+}
+
 // ---------- teclado ----------
 
 window.addEventListener("keydown", (e) => {
@@ -1020,6 +1107,9 @@ async function iniciar() {
   await listen("menu://fechar", () => {
     if (ativa) fecharFolha(ativa.foco);
   });
+  await listen("menu://colar-caminho", () => colarCaminho());
+
+  await ligarArrastar();
 
   // Um reload da webview apaga as abas mas não os shells: sem isto eles ficariam
   // vivos, sem ninguém lendo, a cada recarga do dev server.

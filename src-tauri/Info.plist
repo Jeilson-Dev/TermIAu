@@ -4,5 +4,7 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>O TermIAu usa o microfone para transcrever a sua fala e digitar por você. O áudio é processado no seu computador e nunca sai dele.</string>
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>O TermIAu usa o Bluetooth para captar a sua voz por fones e headsets sem fio.</string>
 </dict>
 </plist>

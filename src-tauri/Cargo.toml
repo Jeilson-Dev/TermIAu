@@ -31,6 +31,13 @@ ureq = "3.2"
 # é o outro motivo de a primeira build demorar.
 fala_nucleo = { path = "crates/fala_nucleo" }
 
+# Área de transferência (o ⌘⇧V). O Tauri não expõe os arquivos que estão na
+# área, só texto — e o Finder não põe texto nenhum lá quando você copia um
+# arquivo. Estas duas já vêm com o wry, então não custam build.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSPasteboardItem"] }
+objc2-foundation = { version = "0.3", features = ["NSURL"] }
+
 [profile.release]
 opt-level = "s"
 lto = true

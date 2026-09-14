@@ -1,3 +1,4 @@
+mod area;
 mod escuta;
 
 use std::collections::HashMap;
@@ -758,6 +759,15 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
         &[
             &PredefinedMenuItem::copy(app, None)?,
             &PredefinedMenuItem::paste(app, None)?,
+            // O ⌘V cola o nome do arquivo (ou nada, se o Finder não deixou
+            // texto); este cola o caminho, que é o que serve de argumento.
+            &MenuItem::with_id(
+                app,
+                "colar-caminho",
+                "Colar Caminho",
+                true,
+                Some("CmdOrCtrl+Shift+V"),
+            )?,
             &PredefinedMenuItem::select_all(app, None)?,
         ],
     )?;
@@ -815,6 +825,7 @@ pub fn run() {
             "dividir-lado" => { let _ = app.emit("menu://dividir-lado", ()); }
             "dividir-abaixo" => { let _ = app.emit("menu://dividir-abaixo", ()); }
             "fechar" => { let _ = app.emit("menu://fechar", ()); }
+            "colar-caminho" => { let _ = app.emit("menu://colar-caminho", ()); }
             "escutar" => { let _ = app.emit("menu://escutar", ()); }
             "voz" => { let _ = app.emit("menu://voz", ()); }
             _ => {}
@@ -834,6 +845,7 @@ pub fn run() {
             escuta_baixar_modelo,
             escuta_comecar,
             escuta_parar,
+            area::area_colar,
             js_log
         ])
         .build(tauri::generate_context!())

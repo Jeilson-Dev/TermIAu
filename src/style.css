@@ -238,6 +238,18 @@ body {
   animation: termiau-pulso 1.6s ease-in-out infinite;
 }
 
+/* O painel que vai receber o arquivo que está sendo arrastado. Vem depois do
+   `.esperando` de propósito: os dois são outline e podem valer ao mesmo tempo,
+   e durante o arrasto o destino importa mais do que o aviso. Mais grosso que o
+   contorno do foco porque é a única resposta que existe enquanto o ponteiro
+   está com o arquivo — o cursor do app nem aparece. */
+.folha.recebendo {
+  outline: 2px solid #d97757;
+  outline-offset: -2px;
+  background: #1b1d22;
+  animation: none;
+}
+
 
 /* ---------- faixa da voz ---------- */
 

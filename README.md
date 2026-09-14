@@ -93,9 +93,40 @@ estado do Claude e nada é falado.
 
 | Atalho | Ação |
 | --- | --- |
+| `⌘T` | Nova aba |
+| `⌘D` / `⌘⇧D` | Divide o painel ao lado / abaixo |
+| `⌘W` | Fecha o painel em foco (o último fecha a aba) |
+| `⌘1`…`⌘9` | Vai para a aba *n* — `⌘9` vai para a última |
+| `⌘⇧[` / `⌘⇧]` | Aba anterior / próxima |
+| `⌘⌥←↑→↓` | Move o foco para o painel vizinho |
+| `⌘⇧A` | Vai para o painel onde o Claude espera resposta |
 | `⌘K` | Limpa a tela |
+| `⌘⇧V` | Cola o **caminho** do arquivo que está na área de transferência |
+| `⌘E` | Liga e desliga a escuta (falar em vez de digitar) |
+| `⌃Espaço` | Liga e desliga a voz |
 
-Todo o resto vai direto para o shell.
+Todo o resto vai direto para o shell. `⌥` compõe caractere como no resto do
+macOS — `⌥C` dá `ç`, `⌥E`+`E` dá `é` —, então não serve de Meta: `⌥F` e `⌥B`
+não andam palavra. As teclas de navegação continuam, porque não passam pela
+composição: `⌥←` e `⌥→` andam palavra, `⌥⌫` apaga a palavra anterior.
+
+## Arquivos
+
+Arrastar um arquivo ou uma pasta do Finder e soltar sobre um painel escreve o
+caminho dele na linha — no painel sob o ponteiro, que também recebe o teclado.
+Soltar vários de uma vez escreve os vários, separados por espaço. O que sai é
+escapado com contrabarra, como no Terminal.app: `/Users/eu/Meus\ Documentos`.
+Acento e emoji passam inteiros — byte alto não é especial para o shell.
+
+O `⌘⇧V` faz o mesmo com o que estiver na área de transferência. É uma tecla
+separada do `⌘V` porque o Finder põe duas coisas na área quando você copia um
+arquivo — o arquivo e o *nome* dele, sem pasta nenhuma — e é o nome que o `⌘V`
+cola. Sem arquivo na área, o `⌘⇧V` cola o texto e age como um `⌘V`.
+
+Nos dois casos o texto entra pelo caminho de colagem do xterm, não por
+`pty_write`: é ele que embrulha em *bracketed paste* quando o programa do outro
+lado pediu — é o que faz o caminho chegar inteiro no Claude Code e no vim, em
+vez de caractere a caractere.
 
 ## Estrutura
 
@@ -107,10 +138,16 @@ src/
 hooks/
   termiau-evento.sh   o hook: manda o evento do Claude pro socket do app
   instalar.sh         registra o hook no settings.json do Claude Code
+scripts/
+  instalar.sh         empacota e põe em /Applications (canal dev ou prod)
 src-tauri/
-  src/lib.rs          PTY, comandos (pty_spawn/write/resize, js_log) e as threads
+  src/lib.rs          PTY, comandos, menu, fila da voz e o socket dos hooks
   src/main.rs         entrypoint
+  src/area.rs         a área de transferência do macOS, para o ⌘⇧V
+  src/escuta/         transcrição local: microfone (audio), whisper (stt), modelo
+  crates/fala_nucleo/ a voz: espeak-ng e ONNX Runtime
   tauri.conf.json     janela, bundle e build
+  tauri.dev.conf.json o mesmo com outro nome e identificador, para o canal dev
   capabilities/       permissões da janela principal
 ```
 
@@ -122,5 +159,6 @@ src-tauri/
 | `pty_write { data }` | Manda o que foi digitado para o shell |
 | `pty_resize { rows, cols }` | Reajusta a grade e dispara `SIGWINCH` |
 | `js_log { msg }` | Joga erros da webview no stderr do processo |
+| `area_colar` | Lê a área de transferência: os caminhos dos arquivos, ou o texto |
 
 Eventos na direção contrária: `pty://data` (saída em base64) e `pty://exit`.
