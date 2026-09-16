@@ -513,11 +513,15 @@ code {
 }
 
 .tree-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px;
 }
 
 .tree-filter input {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   height: 28px;
   padding: 0 10px;
   border: 1px solid var(--selection);
@@ -564,6 +568,37 @@ code {
 
 .tree-chevron {
   color: var(--comment);
+  transition: transform 0.28s ease;
+}
+
+.tree-chevron.fechado {
+  transform: rotate(-90deg);
+}
+
+/* Abrir e fechar pasta e grupo, com a mesma técnica do corpo de um arquivo: a
+   linha do grid vai de 0fr a 1fr e o filho corta o que sobra. Animar `height`
+   exigiria medir a lista; isto anima a altura que o conteúdo já tem.
+   Mais curto que os 0,44s do diff — aqui são três linhas, não um arquivo. */
+.tree-dobra {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.28s ease;
+}
+
+.tree-dobra.aberta {
+  grid-template-rows: 1fr;
+}
+
+.tree-dobra-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tree-dobra,
+  .tree-chevron {
+    transition: none;
+  }
 }
 
 .tree-folder {
@@ -592,6 +627,196 @@ code {
 
 .tree-empty {
   padding: 8px 12px;
+}
+
+/* ---------- índice e commit (só na aba do que está para ser commitado) ---------- */
+
+/* A caixa fica acima das abas da lateral, e não dentro da lista: ela é do
+   repositório inteiro, não de um arquivo — e continua à vista com os marcadores
+   abertos. */
+.commit-box {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--bg-darker);
+}
+
+.commit-msg {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--selection);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  /* Mensagem de commit tem título e corpo: cresce um pouco, mas não empurra a
+     lista de arquivos para fora da tela. */
+  min-height: 42px;
+  max-height: 160px;
+  resize: vertical;
+}
+
+.commit-msg:focus {
+  border-color: var(--purple);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(189, 147, 249, 0.25);
+}
+
+.commit-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--green);
+  color: var(--bg-darker);
+  font-weight: 600;
+}
+
+.commit-btn:disabled {
+  background: var(--bg-lighter);
+  color: var(--comment);
+  cursor: default;
+}
+
+/* A recusa do git — hook que barrou, identidade não configurada, índice vazio —
+   fica junto da mensagem digitada, que não se perde. */
+.commit-erro {
+  margin: 0;
+  color: var(--red);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+/* A colada única da revisão inteira, no alto da lista de marcadores: o gesto é
+   de todos de uma vez, então o botão fica escrito, e não só um ícone. */
+.bookmark-tudo {
+  display: flex;
+  padding: 8px 8px 4px;
+}
+
+.copiar-tudo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 28px;
+  border: 1px solid var(--selection);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg-dim);
+}
+
+.copiar-tudo:hover {
+  border-color: var(--purple);
+  color: var(--fg);
+}
+
+.copiar-tudo.copied {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+/* O cabeçalho de cada grupo da lista — "No índice" e "Fora do índice" — com a
+   conta do que há dentro e o botão que leva ou tira o repositório inteiro. */
+.tree-grupo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 6px 4px 4px;
+}
+
+/* O cabeçalho inteiro é o gesto de abrir e fechar o grupo; o botão do índice,
+   ao lado, é irmão dele — dentro, o clique de um viraria o do outro. */
+.tree-grupo-botao {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 0 2px 4px;
+  border: 0;
+  background: none;
+  color: var(--comment);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tree-grupo-botao:hover {
+  color: var(--fg-dim);
+}
+
+.tree-grupo-nome {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* O botão do grupo não some como o das linhas: ele é o gesto de "tudo de uma
+   vez", e procurá-lo com o ponteiro seria mais trabalho do que o gesto vale. */
+.tree-grupo .stage-btn {
+  flex: none;
+}
+
+/* A linha do arquivo com os botões do índice ao lado: eles são irmãos do botão
+   que seleciona, e não filhos dele. */
+.tree-file-linha {
+  display: flex;
+  align-items: center;
+}
+
+.tree-file-linha .tree-file {
+  flex: 1;
+  min-width: 0;
+}
+
+.stage-acoes {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding-right: 6px;
+  /* Escondidos até o ponteiro chegar na linha — um par de botões em cada
+     arquivo competiria com o nome, que é o que se lê. O que já está no índice
+     mostra o seu sempre: é o sinal de que ele vai no commit. */
+  opacity: 0;
+}
+
+.tree-file-linha:hover .stage-acoes,
+.stage-acoes.staged,
+.stage-acoes.partial {
+  opacity: 1;
+}
+
+.stage-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--comment);
+}
+
+.stage-btn:hover {
+  background: var(--selection);
+  color: var(--fg);
+}
+
+/* Verde é "está no índice, vai no commit"; o menos que o tira fica neutro. */
+.stage-acoes.staged .stage-btn,
+.stage-acoes.partial .stage-btn.tirar {
+  color: var(--green);
 }
 
 .status-icon {

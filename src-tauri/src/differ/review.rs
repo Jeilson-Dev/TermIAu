@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::differ::diff::{self, FileDiff};
+use crate::differ::diff::{self, FileDiff, FileStatus, Staged};
 use crate::differ::error::{Error, Result};
 use crate::differ::git::Repo;
 
@@ -146,13 +146,231 @@ pub fn load_diff_since(path: &Path, base: &str) -> Result<ReviewDiff> {
 }
 
 fn diff_between(repo: &Repo, from: &str, to: &str) -> Result<Vec<FileDiff>> {
-    let range = [from, to, "--"];
-    let raw_args = [&["diff", "--raw", "-z", "--no-abbrev"], DIFF_OPTS, &range].concat();
-    let patch_args = [&["diff", "--patch", "-U3"], DIFF_OPTS, &range].concat();
+    diff_com(repo, &[from, to, "--"], false)
+}
 
-    let raw = diff::parse_raw(&repo.run(&raw_args)?)?;
-    let patch = diff::parse_patch(&repo.run(&patch_args)?)?;
+/// As duas passadas do diff — a lista e o patch — com o mesmo fim de linha de
+/// comando, que é o que garante os mesmos arquivos na mesma ordem nas duas.
+/// `solto` é para o `--no-index`, que sai com 1 quando acha diferença.
+fn diff_com(repo: &Repo, fim: &[&str], solto: bool) -> Result<Vec<FileDiff>> {
+    let raw_args = [&["diff", "--raw", "-z", "--no-abbrev"], DIFF_OPTS, fim].concat();
+    let patch_args = [&["diff", "--patch", "-U3"], DIFF_OPTS, fim].concat();
+    let rodar = |args: &[&str]| if solto { repo.run_diff(args) } else { repo.run(args) };
+
+    let raw = diff::parse_raw(&rodar(&raw_args)?)?;
+    let patch = diff::parse_patch(&rodar(&patch_args)?)?;
     diff::build(raw, patch)
+}
+
+/// O que está para ser commitado: o índice e a árvore de trabalho contra o
+/// HEAD, e mais os arquivos que o git ainda não rastreia. É o `git status` visto
+/// como diff — com `git add` ou sem ele, tudo o que entraria no próximo commit.
+pub fn load_diff_working(path: &Path) -> Result<ReviewDiff> {
+    let repo = Repo::open(path)?;
+    let head_sha = repo.resolve_commit("HEAD").ok_or(Error::NoCommits)?;
+
+    // `diff HEAD` já junta o que foi adicionado com o que não foi: o lado novo
+    // dele é a árvore de trabalho, e o índice entra no caminho.
+    let mut files = diff_com(&repo, &["HEAD", "--"], false)?;
+    files.extend(nao_rastreados(&repo)?);
+    // Duas passadas do git viram uma lista só na tela, e ela tem de estar em
+    // ordem — o não rastreado não fica todo no fim.
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    chaves_do_disco(&repo, &mut files);
+    marcar_indice(&repo, &mut files)?;
+
+    let additions = files.iter().map(|f| f.additions).sum();
+    let deletions = files.iter().map(|f| f.deletions).sum();
+    Ok(ReviewDiff {
+        root: repo.root().display().to_string(),
+        branch: repo.current_branch(),
+        additions,
+        deletions,
+        // Não há dois commits aqui: os três campos apontam para o HEAD, que é o
+        // lado velho de tudo o que esta aba mostra.
+        target: "HEAD".to_string(),
+        target_sha: head_sha.clone(),
+        merge_base: head_sha.clone(),
+        head_sha,
+        files,
+    })
+}
+
+/// Os arquivos que o git ainda não conhece, cada um inteiro, como arquivo novo.
+/// `--no-index` é o que faz o git diffar um arquivo solto contra o nada; ele não
+/// entra numa passada só porque só aceita dois caminhos por vez.
+fn nao_rastreados(repo: &Repo) -> Result<Vec<FileDiff>> {
+    let lista = repo.run(&["ls-files", "--others", "--exclude-standard", "-z"])?;
+    let mut files = Vec::new();
+    for nome in lista.split(|b| *b == 0) {
+        if nome.is_empty() {
+            continue;
+        }
+        let nome = String::from_utf8_lossy(nome).into_owned();
+        // Um arquivo ilegível (um link quebrado, uma permissão negada) não pode
+        // derrubar a aba inteira: some da lista e os outros continuam.
+        if let Ok(achados) = diff_com(repo, &["--no-index", "--", "/dev/null", &nome], true) {
+            files.extend(achados);
+        }
+    }
+    Ok(files)
+}
+
+/// Prefixo das chaves de conteúdo que não são blob do git: o lado novo do diff
+/// da árvore de trabalho está no disco, e não no banco de objetos.
+const CHAVE_DISCO: &str = "wt:";
+
+/// Dá ao lado novo dos arquivos da árvore de trabalho uma chave de conteúdo no
+/// lugar do id de blob, que ali não existe — o conteúdo ainda não passou pelo
+/// git. A chave leva tamanho e data de modificação porque ela é o que diz "isto
+/// mudou": é por ela que o cache do conteúdo e a marca de revisado se refazem.
+fn chaves_do_disco(repo: &Repo, files: &mut [FileDiff]) {
+    for file in files {
+        if file.new_oid.is_some() || file.status == FileStatus::Deleted {
+            continue;
+        }
+        let Ok(meta) = std::fs::metadata(repo.root().join(&file.path)) else {
+            continue;
+        };
+        let carimbo = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let chave = format!("{CHAVE_DISCO}{}-{carimbo}:{}", meta.len(), file.path);
+        file.fingerprint = format!("{}:{chave}", file.fingerprint);
+        file.new_oid = Some(chave);
+    }
+}
+
+/// Uma assinatura barata do que a aba do que está por commitar mostra: muda
+/// quando alguma coisa lá mudou, e só então. É a metade leve do `load_diff_working`
+/// — a lista crua e os nomes não rastreados, sem gerar patch de nada — mais o
+/// tamanho e a data de cada arquivo do disco, que é o que diz que um arquivo já
+/// modificado foi modificado de novo: nas listas do git, ele continua igual.
+pub fn working_stamp(path: &Path) -> Result<String> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let repo = Repo::open(path)?;
+    let mut h = DefaultHasher::new();
+    repo.resolve_commit("HEAD").hash(&mut h);
+
+    let raw = repo.run(&["diff", "--raw", "-z", "--no-abbrev", "HEAD", "--"])?;
+    raw.hash(&mut h);
+    let outros = repo.run(&["ls-files", "--others", "--exclude-standard", "-z"])?;
+    outros.hash(&mut h);
+
+    let rastreados = diff::parse_raw(&raw)?.into_iter().map(|e| e.path);
+    let novos = outros
+        .split(|b| *b == 0)
+        .filter(|n| !n.is_empty())
+        .map(|n| String::from_utf8_lossy(n).into_owned());
+    for nome in rastreados.chain(novos) {
+        let Ok(meta) = std::fs::metadata(repo.root().join(&nome)) else {
+            continue;
+        };
+        meta.len().hash(&mut h);
+        if let Ok(t) = meta.modified().and_then(|t| Ok(t.duration_since(std::time::UNIX_EPOCH))) {
+            t.map(|d| d.as_millis()).unwrap_or(0).hash(&mut h);
+        }
+    }
+    Ok(format!("{:x}", h.finish()))
+}
+
+/// Diz de cada arquivo se o `git add` já o levou. São duas listas de nomes: o
+/// que o índice tem a mais que o HEAD e o que o disco tem a mais que o índice —
+/// quem aparece nas duas está no índice pela metade, porque mudou de novo
+/// depois do `git add`.
+fn marcar_indice(repo: &Repo, files: &mut [FileDiff]) -> Result<()> {
+    let nomes = |args: &[&str]| -> Result<Vec<String>> {
+        let out = repo.run(args)?;
+        Ok(out
+            .split(|b| *b == 0)
+            .filter(|n| !n.is_empty())
+            .map(|n| String::from_utf8_lossy(n).into_owned())
+            .collect())
+    };
+    let no_indice = nomes(&["diff", "--name-only", "-z", "--cached", "HEAD", "--"])?;
+    let no_disco = nomes(&["diff", "--name-only", "-z", "--"])?;
+
+    for file in files {
+        let indice = no_indice.contains(&file.path);
+        let disco = no_disco.contains(&file.path);
+        file.staged = Some(match (indice, disco) {
+            (true, true) => Staged::Partial,
+            (true, false) => Staged::Staged,
+            // O que o git não rastreia não está em nenhuma das duas listas, e
+            // fora do índice é exatamente onde ele está.
+            _ => Staged::Unstaged,
+        });
+    }
+    Ok(())
+}
+
+/// Põe no índice — o `git add` do botão. O alvo é um arquivo, uma pasta ou `.`
+/// para o repositório inteiro. O `-A` é o que faz a pasta e o `.` levarem também
+/// o que foi apagado e o que o git ainda não rastreia; num arquivo só, ele não
+/// muda nada. O alvo vai como pathspec literal: um arquivo chamado `*.txt` ou
+/// começando por `-` não pode virar curinga nem opção de linha de comando.
+pub fn stage(path: &Path, alvo: &str) -> Result<()> {
+    let repo = Repo::open(path)?;
+    repo.run_write(&["add", "-A", "--", &pathspec(alvo)])?;
+    Ok(())
+}
+
+/// Tira do índice, deixando o disco como está. Mesmo alcance do `stage`:
+/// arquivo, pasta ou `.` para tudo.
+pub fn unstage(path: &Path, alvo: &str) -> Result<()> {
+    let repo = Repo::open(path)?;
+    repo.run_write(&["restore", "--staged", "--", &pathspec(alvo)])?;
+    Ok(())
+}
+
+/// Commita o que está no índice e devolve o commit novo. O que ficou de fora do
+/// índice continua no disco, intocado — é o `git commit` de sempre, com hooks e
+/// tudo, só que sem editor: a mensagem vai pronta.
+pub fn commit(path: &Path, message: &str) -> Result<String> {
+    let repo = Repo::open(path)?;
+    if message.trim().is_empty() {
+        return Err(Error::Internal("O commit precisa de uma mensagem.".to_string()));
+    }
+    repo.run_write(&["commit", "-m", message])?;
+    repo.resolve_commit("HEAD").ok_or(Error::NoCommits)
+}
+
+fn pathspec(file: &str) -> String {
+    format!(":(literal){file}")
+}
+
+/// O caminho de um arquivo da árvore de trabalho, garantido dentro do
+/// repositório. A webview pede o arquivo pelo nome, e nome vindo de fora não
+/// pode virar `../../.ssh/id_rsa`.
+fn no_repositorio(raiz: &Path, arquivo: &str) -> Result<PathBuf> {
+    let alvo = raiz.join(arquivo);
+    let (alvo, raiz) = (
+        alvo.canonicalize().map_err(Error::Io)?,
+        raiz.canonicalize().map_err(Error::Io)?,
+    );
+    if !alvo.starts_with(&raiz) {
+        return Err(Error::Internal(format!("caminho fora do repositório: {arquivo}")));
+    }
+    Ok(alvo)
+}
+
+/// O arquivo como está no disco agora: o lado novo do diff da árvore de
+/// trabalho, onde não há blob para ler.
+pub fn read_worktree(path: &Path, arquivo: &str) -> Result<Vec<String>> {
+    let repo = Repo::open(path)?;
+    let bytes = std::fs::read(no_repositorio(repo.root(), arquivo)?)?;
+    Ok(em_linhas(&bytes))
+}
+
+/// Bytes crus do arquivo no disco — as imagens ainda não commitadas.
+pub fn read_worktree_bytes(path: &Path, arquivo: &str) -> Result<Vec<u8>> {
+    let repo = Repo::open(path)?;
+    Ok(std::fs::read(no_repositorio(repo.root(), arquivo)?)?)
 }
 
 fn validate_oid(oid: &str) -> Result<()> {
@@ -167,15 +385,20 @@ pub fn read_blob(path: &Path, oid: &str) -> Result<Vec<String>> {
     validate_oid(oid)?;
     let repo = Repo::open(path)?;
     let bytes = repo.run(&["cat-file", "blob", oid])?;
-    let text = String::from_utf8_lossy(&bytes);
+    Ok(em_linhas(&bytes))
+}
+
+/// O conteúdo em linhas, como o resto do differ as conta: sem a quebra final e
+/// sem o \r do fim de linha do Windows.
+fn em_linhas(bytes: &[u8]) -> Vec<String> {
+    let text = String::from_utf8_lossy(bytes);
     let text = text.strip_suffix('\n').unwrap_or(&text);
     if text.is_empty() {
-        return Ok(Vec::new());
+        return Vec::new();
     }
-    Ok(text
-        .split('\n')
+    text.split('\n')
         .map(|l| l.strip_suffix('\r').unwrap_or(l).to_string())
-        .collect())
+        .collect()
 }
 
 const LFS_POINTER_PREFIX: &[u8] = b"version https://git-lfs.github.com/spec/v1\n";
@@ -227,6 +450,11 @@ mod tests {
         fn new() -> TestRepo {
             let repo = TestRepo { dir: tempfile::tempdir().unwrap() };
             repo.git(&["init", "-q", "-b", "main"]);
+            // Na config do próprio repositório, e não só na linha de comando do
+            // helper: o `commit` daqui é o de verdade, e ele não passa `-c`.
+            repo.git(&["config", "user.name", "Test"]);
+            repo.git(&["config", "user.email", "t@t"]);
+            repo.git(&["config", "commit.gpgsign", "false"]);
             repo
         }
 
@@ -262,6 +490,152 @@ mod tests {
             .iter()
             .find(|f| f.path == path)
             .unwrap_or_else(|| panic!("{path} not in diff"))
+    }
+
+    #[test]
+    fn diffs_working_tree_including_untracked() {
+        let repo = TestRepo::new();
+        repo.write("editado.txt", "um\ndois\n");
+        repo.write("apagado.txt", "tchau\n");
+        repo.write("intocado.txt", "igual\n");
+        repo.commit("base");
+
+        // Os três estados que a aba tem de mostrar juntos: o que entrou no
+        // índice, o que ficou de fora dele e o que o git nem conhece.
+        repo.write("adicionado.txt", "novo no índice\n");
+        repo.git(&["add", "adicionado.txt"]);
+        repo.write("editado.txt", "um\nDOIS\n");
+        fs::remove_file(repo.path().join("apagado.txt")).unwrap();
+        repo.write("solto.txt", "ninguém me rastreia\n");
+        repo.write(".gitignore", "ignorado.txt\n");
+        repo.git(&["add", ".gitignore"]);
+        repo.write("ignorado.txt", "não apareço\n");
+
+        let diff = load_diff_working(repo.path()).unwrap();
+        let mostrados: Vec<&str> = diff.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            mostrados,
+            [".gitignore", "adicionado.txt", "apagado.txt", "editado.txt", "solto.txt"]
+        );
+
+        assert_eq!(file(&diff, "adicionado.txt").status, FileStatus::Added);
+        assert_eq!(file(&diff, "apagado.txt").status, FileStatus::Deleted);
+        assert_eq!(file(&diff, "editado.txt").status, FileStatus::Modified);
+
+        // O arquivo que o git não rastreia entra inteiro, como arquivo novo.
+        let solto = file(&diff, "solto.txt");
+        assert_eq!(solto.status, FileStatus::Added);
+        assert_eq!(solto.additions, 1);
+        assert_eq!(solto.hunks[0].lines[0].kind, LineKind::Add);
+
+        // O lado novo do que está no disco ganha chave de conteúdo no lugar do
+        // id de blob, que ali não existe.
+        assert!(solto.new_oid.as_deref().unwrap().starts_with(CHAVE_DISCO));
+        assert!(file(&diff, "editado.txt").new_oid.as_deref().unwrap().starts_with(CHAVE_DISCO));
+        // O que já está no índice tem blob de verdade.
+        let no_indice = file(&diff, "adicionado.txt").new_oid.clone().unwrap();
+        assert_eq!(no_indice.len(), 40);
+        assert_eq!(read_worktree(repo.path(), "solto.txt").unwrap(), ["ninguém me rastreia"]);
+        assert!(read_worktree(repo.path(), "../fora.txt").is_err());
+    }
+
+    #[test]
+    fn stages_unstages_and_commits() {
+        let repo = TestRepo::new();
+        repo.write("editado.txt", "um\n");
+        repo.commit("base");
+        repo.write("editado.txt", "dois\n");
+        repo.write("solto.txt", "novo\n");
+
+        let pendente = || load_diff_working(repo.path()).unwrap();
+        assert_eq!(file(&pendente(), "editado.txt").staged, Some(Staged::Unstaged));
+        assert_eq!(file(&pendente(), "solto.txt").staged, Some(Staged::Unstaged));
+
+        stage(repo.path(), "solto.txt").unwrap();
+        assert_eq!(file(&pendente(), "solto.txt").staged, Some(Staged::Staged));
+
+        // Mudou de novo depois do `git add`: metade está no índice, metade não.
+        repo.write("solto.txt", "novo e mudado\n");
+        assert_eq!(file(&pendente(), "solto.txt").staged, Some(Staged::Partial));
+
+        unstage(repo.path(), "solto.txt").unwrap();
+        assert_eq!(file(&pendente(), "solto.txt").staged, Some(Staged::Unstaged));
+
+        // O commit leva o que está no índice e deixa o resto onde estava.
+        stage(repo.path(), "editado.txt").unwrap();
+        let novo = commit(repo.path(), "só o editado").unwrap();
+        assert_eq!(novo.len(), 40);
+        let depois = pendente();
+        assert_eq!(depois.head_sha, novo);
+        let restantes: Vec<&str> = depois.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(restantes, ["solto.txt"]);
+
+        // Sem nada no índice o git recusa, e a recusa dele é o que a aba mostra.
+        let erro = commit(repo.path(), "vazio").unwrap_err().to_string();
+        assert!(erro.contains("nothing added") || erro.contains("no changes added"), "{erro}");
+        assert!(commit(repo.path(), "   ").is_err());
+    }
+
+    #[test]
+    fn stages_folders_and_everything() {
+        let repo = TestRepo::new();
+        repo.write("fora.txt", "raiz\n");
+        repo.write("sub/um.txt", "um\n");
+        repo.write("sub/dois.txt", "dois\n");
+        repo.commit("base");
+        // Uma pasta com de tudo dentro: editado, apagado e nunca visto.
+        repo.write("sub/um.txt", "um mudado\n");
+        fs::remove_file(repo.path().join("sub/dois.txt")).unwrap();
+        repo.write("sub/tres.txt", "novo\n");
+        repo.write("fora.txt", "raiz mudada\n");
+
+        let pendente = || load_diff_working(repo.path()).unwrap();
+        let estado = |d: &ReviewDiff, p: &str| file(d, p).staged;
+
+        // A pasta leva os três estados de uma vez e não encosta em quem está fora dela.
+        stage(repo.path(), "sub").unwrap();
+        let d = pendente();
+        assert_eq!(estado(&d, "sub/um.txt"), Some(Staged::Staged));
+        assert_eq!(estado(&d, "sub/dois.txt"), Some(Staged::Staged));
+        assert_eq!(estado(&d, "sub/tres.txt"), Some(Staged::Staged));
+        assert_eq!(estado(&d, "fora.txt"), Some(Staged::Unstaged));
+
+        // `.` é o repositório inteiro, nos dois sentidos.
+        stage(repo.path(), ".").unwrap();
+        assert!(pendente().files.iter().all(|f| f.staged == Some(Staged::Staged)));
+        unstage(repo.path(), ".").unwrap();
+        assert!(pendente().files.iter().all(|f| f.staged == Some(Staged::Unstaged)));
+    }
+
+    #[test]
+    fn working_stamp_changes_with_the_work() {
+        let repo = TestRepo::new();
+        repo.write("a.txt", "um\n");
+        repo.commit("base");
+
+        let marca = || working_stamp(repo.path()).unwrap();
+        let parado = marca();
+        assert_eq!(parado, marca(), "sem mexer em nada, a marca é a mesma");
+
+        repo.write("a.txt", "dois\n");
+        let editado = marca();
+        assert_ne!(parado, editado);
+
+        // O caso que as listas do git não pegam: já modificado, modificado de novo.
+        repo.write("a.txt", "três\n");
+        let de_novo = marca();
+        assert_ne!(editado, de_novo);
+
+        repo.write("novo.txt", "apareci\n");
+        let com_novo = marca();
+        assert_ne!(de_novo, com_novo);
+
+        stage(repo.path(), ".").unwrap();
+        let no_indice = marca();
+        assert_ne!(com_novo, no_indice);
+
+        repo.git(&["commit", "-q", "-m", "tudo"]);
+        assert_ne!(no_indice, marca());
     }
 
     #[test]

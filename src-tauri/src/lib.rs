@@ -935,8 +935,16 @@ pub fn run() {
             differ::open_repo,
             differ::load_diff,
             differ::load_diff_since,
+            differ::load_diff_working,
             differ::read_blob,
             differ::read_blob_bytes,
+            differ::read_worktree,
+            differ::read_worktree_bytes,
+            differ::repo_root,
+            differ::working_stamp,
+            differ::stage,
+            differ::unstage,
+            differ::commit,
             differ::watch_repo,
             js_log
         ])

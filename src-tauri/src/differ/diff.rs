@@ -19,6 +19,17 @@ pub enum FileStatus {
     TypeChanged,
 }
 
+/// Como o arquivo está no índice, no diff do que está para ser commitado: o
+/// `git add` pode ter levado tudo, parte (o arquivo mudou de novo depois dele)
+/// ou nada.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Staged {
+    Staged,
+    Partial,
+    Unstaged,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LineKind {
@@ -70,6 +81,9 @@ pub struct FileDiff {
     pub deletions: u32,
     /// Changes whenever this file's diff changes; used to invalidate "viewed" marks.
     pub fingerprint: String,
+    /// Só no diff do que está para ser commitado; `None` nos outros escopos,
+    /// onde tudo o que se vê já é commit e índice não há.
+    pub staged: Option<Staged>,
     pub hunks: Vec<Hunk>,
 }
 
@@ -306,6 +320,7 @@ pub fn build(raw: Vec<RawEntry>, patch: Vec<PatchSection>) -> Result<Vec<FileDif
                 additions,
                 deletions,
                 fingerprint,
+                staged: None,
                 hunks: section.hunks,
             }
         })

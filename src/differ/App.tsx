@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { loadDiff, loadDiffSince, openRepo, watchRepo } from "./api";
+import {
+  commitIndex,
+  loadDiff,
+  loadDiffSince,
+  loadDiffWorking,
+  openRepo,
+  stage,
+  unstage,
+  watchRepo,
+  workingStamp,
+} from "./api";
 import { COLLAPSE_MS, FileDiffView, type NewBookmark } from "./components/FileDiffView";
 import { Icon } from "./components/Icons";
 import { Mudou } from "./components/Mudou";
 import { Prefs } from "./components/Prefs";
-import { Sidebar } from "./components/Sidebar";
+import { Sidebar, type GrupoArquivos } from "./components/Sidebar";
 import { Toolbar } from "./components/Toolbar";
 import { bookmarkReference, checkBookmarks } from "./lib/bookmarks";
 import { incrementalBase, placeBookmarks, type FixPlacement } from "./lib/fixes";
@@ -38,7 +48,13 @@ function omit<T>(record: Record<string, T>, key: string): Record<string, T> {
 const STEP_PAUSE_MS = 150;
 
 /** Scrolls with the same duration as the file open/close animation, then calls `done`. */
-function animateScroll(scroller: HTMLElement, top: number, duration: number, done: () => void) {
+function animateScroll(
+  scroller: HTMLElement,
+  top: number,
+  duration: number,
+  done: () => void,
+  cancelada: () => boolean,
+) {
   const start = scroller.scrollTop;
   const distance = top - start;
   if (Math.abs(distance) < 1 || matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -49,6 +65,9 @@ function animateScroll(scroller: HTMLElement, top: number, duration: number, don
   const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
   const startedAt = performance.now();
   const step = (now: number) => {
+    // Outra rolagem começou por cima desta: esta para onde está, sem terminar de
+    // ir a um destino que já não é o destino.
+    if (cancelada()) return;
     const t = Math.min(1, (now - startedAt) / duration);
     scroller.scrollTop = start + distance * easeInOut(t);
     if (t < 1) requestAnimationFrame(step);
@@ -111,21 +130,43 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [prefs, setPrefs] = useState(false);
   const [mudou, setMudou] = useState(false);
+  /** A aba está na tela. Quem diz é o TermIAu: dentro de um iframe escondido, a
+      API de visibilidade do navegador continua dizendo "visível". */
+  const [visivel, setVisivel] = useState(true);
 
   const scope: Scope = settings?.scope ?? "branch";
   const incremental = scope === "incremental";
+  const working = scope === "working";
+  /** O diff da árvore de trabalho não depende de branch alvo: o lado velho dele é o HEAD. */
+  const readyToRefresh = !!repo && (!!target || working);
 
   const requestId = useRef(0);
   const started = useRef(false);
   const scrollerRef = useRef<HTMLElement>(null);
   const fileEls = useRef(new Map<string, HTMLElement>());
   const scrollFrame = useRef(0);
-  // "V" runs close → scroll → highlight next, one visible step at a time. While it runs the
-  // highlight must not follow the scroll, and the next file waits for the close to finish.
-  const holdActive = useRef(false);
-  const pendingJump = useRef<{ from: string; to: string } | null>(null);
+  // O "v" anda na hora; a rolagem é que vai atrás. Enquanto ela está a caminho, a
+  // posição do scroll não mexe no cursor — os eventos que a própria rolagem
+  // dispara o puxariam de volta para o arquivo do topo da tela.
+  const scrollLock = useRef(false);
+  /** Para onde a rolagem tem de ir. Um "v" novo só troca o destino. */
+  const jumpTarget = useRef<string | null>(null);
+  /** Qual arquivo fechando destrava a rolagem: fechar e andar junto se atropelam. */
+  const jumpFrom = useRef<string | null>(null);
+  const jumpTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /** Rolagem em curso. Trocar o número cancela a anterior no meio do caminho. */
+  const scrollAnim = useRef(0);
+  /** O cursor como ele está agora, mesmo antes de o render acontecer. */
+  const cursor = useRef<string | null>(null);
+  /** Marcados nesta rajada de "v", que o `viewedPaths` da tela ainda não tem. */
+  const marcados = useRef(new Set<string>());
+  // Quando fomos nós que commitamos. O commit escreve refs, o vigia vê e o aviso
+  // de "o repositório mudou" apareceria logo depois do diff já refeito por nós.
+  const nossoCommit = useRef(0);
+  /** A última assinatura do disco que já está na tela. */
+  const marcaNaTela = useRef<string | null>(null);
 
-  const refresh = useCallback(async (root: string, targetBranch: string, since: boolean) => {
+  const refresh = useCallback(async (root: string, targetBranch: string, escopo: Scope) => {
     const id = ++requestId.current;
     setLoading(true);
     setError(null);
@@ -133,18 +174,25 @@ export default function App() {
       const info = await openRepo(root);
       const key = reviewKey(info.root, info.currentBranch);
       const saved = await persist.loadReview(key);
+      const pendente = escopo === "working";
       // Incremental starts from the last commit reviewed to the end; before any, it's the branch.
-      let base = since ? incrementalBase(saved.completed, info.headSha) : null;
+      let base = escopo === "incremental" ? incrementalBase(saved.completed, info.headSha) : null;
       let result: ReviewDiff;
       try {
-        result = base ? await loadDiffSince(root, base) : await loadDiff(root, targetBranch);
+        result = pendente
+          ? await loadDiffWorking(root)
+          : base
+            ? await loadDiffSince(root, base)
+            : await loadDiff(root, targetBranch);
       } catch (err) {
         // The reviewed commit may be gone (rewritten history, gc): fall back to the branch.
         if (!base) throw err;
         base = null;
         result = await loadDiff(root, targetBranch);
       }
-      let state = coverCompleted(saved, result);
+      // O que ainda não foi commitado nunca foi revisado: aqui a revisão completa
+      // de um commit não vale como revisão do que está por cima dele.
+      let state = pendente ? saved : coverCompleted(saved, result);
       let lost: Set<string>;
       let placed: Map<string, FixPlacement> | null = null;
       if (base) {
@@ -167,8 +215,12 @@ export default function App() {
       setOutdated(lost);
       setPlacements(placed);
       setSinceBase(base);
-      pendingJump.current = null;
-      holdActive.current = false;
+      // Diff novo, viagem velha não interessa: o destino pode nem estar mais na lista.
+      clearTimeout(jumpTimer.current);
+      jumpTarget.current = null;
+      jumpFrom.current = null;
+      scrollLock.current = false;
+      marcados.current = new Set();
     } catch (err) {
       if (id !== requestId.current) return;
       setDiff(null);
@@ -216,7 +268,9 @@ export default function App() {
         // mexeu chega como `termiau:mudou`. Falhar aqui não impede a revisão —
         // só custa o aviso, e o botão Atualizar continua no lugar.
         watchRepo(info.root).catch(() => {});
-        if (initial) await refresh(info.root, initial, prefs.scope === "incremental");
+        // O diff do que está para ser commitado não compara com branch nenhuma:
+        // ele abre mesmo num repositório de uma branch só.
+        if (initial || prefs.scope === "working") await refresh(info.root, initial, prefs.scope);
         else setError("O repositório não tem branches para comparar.");
       } catch (err) {
         setError(String(err));
@@ -243,6 +297,12 @@ export default function App() {
   // dado antes desta página existir, e nesse caso o pedido está guardado lá
   // esperando exatamente este aviso.
   useEffect(() => {
+    const ver = (e: Event) => setVisivel((e as CustomEvent<boolean>).detail);
+    window.addEventListener("termiau:visivel", ver);
+    return () => window.removeEventListener("termiau:visivel", ver);
+  }, []);
+
+  useEffect(() => {
     const abrir = (e: Event) => void openRepoAt((e as CustomEvent<string>).detail);
     const preferencias = () => setPrefs(true);
     window.addEventListener("termiau:repo", abrir);
@@ -253,6 +313,14 @@ export default function App() {
       window.removeEventListener("termiau:prefs", preferencias);
     };
   }, [openRepoAt]);
+
+  // Sem repositório aberto não há o que esta aba mostre, e o TermIAu apaga o
+  // chip dela na barra. Quem sabe disso é esta página, então é ela que avisa —
+  // no primeiro render também, que é quando o `repo` ainda é nulo.
+  useEffect(() => {
+    if (window.parent === window) return;
+    window.parent.postMessage({ termiauRepoAberto: repo?.root ?? null }, "*");
+  }, [repo]);
 
   useEffect(() => {
     if (settings) persist.saveSettings(settings);
@@ -267,24 +335,89 @@ export default function App() {
       if (!repo) return;
       setTarget(next);
       persist.saveRepoConfig(repo.root, { target: next });
-      refresh(repo.root, next, incremental);
+      refresh(repo.root, next, scope);
     },
-    [repo, incremental, refresh],
+    [repo, scope, refresh],
   );
 
   const doRefresh = useCallback(() => {
-    if (repo && target) refresh(repo.root, target, incremental);
-  }, [repo, target, incremental, refresh]);
+    if (repo && readyToRefresh) refresh(repo.root, target, scope);
+  }, [repo, readyToRefresh, target, scope, refresh]);
+
+  /// Pôr no índice e tirar de lá. O alvo é um arquivo, uma pasta ou "." — o
+  /// repositório inteiro. O diff é refeito porque foi o próprio diff que mudou:
+  /// o que está no índice e o que está no disco deixaram de ser o mesmo.
+  const setStaged = useCallback(
+    async (alvo: string, dentro: boolean) => {
+      if (!repo) return;
+      try {
+        await (dentro ? stage : unstage)(repo.root, alvo);
+        marcaNaTela.current = null;
+      } catch (err) {
+        setError(String(err));
+        return;
+      }
+      await refresh(repo.root, target, scope);
+    },
+    [repo, target, scope, refresh],
+  );
+
+  /// O erro sobe de propósito: quem o mostra é a caixa de commit, ao lado da
+  /// mensagem que o usuário acabou de escrever e não pode perder.
+  const doCommit = useCallback(
+    async (mensagem: string) => {
+      if (!repo) return;
+      await commitIndex(repo.root, mensagem);
+      nossoCommit.current = Date.now();
+      marcaNaTela.current = null;
+      await refresh(repo.root, target, scope);
+    },
+    [repo, target, scope, refresh],
+  );
 
   const changeScope = useCallback(
     (next: Scope) => {
       if (next === scope) return;
       setSettings((s) => s && { ...s, scope: next });
       scrollerRef.current?.scrollTo(0, 0);
-      if (repo && target) refresh(repo.root, target, next === "incremental");
+      if (repo && (target || next === "working")) refresh(repo.root, target, next);
     },
     [scope, repo, target, refresh],
   );
+
+  /**
+   * A aba do que está para ser commitado se mantém em dia sozinha. O vigia do
+   * `.git` não serve aqui: editar um arquivo não escreve nada lá dentro, e
+   * vigiar a árvore de trabalho inteira seria acordar a cada arquivo de build.
+   * Então é relógio, com uma assinatura barata do disco no lugar do diff — e só
+   * enquanto a aba está à vista.
+   */
+  useEffect(() => {
+    if (!repo || !working || !visivel || prefs) return;
+    let vivo = true;
+    const bater = async () => {
+      try {
+        const marca = await workingStamp(repo.root);
+        if (!vivo) return;
+        const anterior = marcaNaTela.current;
+        marcaNaTela.current = marca;
+        // Primeira batida (ou logo depois de um `git add` nosso): só registra.
+        if (anterior !== null && anterior !== marca) doRefresh();
+      } catch {
+        // Repositório fora do ar (pasta apagada, .git sumindo num rebase): a
+        // batida seguinte tenta de novo, e quem explica é o refresh.
+      }
+    };
+    void bater();
+    // Dois segundos: a batida custa um `git diff --raw` e um `ls-files`, que num
+    // repositório grande não são de graça — e ninguém edita um arquivo e olha
+    // para a aba no mesmo segundo.
+    const relogio = setInterval(bater, 2000);
+    return () => {
+      vivo = false;
+      clearInterval(relogio);
+    };
+  }, [repo, working, visivel, prefs, doRefresh]);
 
   // O .git mexeu. Um commit escreve vários arquivos lá dentro, e um fetch
   // escreve muitos: sem a espera, o mesmo commit abriria o diálogo seis vezes.
@@ -293,6 +426,8 @@ export default function App() {
     let espera: ReturnType<typeof setTimeout>;
     const avisar = (e: Event) => {
       if ((e as CustomEvent<string>).detail !== repo.root) return;
+      // O commit saiu daqui: a tela já está com ele, não há o que avisar.
+      if (Date.now() - nossoCommit.current < 3000) return;
       clearTimeout(espera);
       espera = setTimeout(() => setMudou(true), 400);
     };
@@ -318,6 +453,31 @@ export default function App() {
 
   const tree = useMemo(() => (diff ? buildTree(diff.files) : []), [diff]);
   const files = useMemo(() => flattenTree(tree), [tree]);
+
+  // Na aba do que está para ser commitado a lista vem partida em duas, como no
+  // VS Code: o que o commit vai levar e o que não vai. Quem está no índice pela
+  // metade fica no primeiro grupo — parte dele vai — e mostra os dois botões.
+  const grupos: GrupoArquivos[] | null = useMemo(() => {
+    if (!working) return null;
+    const dentro = files.filter((f) => f.staged === "staged" || f.staged === "partial");
+    const fora = files.filter((f) => f.staged === "unstaged");
+    return [
+      {
+        chave: "indice",
+        titulo: "No índice",
+        tree: buildTree(dentro),
+        poeTudo: false,
+        vazio: "Nada no índice ainda.",
+      },
+      {
+        chave: "fora",
+        titulo: "Fora do índice",
+        tree: buildTree(fora),
+        poeTudo: true,
+        vazio: "Tudo o que mudou já está no índice.",
+      },
+    ];
+  }, [working, files]);
   const reviewedMap = review?.state.reviewed;
   const viewedPaths = useMemo(
     () => new Set(files.filter((f) => reviewedMap?.[fileKey(f)] !== undefined).map((f) => f.path)),
@@ -397,10 +557,13 @@ export default function App() {
   // incremental review starts from it.
   useEffect(() => {
     if (!diff || files.length === 0 || viewedPaths.size !== files.length) return;
+    // Ver tudo o que está por commitar não é ter revisado o commit: o checkpoint
+    // é do que está no HEAD, e no disco há coisa que ele não tem.
+    if (working) return;
     if (!completed || completed.some((c) => c.commit === diff.headSha)) return;
     const checkpoint = { commit: diff.headSha, at: Date.now() };
     updateReview((s) => ({ ...s, completed: [...s.completed, checkpoint] }));
-  }, [diff, files, viewedPaths, completed, updateReview]);
+  }, [diff, files, viewedPaths, completed, working, updateReview]);
 
   const oldPaths = useMemo(() => new Map(files.map((f) => [f.path, f.oldPath])), [files]);
   const referenceOf = useCallback(
@@ -414,13 +577,22 @@ export default function App() {
     [placements, oldPaths],
   );
 
-  /** `smooth` glides there and only then highlights the file, so the move is easy to follow. */
-  const selectFile = useCallback((path: string, smooth = false) => {
+  /**
+   * `smooth` glides there and only then highlights the file, so the move is easy to follow.
+   * `moveCursor` fica falso quando quem chama é o "v": lá o cursor já andou, e
+   * pô-lo de novo no fim da rolagem o traria de volta se outro "v" já o adiantou.
+   */
+  const selectFile = useCallback((path: string, smooth = false, moveCursor = true) => {
     const el = fileEls.current.get(path);
     const scroller = scrollerRef.current;
+    const id = ++scrollAnim.current;
     const arrive = () => {
-      setActivePath(path);
-      holdActive.current = false;
+      if (id !== scrollAnim.current) return;
+      if (moveCursor) {
+        cursor.current = path;
+        setActivePath(path);
+      }
+      scrollLock.current = false;
     };
     if (!el || !scroller) {
       arrive();
@@ -428,55 +600,140 @@ export default function App() {
       const gap = parseFloat(getComputedStyle(scroller).getPropertyValue("--sticky-gap")) || 0;
       const target =
         scroller.scrollTop + el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - gap;
-      animateScroll(scroller, target, COLLAPSE_MS, arrive);
+      animateScroll(scroller, target, COLLAPSE_MS, arrive, () => id !== scrollAnim.current);
     } else {
       el.scrollIntoView({ block: "start" });
       arrive();
     }
   }, []);
 
+  /** Vai até onde o cursor está agora — que pode já não ser onde estava quando a viagem começou. */
+  const alcancarCursor = useCallback(() => {
+    clearTimeout(jumpTimer.current);
+    jumpFrom.current = null;
+    const alvo = jumpTarget.current;
+    jumpTarget.current = null;
+    if (alvo) selectFile(alvo, true, false);
+    else scrollLock.current = false;
+  }, [selectFile]);
+
+  /**
+   * Marca o destino e deixa a rolagem para depois. Medir o próximo arquivo com o
+   * anterior ainda encolhendo erra o alvo — o resto do fechamento puxa tudo para
+   * cima —, então ela espera o fechamento; o relógio é a rede de segurança para
+   * quando fechamento não há (arquivo já fechado) ou quando ele não avisa.
+   */
+  const agendarRolagem = useCallback(
+    (destino: string, fechando: string | null) => {
+      jumpTarget.current = destino;
+      jumpFrom.current = fechando;
+      scrollLock.current = true;
+      clearTimeout(jumpTimer.current);
+      jumpTimer.current = setTimeout(alcancarCursor, COLLAPSE_MS + STEP_PAUSE_MS);
+    },
+    [alcancarCursor],
+  );
+
   const handleCollapseEnd = useCallback(
     (file: FileDiff) => {
-      const jump = pendingJump.current;
-      if (jump?.from !== file.path) return;
-      pendingJump.current = null;
+      if (jumpFrom.current !== file.path) return;
+      jumpFrom.current = null;
       // A short beat between "closed" and "moving on" so each step reads on its own.
-      setTimeout(() => selectFile(jump.to, true), STEP_PAUSE_MS);
+      clearTimeout(jumpTimer.current);
+      jumpTimer.current = setTimeout(alcancarCursor, STEP_PAUSE_MS);
     },
-    [selectFile],
+    [alcancarCursor],
   );
 
   /** The file the keyboard acts on: the one at the top of the diff. */
   const currentPath = activePath ?? files[0]?.path ?? null;
 
-  // "V" toggles the current file; once reviewed, jump to the next one still to review.
+  // O cursor num ref também: um "v" atrás do outro anda mais rápido que o render,
+  // e o segundo precisa saber onde o primeiro parou.
+  useEffect(() => {
+    cursor.current = currentPath;
+  }, [currentPath]);
+
+  // A rajada acabou de chegar à tela: o que estava só no ref agora está no estado.
+  useEffect(() => {
+    marcados.current = new Set();
+  }, [viewedPaths]);
+
+  // "V" toggles the current file; once reviewed, the cursor moves to the next one still to
+  // review — na hora, sem esperar a rolagem: quem aperta rápido não pode ser freado por ela.
   const toggleCurrentViewed = useCallback(() => {
-    if (holdActive.current) return; // previous "V" still moving on
-    const file = files.find((f) => f.path === currentPath);
+    const atual = cursor.current ?? currentPath;
+    const file = files.find((f) => f.path === atual);
     if (!file) return;
-    const value = !viewedPaths.has(file.path);
+    // O estado da tela mais o que esta rajada já marcou e ele ainda não mostra.
+    const vistos = marcados.current.size
+      ? new Set([...viewedPaths, ...marcados.current])
+      : viewedPaths;
+    const value = !vistos.has(file.path);
     // Unviewed files are open unless the user closed them or they're generated.
     const alreadyClosed = collapsedOverrides[fileKey(file)] ?? isGenerated(file.path);
     markViewed(file, value);
-    if (!value) return;
-    const next = nextToReview(files, file.path, viewedPaths);
+    if (!value) {
+      marcados.current.delete(file.path);
+      return;
+    }
+    marcados.current.add(file.path);
+    const next = nextToReview(files, file.path, vistos);
     if (!next) return;
-    // Close, then scroll, then highlight the next file. Measuring the next file while this one
-    // is still closing would also overshoot: the rest of the close pulls everything up.
-    holdActive.current = true;
-    if (alreadyClosed) selectFile(next.path, true);
-    else pendingJump.current = { from: file.path, to: next.path };
-  }, [files, currentPath, viewedPaths, collapsedOverrides, markViewed, selectFile]);
+    // O cursor é o da lista, não o do scroll: o próximo por revisar, esteja ele
+    // onde estiver na tela.
+    cursor.current = next.path;
+    setActivePath(next.path);
+    agendarRolagem(next.path, alreadyClosed ? null : file.path);
+  }, [files, currentPath, viewedPaths, collapsedOverrides, markViewed, agendarRolagem]);
+
+  /** Já está tudo no índice, dentro deste alvo? É o que decide se a tecla põe ou tira. */
+  const tudoNoIndice = useCallback(
+    (alvo: string) => {
+      const dentro = files.filter(
+        (f) => alvo === "." || f.path === alvo || f.path.startsWith(`${alvo}/`),
+      );
+      return dentro.length > 0 && dentro.every((f) => f.staged === "staged");
+    },
+    [files],
+  );
+
+  /**
+   * As três teclas do índice, todas alternando: o arquivo do cursor, a pasta
+   * dele e o repositório inteiro. Alternar em vez de só pôr é o que dispensa uma
+   * segunda tecla para cada um dos três.
+   */
+  const alternarIndice = useCallback(
+    (alvo: string) => void setStaged(alvo, !tudoNoIndice(alvo)),
+    [setStaged, tudoNoIndice],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== "v" || e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target)) return;
-      e.preventDefault();
-      toggleCurrentViewed();
+      if (e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target)) return;
+      const tecla = e.key.toLowerCase();
+      if (tecla === "v") {
+        e.preventDefault();
+        toggleCurrentViewed();
+        return;
+      }
+      // Índice só existe na aba do que está para ser commitado.
+      if (!working) return;
+      const atual = files.find((f) => f.path === (cursor.current ?? currentPath));
+      if (tecla === "s" && atual) {
+        e.preventDefault();
+        // ⇧S sobe um degrau: a pasta do arquivo — a raiz é o repositório todo.
+        const pasta = atual.path.split("/").slice(0, -1).join("/");
+        alternarIndice(e.shiftKey ? pasta || "." : atual.path);
+      }
+      if (tecla === "a") {
+        e.preventDefault();
+        alternarIndice(".");
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [toggleCurrentViewed]);
+  }, [toggleCurrentViewed, working, files, currentPath, alternarIndice]);
 
   const selectBookmark = useCallback(
     (b: Bookmark) => {
@@ -491,7 +748,7 @@ export default function App() {
 
   // Highlight in the sidebar the file currently at the top of the diff.
   const onScroll = useCallback(() => {
-    if (holdActive.current || scrollFrame.current) return;
+    if (scrollLock.current || scrollFrame.current) return;
     scrollFrame.current = requestAnimationFrame(() => {
       scrollFrame.current = 0;
       const scroller = scrollerRef.current;
@@ -510,6 +767,7 @@ export default function App() {
           break;
         }
       }
+      cursor.current = current;
       setActivePath(current);
     });
   }, [files]);
@@ -562,6 +820,7 @@ export default function App() {
         <div className="workspace">
           <Sidebar
             tree={tree}
+            grupos={grupos}
             files={files}
             viewedPaths={viewedPaths}
             activePath={currentPath}
@@ -569,6 +828,10 @@ export default function App() {
             outdated={outdated}
             placements={placements}
             referenceOf={referenceOf}
+            staging={working}
+            noIndice={files.filter((f) => f.staged === "staged" || f.staged === "partial").length}
+            onStage={setStaged}
+            onCommit={doCommit}
             onSelectFile={selectFile}
             onSelectBookmark={selectBookmark}
             onRemoveBookmark={removeBookmark}
@@ -579,7 +842,12 @@ export default function App() {
               <div className="sticky-cap" />
               {diff && (
                 <div className="diff-summary">
-                  {sinceBase ? (
+                  {working ? (
+                    <span>
+                      O que está para ser commitado em <code className="branch-name">{diff.branch ?? "HEAD"}</code>{" "}
+                      — com <code>git add</code> ou sem ele, e mais o que o git ainda não rastreia
+                    </span>
+                  ) : sinceBase ? (
                     <span>
                       Mudanças em <code className="branch-name">{diff.branch ?? "HEAD"}</code> desde a última
                       revisão completa, em <code className="branch-name">{sinceBase.slice(0, 7)}</code>
@@ -592,9 +860,15 @@ export default function App() {
                     </span>
                   )}
                   {sinceBase && <ResolvedCount bookmarks={bookmarks} placements={placements} />}
-                  <span className="sha" title={`base ${diff.mergeBase}\nhead ${diff.headSha}`}>
-                    {diff.mergeBase.slice(0, 7)}…{diff.headSha.slice(0, 7)}
-                  </span>
+                  {working ? (
+                    <span className="sha" title={`head ${diff.headSha}\nO lado novo é o disco, como está agora`}>
+                      {diff.headSha.slice(0, 7)}…disco
+                    </span>
+                  ) : (
+                    <span className="sha" title={`base ${diff.mergeBase}\nhead ${diff.headSha}`}>
+                      {diff.mergeBase.slice(0, 7)}…{diff.headSha.slice(0, 7)}
+                    </span>
+                  )}
                 </div>
               )}
               {diff && files.length === 0 && sinceBase && (
@@ -606,7 +880,16 @@ export default function App() {
                   </p>
                 </div>
               )}
-              {diff && files.length === 0 && !sinceBase && (
+              {diff && files.length === 0 && working && (
+                <div className="empty-diff">
+                  <h2>Nada para commitar</h2>
+                  <p>
+                    A pasta está igual ao último commit de <code>{diff.branch ?? "HEAD"}</code>: nada no índice,
+                    nada editado e nenhum arquivo novo.
+                  </p>
+                </div>
+              )}
+              {diff && files.length === 0 && !sinceBase && !working && (
                 <div className="empty-diff">
                   <h2>Nada para revisar</h2>
                   <p>

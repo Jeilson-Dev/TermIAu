@@ -152,8 +152,16 @@ type Presa = {
   /// Recados dados antes disso. O primeiro clique quase sempre chega antes de a
   /// página existir — ela só carrega quando a aba é aberta pela primeira vez.
   fila: unknown[];
+  /// Há repositório aberto lá dentro. Quem diz é o próprio differ, que é quem
+  /// sabe se abrir deu certo: mandar o cwd de um painel não garante que aquela
+  /// pasta seja um repositório.
+  repoAberto: boolean;
 };
 let presa: Presa | undefined;
+/// A raiz do repositório aberto no diff, como o differ a reporta. É por ela que
+/// os painéis daquele projeto acendem o botão de diff: o diff é de um
+/// repositório, não de um painel, e dois painéis podem ser do mesmo.
+let repoDoDiff: string | null = null;
 /// Verdadeiro enquanto quem ocupa a tela é a aba presa. `ativa` continua
 /// apontando pro terminal de onde se veio — é pra ele que se volta.
 let noDiff = false;
@@ -193,9 +201,11 @@ function trocarFilho(pai: Divisao, velho: No, novo: No) {
   novo.pai = pai;
 }
 
-/// O grid tem três tracks: primeiro filho, divisor, segundo filho.
+/// O grid tem três tracks: primeiro filho, vão, segundo filho. A espessura do
+/// vão é o `--vao` do style.css — é a mesma medida que afasta os cartões dos
+/// painéis um do outro e da borda da janela.
 function aplicarFracao(d: Divisao) {
-  const tracks = `${d.fracao}fr 6px ${1 - d.fracao}fr`;
+  const tracks = `${d.fracao}fr var(--vao) ${1 - d.fracao}fr`;
   d.el.style.gridTemplate = d.eixo === "lado" ? `1fr / ${tracks}` : `${tracks} / 1fr`;
 }
 
@@ -530,7 +540,12 @@ function criarPresa() {
   const quadro = document.createElement("iframe");
   quadro.className = "quadro";
   quadro.src = "/differ.html";
-  corpo.appendChild(quadro);
+  // O iframe vai dentro de uma moldura, e não solto na aba: o canto arredondado
+  // do cartão não corta o conteúdo de um iframe no WebKit — quem corta é um
+  // elemento comum com `overflow:hidden` em volta dele.
+  const moldura = elemento("div", "moldura");
+  moldura.appendChild(quadro);
+  corpo.appendChild(moldura);
   painel.appendChild(corpo);
 
   const chip = document.createElement("div");
@@ -542,7 +557,36 @@ function criarPresa() {
     if (e.button === 0) abrirPresa();
   });
 
-  presa = { corpo, chip, quadro, pronta: false, fila: [] };
+  presa = { corpo, chip, quadro, pronta: false, fila: [], repoAberto: false };
+  habilitarPresa(null);
+}
+
+/// Acende ou apaga o chip do diff. Uma aba que só sabe mostrar tela em branco
+/// não se abre: enquanto não houver repositório, o chip fica apagado e o clique
+/// nele não faz nada. O ⌘, continua entrando — as preferências moram lá, e não
+/// dependem de repositório nenhum.
+function habilitarPresa(raiz: string | null) {
+  if (!presa) return;
+  presa.repoAberto = !!raiz;
+  repoDoDiff = raiz;
+  presa.chip.classList.toggle("desabilitada", !raiz);
+  // Acesa na mesma cor do botão de diff do painel de onde o repositório veio: os
+  // dois ícones acesos ao mesmo tempo são o que liga um lugar ao outro.
+  presa.chip.classList.toggle("ligado", !!raiz);
+  const nome = raiz?.split("/").filter(Boolean).pop();
+  presa.chip.title = raiz
+    ? `Diff de ${nome ?? "repositório"}`
+    : "Nenhum repositório aberto — use o botão de diff de um painel";
+  // O botão de diff de cada painel diz se é aquele projeto que está lá dentro,
+  // e quem está lá dentro acabou de mudar.
+  for (const a of abas) for (const f of folhas(a.raiz)) desenharBarra(f);
+}
+
+/// O painel está no repositório que o diff mostra. São as duas raízes, e não a
+/// pasta contra a raiz: um painel dentro de um submódulo está noutro
+/// repositório, mesmo estando dentro da pasta deste.
+function noRepoDoDiff(b: Barra): boolean {
+  return !!repoDoDiff && b.repo === repoDoDiff;
 }
 
 /// Fala com a página do differ, guardando o recado se ela ainda não carregou.
@@ -554,7 +598,8 @@ function recado(msg: unknown) {
 
 /// Leva o repositório do painel para a aba do diff e a traz para a frente.
 async function abrirDiff(folha: Folha) {
-  abrirPresa();
+  // Forçado: é este clique que vai dar um repositório a ela.
+  abrirPresa(true);
   const cwd = await invoke<string | null>("pty_cwd", { id: folha.id }).catch(() => null);
   if (cwd) recado({ termiauRepo: cwd });
 }
@@ -562,12 +607,14 @@ async function abrirDiff(folha: Folha) {
 /// ⌘, — as preferências moram no differ, que é quem tem o que configurar e
 /// quem guarda o arquivo. Abrir a aba junto é parte do gesto.
 function abrirPreferencias() {
-  abrirPresa();
+  abrirPresa(true);
   recado({ termiauPrefs: true });
 }
 
-function abrirPresa() {
+function abrirPresa(forcar = false) {
   if (!presa || noDiff) return;
+  // Apagada: o clique no chip, o ⌘1 e o ciclo das abas passam por aqui e param.
+  if (!presa.repoAberto && !forcar) return;
   if (ativa) {
     ativa.corpo.hidden = true;
     ativa.chip.classList.remove("ativa");
@@ -576,6 +623,10 @@ function abrirPresa() {
     ativa.foco.term.blur();
   }
   noDiff = true;
+  // A aba só se mantém em dia com a árvore de trabalho enquanto está à vista:
+  // olhar o disco de segundo em segundo por trás de um terminal seria trabalho
+  // jogado fora. Quem sabe se ela está à vista é daqui.
+  recado({ termiauVisivel: true });
   presa.corpo.hidden = false;
   presa.chip.classList.add("ativa");
   presa.quadro.focus();
@@ -587,6 +638,7 @@ function abrirPresa() {
 function esconderPresa() {
   if (!presa || !noDiff) return;
   noDiff = false;
+  recado({ termiauVisivel: false });
   presa.corpo.hidden = true;
   presa.chip.classList.remove("ativa");
 }
@@ -783,8 +835,11 @@ function vizinho(folha: Folha, dir: "Left" | "Right" | "Up" | "Down"): Folha | u
 
 function irParaAba(delta: number) {
   // A aba presa entra no anel como qualquer outra — ela é a primeira da barra,
-  // e ⌘⇧[ na aba seguinte tem de cair nela.
-  const anel: (Aba | Presa)[] = presa ? [presa, ...abas] : [...abas];
+  // e ⌘⇧[ na aba seguinte tem de cair nela. Apagada ela fica de fora, a não ser
+  // que seja ela que esteja na tela: o ⌘, abre as preferências sem repositório
+  // nenhum, e de lá o ciclo tem de conseguir sair.
+  const dentro = presa && (presa.repoAberto || noDiff);
+  const anel: (Aba | Presa)[] = dentro ? [presa as Presa, ...abas] : [...abas];
   const i = noDiff ? 0 : ativa ? anel.indexOf(ativa) : -1;
   if (i < 0 || anel.length < 2) return;
   // Circular: da última pra primeira, como no iTerm2.
@@ -1335,6 +1390,10 @@ type Barra = {
   escolher: HTMLButtonElement;
   diff: HTMLButtonElement;
   projeto: Projeto | null;
+  /// A raiz do repositório git em que o shell deste painel está, ou `null` se
+  /// ele não estiver em nenhum. É ela que diz se o botão de diff tem para onde
+  /// levar, e é por ela que se sabe se o diff aberto é o deste painel.
+  repo: string | null;
   /// Respostas de `carregarProjeto` chegando fora de ordem (vários `cd`
   /// seguidos) não podem sobrescrever a mais nova.
   pedido: number;
@@ -1402,6 +1461,7 @@ function criarBarra(): Barra {
     escolher,
     diff,
     projeto: null,
+    repo: null,
     pedido: 0,
   };
 }
@@ -1451,6 +1511,17 @@ function desenharBarra(folha: Folha) {
     }
   }
 
+  // Fora de um repositório o diff não tem o que mostrar: o botão some, como o
+  // play some onde não há launch.json — um botão apagado em todo shell é ruído.
+  // Roxo quando é este repositório que está aberto no diff: a mesma cor que
+  // acende no chip da aba de lá, e é o par de ícones acesos que liga um ao outro.
+  const noDiffAgora = noRepoDoDiff(b);
+  b.diff.hidden = !b.repo;
+  b.diff.classList.toggle("ligado", noDiffAgora);
+  b.diff.title = noDiffAgora
+    ? "Este projeto está aberto na aba do diff"
+    : "Diff da branch deste painel";
+
   // Sem launch.json não há play: um botão apagado em todo shell seria ruído.
   const proj = b.projeto;
   b.grupoPlay.hidden = !proj;
@@ -1480,6 +1551,11 @@ async function carregarProjeto(folha: Folha) {
   let novo: Projeto | null = null;
   const cwd = await invoke<string | null>("pty_cwd", { id: folha.id }).catch(() => null);
   const achado = cwd ? await invoke<Achado | null>("launch_ler", { cwd }).catch(() => null) : null;
+  // Sem repositório o botão de diff não tem para onde levar, e um `cd` pode ter
+  // tirado o painel de um ou posto ele em outro.
+  const raiz = cwd
+    ? await invoke<string | null>("repo_root", { path: cwd }).catch(() => null)
+    : null;
   if (achado) {
     const { pasta, home } = achado;
     let tarefasDoProjeto: Tarefa[] = [];
@@ -1495,6 +1571,7 @@ async function carregarProjeto(folha: Folha) {
     }
   }
   if (pedido !== b.pedido || folha.morta) return;
+  b.repo = raiz;
   b.projeto = novo;
   desenharBarra(folha);
 }
@@ -1856,7 +1933,17 @@ window.addEventListener("keydown", (e) => {
 // conferida no `source` — nenhuma outra janela fala com esta.
 window.addEventListener("message", (e) => {
   if (!presa || e.source !== presa.quadro.contentWindow) return;
-  const dado = e.data as { termiau?: Atalho; termiauPronto?: boolean } | null;
+  const dado = e.data as {
+    termiau?: Atalho;
+    termiauPronto?: boolean;
+    termiauRepoAberto?: string | null;
+  } | null;
+
+  // Abriu ou fechou repositório lá dentro: é o que acende e apaga o chip.
+  if (dado && "termiauRepoAberto" in dado) {
+    habilitarPresa(dado.termiauRepoAberto ?? null);
+    return;
+  }
 
   // O differ avisa quando começa a ouvir. Um pedido que tenha chegado antes
   // disso estava guardado esperando exatamente este aviso.
@@ -1864,6 +1951,9 @@ window.addEventListener("message", (e) => {
     presa.pronta = true;
     const fila = presa.fila.splice(0);
     for (const msg of fila) presa.quadro.contentWindow?.postMessage(msg, "*");
+    // A página pode ter recarregado com a aba já aberta (um reload do dev, um
+    // crash da webview): ela não viu o `abrirPresa` que a pôs na tela.
+    recado({ termiauVisivel: noDiff });
     return;
   }
 
@@ -1899,6 +1989,10 @@ async function iniciar() {
   });
 
   await ligarEscuta();
+
+  // O "+" da barra faz o que o ⌘T faz — é o mesmo caminho, só que no alcance do
+  // mouse. `void` porque o clique não espera a aba abrir.
+  document.getElementById("nova-aba")?.addEventListener("click", () => void novaAba());
 
   // ⌘T, ⌘D, ⌘⇧D e ⌘W chegam por aqui: quem recebe a tecla é o menu nativo.
   await listen("menu://nova-aba", () => novaAba());

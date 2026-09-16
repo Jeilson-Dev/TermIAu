@@ -1,4 +1,5 @@
-import { readBlobBytes } from "../api";
+import { readBlobBytes, readWorktreeBytes } from "../api";
+import { worktreePath } from "./blobs";
 
 const MIME: Record<string, string> = {
   png: "image/png",
@@ -43,7 +44,9 @@ export function loadImage(root: string, oid: string, path: string): Promise<Load
 }
 
 async function decode(root: string, oid: string, type: string): Promise<LoadedImage> {
-  const bytes = await readBlobBytes(root, oid);
+  // A imagem ainda não commitada está no disco, não no banco de objetos.
+  const file = worktreePath(oid);
+  const bytes = file === null ? await readBlobBytes(root, oid) : await readWorktreeBytes(root, file);
   const url = URL.createObjectURL(new Blob([bytes], { type }));
   const element = new Image();
   element.src = url;

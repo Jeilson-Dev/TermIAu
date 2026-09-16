@@ -45,11 +45,24 @@ export function Toolbar(props: Props) {
             <Icon name="history" size={14} />
             Incremental
           </button>
+          <button
+            className={scope === "working" ? "active" : ""}
+            title="O que está para ser commitado: o que entrou no índice com git add, o que ficou de fora dele e os arquivos que o git ainda não rastreia"
+            onClick={() => props.onScope("working")}
+          >
+            <Icon name="pencil" size={14} />
+            Para commitar
+          </button>
         </div>
       )}
       {repo && (
         <div className="compare">
-          {sinceBase ? (
+          {scope === "working" ? (
+            <span className="base-pill" title="O diff do que está por commitar é contra o último commit da branch">
+              <Icon name="git-commit" size={14} />
+              HEAD
+            </span>
+          ) : sinceBase ? (
             <span
               className="base-pill"
               title={`Última revisão completa: ${sinceBase}\nO diff mostra só o que mudou depois dela`}

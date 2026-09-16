@@ -25,6 +25,23 @@ export function bookmarkReference(
 }
 
 /**
+ * Todos os comentários num texto só, na ordem em que a lista os mostra — para
+ * colar a revisão inteira de uma vez num prompt. Cada um sai exatamente como o
+ * `bookmarkReference` o escreve, separados por linha em branco; os já resolvidos
+ * vão marcados, porque num prompt eles mudam o pedido em vez de somar a ele.
+ */
+export function bookmarksReference(
+  bookmarks: Bookmark[],
+  referenceOf: (b: Bookmark) => string,
+): string {
+  if (bookmarks.length === 0) return "";
+  const titulo =
+    bookmarks.length === 1 ? "1 comentário de revisão" : `${bookmarks.length} comentários de revisão`;
+  const corpo = bookmarks.map((b) => (b.resolved ? `${referenceOf(b)}\n(resolvido)` : referenceOf(b)));
+  return [titulo, ...corpo].join("\n\n");
+}
+
+/**
  * A bookmark is outdated when its lines no longer hold the content it was created on.
  * Bookmarks still matching get their fingerprint refreshed so the next check is free.
  */

@@ -37,6 +37,7 @@ function file(hunks: Hunk[], status: FileStatus = "modified"): FileDiff {
     additions: 0,
     deletions: 0,
     fingerprint: "x",
+    staged: null,
     hunks,
   };
 }

@@ -1,4 +1,4 @@
-import type { FileDiff } from "../types";
+import type { FileDiff, StagedState } from "../types";
 
 export interface DirNode {
   type: "dir";
@@ -54,6 +54,18 @@ function normalize(nodes: TreeNode[]): TreeNode[] {
 /** Files in tree order, which is also the order they're listed in the diff. */
 export function flattenTree(nodes: TreeNode[]): FileDiff[] {
   return nodes.flatMap((node) => (node.type === "file" ? [node.file] : flattenTree(node.children)));
+}
+
+/**
+ * Como a pasta está no índice, olhando o que há dentro dela: tudo lá, nada lá ou
+ * uma parte. É o que decide quais botões a linha da pasta mostra.
+ */
+export function dirStaged(node: DirNode): StagedState | null {
+  const estados = flattenTree(node.children).map((f) => f.staged);
+  if (estados.length === 0 || estados.some((e) => !e)) return null;
+  if (estados.every((e) => e === "staged")) return "staged";
+  if (estados.every((e) => e === "unstaged")) return "unstaged";
+  return "partial";
 }
 
 export function filterTree(nodes: TreeNode[], query: string): TreeNode[] {

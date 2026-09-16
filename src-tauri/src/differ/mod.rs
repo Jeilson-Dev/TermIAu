@@ -4,7 +4,9 @@
 //! O que muda aqui é só a casca: em vez de um app com janela própria, são
 //! quatro comandos que a aba presa da barra chama pela webview.
 //!
-//! Nada aqui escreve no repositório: é tudo `git` de leitura.
+//! Quase nada aqui escreve no repositório: fora `stage_file`, `unstage_file` e
+//! `commit` — os três da aba do que está para ser commitado —, é tudo `git` de
+//! leitura, e nem o lock do índice os outros tomam (ver `run` em git.rs).
 
 mod diff;
 mod error;
@@ -42,6 +44,52 @@ pub async fn load_diff(path: PathBuf, target: String) -> Result<ReviewDiff> {
 #[tauri::command]
 pub async fn load_diff_since(path: PathBuf, base: String) -> Result<ReviewDiff> {
     blocking(move || review::load_diff_since(&path, &base)).await
+}
+
+/// O que está para ser commitado: índice, árvore de trabalho e arquivos novos.
+#[tauri::command]
+pub async fn load_diff_working(path: PathBuf) -> Result<ReviewDiff> {
+    blocking(move || review::load_diff_working(&path)).await
+}
+
+/// A raiz do repositório que contém a pasta, ou `None` quando não há nenhum. É
+/// o que diz se o botão de diff de um painel leva a algum lugar.
+#[tauri::command]
+pub async fn repo_root(path: PathBuf) -> Result<Option<String>> {
+    blocking(move || Ok(git::Repo::open(&path).ok().map(|r| r.root().display().to_string()))).await
+}
+
+/// Assinatura do estado da árvore de trabalho, para a aba saber que mudou sem
+/// refazer o diff inteiro a cada batida do relógio.
+#[tauri::command]
+pub async fn working_stamp(path: PathBuf) -> Result<String> {
+    blocking(move || review::working_stamp(&path)).await
+}
+
+/// Põe no índice o `target` — um arquivo, uma pasta ou `.` para o repositório
+/// inteiro. É, com o `unstage` e o `commit`, uma das três únicas coisas que o
+/// differ escreve; todo o resto aqui é leitura.
+#[tauri::command]
+pub async fn stage(path: PathBuf, target: String) -> Result<()> {
+    blocking(move || review::stage(&path, &target)).await
+}
+
+#[tauri::command]
+pub async fn unstage(path: PathBuf, target: String) -> Result<()> {
+    blocking(move || review::unstage(&path, &target)).await
+}
+
+/// Commita o que está no índice e devolve o sha do commit novo.
+#[tauri::command]
+pub async fn commit(path: PathBuf, message: String) -> Result<String> {
+    blocking(move || review::commit(&path, &message)).await
+}
+
+/// O arquivo como está no disco. O lado novo do diff da árvore de trabalho não
+/// tem blob para ler: o conteúdo ainda não passou pelo git.
+#[tauri::command]
+pub async fn read_worktree(path: PathBuf, file: String) -> Result<Vec<String>> {
+    blocking(move || review::read_worktree(&path, &file)).await
 }
 
 #[tauri::command]
@@ -107,5 +155,12 @@ pub async fn watch_repo(app: AppHandle, path: PathBuf) -> Result<()> {
 #[tauri::command]
 pub async fn read_blob_bytes(path: PathBuf, oid: String) -> Result<tauri::ipc::Response> {
     let bytes = blocking(move || review::read_blob_bytes(&path, &oid)).await?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// O mesmo, para a imagem que ainda está só no disco.
+#[tauri::command]
+pub async fn read_worktree_bytes(path: PathBuf, file: String) -> Result<tauri::ipc::Response> {
+    let bytes = blocking(move || review::read_worktree_bytes(&path, &file)).await?;
     Ok(tauri::ipc::Response::new(bytes))
 }

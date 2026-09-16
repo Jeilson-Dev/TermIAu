@@ -44,7 +44,8 @@ export function ResolveButton({ resolved, size, onToggle }: { resolved: boolean;
 }
 
 /** Copies the bookmark as a prompt-ready reference, confirming with a check for a moment. */
-export function CopyReferenceButton({ reference, size }: { reference: string; size?: number }) {
+/** O "copiado" que pisca por um instante e volta ao normal, dos dois botões de copiar. */
+function useCopiar(texto: string): [boolean, (e: { stopPropagation(): void }) => void] {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -53,16 +54,39 @@ export function CopyReferenceButton({ reference, size }: { reference: string; si
     return () => clearTimeout(timer);
   }, [copied]);
 
+  const copiar = (e: { stopPropagation(): void }) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(texto).then(() => setCopied(true));
+  };
+  return [copied, copiar];
+}
+
+export function CopyReferenceButton({ reference, size }: { reference: string; size?: number }) {
+  const [copied, copiar] = useCopiar(reference);
+
   return (
     <button
       className={copied ? "icon-btn copied" : "icon-btn"}
       title="Copiar referência (caminho:linhas + comentário) para colar num prompt"
-      onClick={(e) => {
-        e.stopPropagation();
-        navigator.clipboard.writeText(reference).then(() => setCopied(true));
-      }}
+      onClick={copiar}
     >
       <Icon name={copied ? "check" : "copy"} size={size} />
+    </button>
+  );
+}
+
+/** O mesmo, para a revisão inteira: todos os comentários numa colada só. */
+export function CopyAllButton({ reference, count }: { reference: string; count: number }) {
+  const [copied, copiar] = useCopiar(reference);
+
+  return (
+    <button
+      className={copied ? "copiar-tudo copied" : "copiar-tudo"}
+      title="Copiar todos os comentários da revisão, na ordem da lista, para colar num prompt"
+      onClick={copiar}
+    >
+      <Icon name={copied ? "check" : "copy"} size={14} />
+      {copied ? "Copiados" : `Copiar todos (${count})`}
     </button>
   );
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { bookmarkReference } from "./bookmarks";
+import type { Bookmark } from "../types";
+import { bookmarkReference, bookmarksReference } from "./bookmarks";
 
 const base = {
   path: "packages/app/lib/main.dart",
@@ -30,5 +31,29 @@ describe("bookmarkReference", () => {
     expect(bookmarkReference({ ...base, side: "old" }, "lib/old.dart")).toMatch(
       /^lib\/old\.dart:12-35 \(versão anterior\)\n/,
     );
+  });
+});
+
+describe("bookmarksReference", () => {
+  const marcador = (n: number, resolved = false) =>
+    ({ ...base, id: `b${n}`, startLine: n, endLine: n, note: `nota ${n}`, resolved }) as Bookmark;
+
+  it("joins every comment under a count, in the order given", () => {
+    const texto = bookmarksReference([marcador(1), marcador(2)], (b) => bookmarkReference(b));
+    expect(texto).toBe(
+      "2 comentários de revisão\n\n" +
+        `${base.path}:1\ncomment:\nnota 1\n\n` +
+        `${base.path}:2\ncomment:\nnota 2`,
+    );
+  });
+
+  it("marks the ones already checked off", () => {
+    expect(bookmarksReference([marcador(3, true)], (b) => bookmarkReference(b))).toBe(
+      `1 comentário de revisão\n\n${base.path}:3\ncomment:\nnota 3\n(resolvido)`,
+    );
+  });
+
+  it("is empty when there is nothing to copy", () => {
+    expect(bookmarksReference([], (b) => bookmarkReference(b))).toBe("");
   });
 });

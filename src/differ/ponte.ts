@@ -44,12 +44,17 @@ window.addEventListener("message", (e) => {
     termiauRepo?: string;
     termiauPrefs?: boolean;
     termiauMudou?: string;
+    termiauVisivel?: boolean;
   } | null;
   if (typeof dado?.termiauRepo === "string") {
     window.dispatchEvent(new CustomEvent("termiau:repo", { detail: dado.termiauRepo }));
   }
   // ⌘, no menu do TermIAu: as preferências são daqui, então é aqui que abrem.
   if (dado?.termiauPrefs) window.dispatchEvent(new Event("termiau:prefs"));
+  // Escondida atrás de um terminal, a aba não precisa vigiar nada.
+  if (typeof dado?.termiauVisivel === "boolean") {
+    window.dispatchEvent(new CustomEvent("termiau:visivel", { detail: dado.termiauVisivel }));
+  }
   if (typeof dado?.termiauMudou === "string") {
     window.dispatchEvent(new CustomEvent("termiau:mudou", { detail: dado.termiauMudou }));
   }

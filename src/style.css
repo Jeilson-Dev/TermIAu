@@ -21,13 +21,30 @@
   --green: #50fa7b;
   --red: #ff5555;
   --yellow: #f1fa8c;
+
+  /* O vão entre painéis: a largura do divisor no grid (escrita pelo
+     `aplicarFracao`, em src/main.ts) e a espessura da alça da gaveta. É ele que
+     afasta um painel do outro — com a tela dividida, o vão é fundo, não borda. */
+  --vao: 10px;
+  --canto: 10px;
+  /* Quanto o painel sem o teclado apaga. Ele apaga por inteiro — fundo, texto e
+     sombra — e, como o que está atrás dele é o `--fosso`, apagar é recuar. */
+  --apagado: 0.42;
+  /* O fundo que aparece nos vãos e em volta dos cartões. Mais escuro que o
+     `--bg-darker`, que é o mais fundo da paleta: aqui não é superfície do app,
+     é o vazio entre as superfícies, e é o contraste com ele que dá o relevo. */
+  --fosso: #0c0d11;
+  /* O tempo das trocas de foco — painel, aba, anel roxo. Todas com a mesma
+     duração de propósito: é sempre a mesma coisa acontecendo, o foco indo de um
+     lugar pro outro, e durações diferentes fariam parecer efeitos soltos. */
+  --tempo: 560ms;
 }
 
 html, body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--fosso);
 }
 
 body {
@@ -44,17 +61,25 @@ body {
 }
 
 /* Uma por aba; só a ativa fica visível. Escondemos com display:none — as
-   inativas ficam com dimensão zero e por isso são remedidas ao voltar. */
-/* Coluna: a árvore de painéis fica com o espaço, e a gaveta do app (quando há
-   uma e está aberta) com a fatia de baixo. */
+   inativas ficam com dimensão zero e por isso são remedidas ao voltar.
+
+   Coluna: a árvore de painéis fica com o espaço, e a gaveta do app (quando há
+   uma e está aberta) com a fatia de baixo. O respiro em volta vale com um
+   painel ou com seis: o ⌘D não pode mexer o terminal de lugar — o que estava
+   escrito na linha de cima continuaria na linha de cima, mas deslocado, e é
+   isso que se vê como tremida. */
 .aba {
   display: flex;
   flex-direction: column;
   height: 100%;
+  padding: var(--vao);
+  box-sizing: border-box;
+  background: var(--fosso);
 }
 
 .aba > .folha,
-.aba > .divisao {
+.aba > .divisao,
+.aba > .moldura {
   flex: 1;
   min-height: 0;
 }
@@ -63,11 +88,71 @@ body {
   display: none;
 }
 
+/* Trocar de aba: a que entra aparece. É `animation` e não `transition` porque
+   ela vem do `display:none` — não há estado anterior de onde transicionar, e o
+   navegador reinicia a animação toda vez que ela volta a ser exibida. Só
+   opacidade: mexer em escala borraria o texto do terminal no meio do caminho. */
+@keyframes termiau-aba-entra {
+  from { opacity: 0.4; }
+  to { opacity: 1; }
+}
+
+.aba:not([hidden]) {
+  animation: termiau-aba-entra var(--tempo) ease-out;
+}
+
+/* O cartão. `overflow:hidden` é o que faz a barra do painel, em cima, e a
+   gaveta, embaixo, respeitarem o arredondamento — e a sombra o descola do
+   fundo. Vale para as folhas da árvore, dividida ou não; o terminal de dentro
+   de uma gaveta não entra, que ele já está dentro de um cartão. */
+.aba > .folha,
+.aba .divisao > .folha,
+.aba > .moldura {
+  position: relative;
+  border-radius: var(--canto);
+  overflow: hidden;
+  background: var(--bg);
+  box-shadow: 0 1px 4px #000000a6;
+  --borda: var(--bg-lighter);
+}
+
+/* A borda do cartão, num pseudo-elemento e não num `box-shadow: inset`: o inset
+   fica por baixo dos filhos, e os filhos aqui são opacos — a barra do painel
+   comia o traço de cima e o xterm, que transborda o próprio box, o de baixo. O
+   ::after é o último filho, então passa por cima de todos e fecha os quatro
+   lados. `inherit` no raio o mantém colado no canto arredondado. */
+.aba > .folha::after,
+.aba .divisao > .folha::after,
+.aba > .moldura::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--borda);
+  border-radius: inherit;
+  /* Ele cobre o terminal inteiro: sem isto, clicar e arrastar texto pararia
+     nele em vez de chegar ao xterm. */
+  pointer-events: none;
+  transition: border-color var(--tempo) ease;
+}
+
+/* Fora do foco o painel apaga — mas só quando há outro painel de quem se
+   distinguir. Com um só ele está sempre em foco, e apagá-lo seria apagar a
+   janela inteira. */
+.aba.dividida .divisao > .folha {
+  opacity: var(--apagado);
+  /* A troca de foco é instantânea, mas a acesa não: o rastro diz de onde o
+     teclado saiu. */
+  transition: opacity var(--tempo) ease;
+}
+
 /* Um corte: primeiro filho, divisor, segundo filho. Quem escreve os tracks é o
-   `aplicarFracao` em src/main.ts, porque a fatia muda ao arrastar o divisor. */
+   `aplicarFracao` em src/main.ts, porque a fatia muda ao arrastar o divisor.
+   Sem fundo de propósito, inclusive nos cortes aninhados: o que aparece nos vãos
+   é sempre o fundo da aba. */
 .divisao {
   display: grid;
   height: 100%;
+  background: transparent;
 }
 
 /* Itens de grid não encolhem além do conteúdo por padrão, e o conteúdo aqui é
@@ -78,8 +163,7 @@ body {
   overflow: hidden;
 }
 
-/* O painel em si. O padding é o mesmo que o terminal inteiro tinha antes de
-   existir divisão — com um painel só, nada mudou de lugar. */
+/* O painel em si: barra em cima, terminal no meio, gaveta embaixo. */
 .folha {
   display: flex;
   flex-direction: column;
@@ -95,8 +179,11 @@ body {
   box-sizing: border-box;
 }
 
+/* Transparente de propósito: o que se vê no vão é o fundo da aba. Pintá-lo
+   devolveria a barra que separava os painéis antes de eles virarem cartões —
+   ele continua sendo só a área que se arrasta. */
 .divisor {
-  background: var(--bg-darker);
+  background: transparent;
 }
 
 .divisor.lado {
@@ -109,10 +196,26 @@ body {
 
 /* Qual painel tem o teclado. Só aparece quando há mais de um: com um só, o
    contorno seria uma moldura permanente em volta da janela inteira. */
-.aba.dividida .folha.focada,
 .folha.com-gaveta.focada > .folha-termo,
 .gaveta > .folha.focada {
   box-shadow: inset 0 0 0 1px var(--selection);
+}
+
+/* O cartão em foco: aceso por inteiro, o anel `inset` acompanhando o canto
+   arredondado e a sombra mais funda o levantando sobre os vizinhos. Só com a
+   tela dividida — com um painel só o anel seria uma moldura permanente, e não
+   há de quem distinguir. */
+.aba.dividida .divisao > .folha.focada {
+  opacity: 1;
+  --borda: var(--comment);
+  box-shadow: 0 6px 22px #000000bf;
+}
+
+/* Dois estados falam mesmo sem o teclado: o painel que espera por você e o que
+   vai receber o arquivo sendo arrastado. Apagá-los engoliria o aviso. */
+.aba.dividida .divisao > .folha.esperando,
+.aba.dividida .divisao > .folha.recebendo {
+  opacity: 1;
 }
 
 /* A gaveta: o terminal do app que o play do painel roda, embaixo do terminal
@@ -131,7 +234,7 @@ body {
 
 .gaveta-alca {
   flex: none;
-  height: 6px;
+  height: var(--vao);
   background: var(--bg-darker);
   cursor: row-resize;
 }
@@ -200,9 +303,17 @@ body {
 #tabs {
   display: flex;
   align-items: stretch;
-  gap: 1px;
-  background: var(--bg-dark);
-  border-bottom: 1px solid var(--bg-darker);
+  /* O mesmo fundo dos vãos entre painéis: a barra deixa de ser uma superfície
+     com abas coladas nela e passa a ser o escuro onde os chips flutuam. O vão
+     entre eles é o mesmo `--vao` de lá, pela metade — são chips, não painéis. */
+  gap: calc(var(--vao) / 2);
+  /* Embaixo, nada: quem dá o vão entre os chips e o cartão é o `padding` da
+     aba, logo abaixo, que também é `--vao`. Somar os dois deixava o de baixo
+     três vezes o de cima. Nas laterais o mesmo `--vao` da aba, para os chips
+     começarem e terminarem na mesma coluna que o cartão. */
+  padding: var(--vao) var(--vao) 0;
+  box-sizing: border-box;
+  background: var(--fosso);
   /* A barra não pode encolher nem rolar junto: com muitas abas elas é que
      espremem, como no Terminal.app. */
   flex: none;
@@ -230,20 +341,53 @@ body {
   padding: 6px 8px 6px 10px;
   font: 12px/1 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
   color: var(--comment);
-  background: var(--bg-darker);
+  background: var(--bg-dark);
   border: none;
-  border-top: 2px solid transparent;
+  /* Um pouco menos que o canto do painel: o chip é menor, e o mesmo raio nele
+     pareceria mais redondo do que lá. */
+  border-radius: calc(var(--canto) - 2px);
   cursor: default;
+  /* Âncora do anel roxo, que é um ::after. */
+  position: relative;
+  /* As abas paradas ficam recuadas, como os painéis sem o teclado. */
+  opacity: 0.7;
+  transition: opacity var(--tempo) ease, background-color var(--tempo) ease,
+    color var(--tempo) ease;
+}
+
+/* O anel da aba de agora. Ele chega fechando sobre o chip — entra um pouco
+   maior e assenta — e sai desmanchando na mesma medida, que é o que dá a
+   sensação de o foco ter ido de uma aba pra outra e não de ter piscado. */
+.tab::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--purple);
+  border-radius: inherit;
+  opacity: 0;
+  transform: scale(1.06);
+  /* O anel cobre o chip inteiro, inclusive o X de fechar. */
+  pointer-events: none;
+  transition: opacity var(--tempo) ease, transform var(--tempo) cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.tab.ativa::after {
+  opacity: 1;
+  transform: none;
 }
 
 .tab:hover {
   color: var(--fg-dim);
+  opacity: 1;
 }
 
+/* A aba de agora: acesa por inteiro e no tom do terminal. O anel roxo entrou no
+   lugar do traço que ficava em cima — num chip arredondado o traço vira um arco
+   torto. Quem o desenha é o ::after, logo acima. */
 .tab.ativa {
+  opacity: 1;
   color: var(--fg);
   background: var(--bg);
-  border-top-color: var(--purple);
 }
 
 .tab-titulo {
@@ -279,23 +423,88 @@ body {
 
 /* A aba presa: ícone só, largura fixa, encostada na esquerda. Ela está sempre
    na barra — um chip do tamanho dos outros roubaria espaço do nome do que está
-   rodando, que é a informação que muda. O traço à direita separa o que é
-   fixture da barra do que é aba de verdade. */
+   rodando, que é a informação que muda. */
 .tab.presa {
   flex: none;
   width: 34px;
   justify-content: center;
   padding: 6px 0;
-  border-right: 1px solid var(--bg-darker);
+  /* O traço que separava a fixture das abas de verdade não sobrevive ao canto
+     arredondado: quem separa agora é um vão maior que o dos outros chips. */
+  margin-right: calc(var(--vao) / 2);
 }
 
 .tab.presa svg {
   display: block;
 }
 
+/* O "+": um chip do tamanho do ✕ das abas, encostado no fim da barra. `order`
+   o mantém lá sem depender da ordem no DOM — chip de aba nova entra sempre no
+   fim da barra, e sem isto ele empurraria o botão pra dentro da fila. */
+.tab-mais {
+  order: 1;
+  flex: none;
+  /* Um vão a mais que o dos chips entre si, como o da aba presa do outro lado:
+     ele não é mais uma aba na fila, é o que abre a próxima. */
+  margin-left: calc(var(--vao) / 2);
+  /* Flex, e não o centro que o <button> dá de graça: o de dentro do botão é
+     alinhamento de texto, pela linha de base. Aqui o que está dentro é desenho,
+     e desenho se centra pela caixa. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  padding: 0;
+  border: none;
+  border-radius: calc(var(--canto) - 2px);
+  background: transparent;
+  color: var(--comment);
+  cursor: default;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+/* `block`: um <svg> é inline por padrão e ganharia o espaço de descida da
+   linha embaixo, empurrando o desenho pra cima. */
+.tab-mais svg {
+  display: block;
+}
+
+.tab-mais:hover {
+  background: var(--bg-dark);
+  color: var(--fg);
+}
+
+/* A aba do diff com repositório aberto: roxa, a mesma cor que acende no botão de
+   diff do painel daquele projeto. Os dois acesos ao mesmo tempo são o que diz
+   que um está mostrando o outro. Vence o realce da aba ativa de propósito — a
+   ligação continua valendo com a aba na frente. */
+.tab.presa.ligado {
+  color: var(--purple);
+  opacity: 1;
+}
+
+/* A aba do diff enquanto não há repositório aberto nela. Continua na barra —
+   ela é fixa, e sumir e voltar faria os outros chips dançarem — mas apagada e
+   sem reagir ao ponteiro, que é o que diz que clicar ali não leva a lugar
+   nenhum. O :hover precisa vir junto, senão o realce das abas a reacenderia. */
+.tab.desabilitada,
+.tab.desabilitada:hover {
+  opacity: 0.3;
+  color: var(--comment);
+  cursor: default;
+}
+
+/* Apagada e na tela ao mesmo tempo: é o ⌘, — as preferências moram no differ e
+   abrem sem repositório nenhum. Some do caminho do olho menos que as outras
+   apagadas, senão a aba que está sendo vista pareceria não estar. */
+.tab.desabilitada.ativa {
+  opacity: 0.55;
+}
+
 /* O differ, dentro da aba presa. Documento à parte de propósito: o CSS dele é
    global (mexe em body, em button, na barra de rolagem) e os atalhos dele são
-   de uma tecla — nada disso alcança o terminal daqui. */
+   de uma tecla — nada disso alcança o terminal daqui. A moldura é quem corta o
+   canto: o `border-radius` do cartão não alcança o conteúdo de um iframe. */
 .quadro {
   display: block;
   width: 100%;
@@ -442,6 +651,17 @@ body {
 
 .tarefa-acao {
   color: var(--yellow);
+}
+
+/* O botão de diff do painel cujo repositório está aberto na aba do diff. Roxo é
+   a cor que a barra de cima já usa para "é aqui que você está". */
+.tarefa-diff.ligado {
+  color: var(--purple);
+}
+
+.tarefa-diff.ligado:hover:not(:disabled) {
+  color: var(--purple);
+  background: var(--bg-lighter);
 }
 
 /* Uma lista só para a janela, posta junto do botão que a abriu (quem escreve

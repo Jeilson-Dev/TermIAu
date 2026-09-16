@@ -4,6 +4,9 @@ export type FileStatus = "added" | "modified" | "deleted" | "renamed" | "copied"
 
 export type LineKind = "context" | "add" | "del";
 
+/** How much of the file `git add` already took: all of it, part (it changed again), or none. */
+export type StagedState = "staged" | "partial" | "unstaged";
+
 export interface Line {
   kind: LineKind;
   oldNo: number | null;
@@ -35,6 +38,8 @@ export interface FileDiff {
   additions: number;
   deletions: number;
   fingerprint: string;
+  /** Only in the working-tree scope; `null` elsewhere, where everything is already committed. */
+  staged: StagedState | null;
   hunks: Hunk[];
 }
 
@@ -42,8 +47,18 @@ export type Side = "old" | "new";
 
 export type ViewMode = "unified" | "split";
 
-/** The whole branch against its target, or only what changed since the last complete review. */
-export type Scope = "branch" | "incremental";
+/**
+ * The whole branch against its target, only what changed since the last complete review,
+ * or what is about to be committed (index + working tree + untracked files).
+ */
+export type Scope = "branch" | "incremental" | "working";
+
+/**
+ * Content key of a file that lives on disk instead of in git's object database: the new side
+ * of the working-tree diff. Shaped `wt:<size>-<mtime>:<path>`, so it changes with the file —
+ * `getBlob` and `loadImage` route these to the worktree instead of `git cat-file`.
+ */
+export const WORKTREE_KEY = "wt:";
 
 /** A local note anchored to a line range, like a bookmark between book pages. */
 export interface Bookmark {
