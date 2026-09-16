@@ -1,0 +1,22 @@
+{
+  // O play do TermIAu e o do VS Code leem este arquivo.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // O `tauri dev` sobe o Vite sozinho (beforeDevCommand): não precisa de
+      // preLaunchTask. Parar com Ctrl+C encerra os dois.
+      "name": "TermIAu (dev)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "app:dev"]
+    },
+    {
+      "name": "Testes",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["test"]
+    }
+  ]
+}

@@ -11,17 +11,27 @@
     "app:build:dev": "tauri build --config src-tauri/tauri.dev.conf.json --bundles app",
     "app:build": "tauri build",
     "app:instalar:dev": "./scripts/instalar.sh dev",
-    "app:instalar": "./scripts/instalar.sh prod"
+    "app:instalar": "./scripts/instalar.sh prod",
+    "test": "vitest run"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
-    "@xterm/xterm": "^5.5.0",
+    "@tauri-apps/plugin-store": "^2.4.4",
     "@xterm/addon-fit": "^0.10.0",
-    "@xterm/addon-web-links": "^0.11.0"
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/xterm": "^5.5.0",
+    "diff": "^9.0.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "shiki": "^4.4.3"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.6.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "vitest": "^3.2.4"
   }
 }

@@ -15,7 +15,8 @@
         "title": "TermIAu",
         "width": 1000,
         "height": 640,
-        "backgroundColor": "#14161a",
+        "backgroundColor": "#282a36",
+        "theme": "Dark",
         "label": "main"
       }
     ],

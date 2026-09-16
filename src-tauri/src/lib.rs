@@ -1,4 +1,5 @@
 mod area;
+mod differ;
 mod escuta;
 
 use std::collections::HashMap;
@@ -19,6 +20,9 @@ struct Session {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
+    /// Pid do shell. Comparado ao grupo em primeiro plano do terminal, diz se há
+    /// um programa rodando na frente dele (ver `pty_ocupado`).
+    pid: Option<u32>,
     /// Marcado antes de matarmos o shell de propósito (aba fechada, reload da
     /// webview). A thread de espera consulta isto para não anunciar "encerrado"
     /// de uma aba que o próprio usuário já mandou embora.
@@ -152,6 +156,7 @@ fn pty_spawn(
 
     let child = pair.slave.spawn_command(shell(cwd, id, &cfg)).map_err(|e| e.to_string())?;
     let killer = child.clone_killer();
+    let pid = child.process_id();
     drop(pair.slave); // solta o lado escravo, senão nunca vemos o EOF
 
     let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
@@ -163,6 +168,7 @@ fn pty_spawn(
             master: pair.master,
             writer,
             killer,
+            pid,
             closing: Arc::new(AtomicBool::new(false)),
             reader: Some(reader),
             child: Some(child),
@@ -277,6 +283,73 @@ fn pty_close_all(state: State<'_, Ptys>) {
         s.closing.store(true, Ordering::SeqCst);
         let _ = s.killer.kill();
     }
+}
+
+/// Há um programa na frente do shell — o app que o play mandou rodar, um `vim`.
+/// O terminal tem um grupo de processos em primeiro plano; quando ele é o próprio
+/// shell, o comando digitado já terminou.
+#[tauri::command]
+fn pty_ocupado(state: State<'_, Ptys>, id: u64) -> bool {
+    let sessions = state.sessions.lock().unwrap();
+    let Some(s) = sessions.get(&id) else { return false };
+    match (s.master.process_group_leader(), s.pid) {
+        (Some(frente), Some(shell)) => frente as u32 != shell,
+        _ => false,
+    }
+}
+
+/// Manda um sinal ao programa em primeiro plano. Vai para o grupo inteiro, como
+/// o Ctrl+C: os filhos que ele abriu (um servidor, o processo do emulador) saem
+/// junto em vez de ficarem órfãos. O shell nunca recebe — fechar o painel é outra
+/// conversa, e é do `pty_close`.
+#[tauri::command]
+fn pty_sinal(state: State<'_, Ptys>, id: u64, sinal: i32) -> Result<(), String> {
+    let sessions = state.sessions.lock().unwrap();
+    let s = sessions.get(&id).ok_or("pty não iniciado")?;
+    let frente = s.master.process_group_leader().ok_or("sem processo em primeiro plano")?;
+    if Some(frente as u32) == s.pid {
+        return Ok(());
+    }
+    if unsafe { libc::kill(-frente, sinal) } != 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    Ok(())
+}
+
+/// O `.vscode/launch.json` do projeto de um painel, com o `tasks.json` ao lado.
+#[derive(serde::Serialize)]
+struct Launch {
+    /// A pasta que tem o `.vscode`: é o `${workspaceFolder}` das configurações.
+    pasta: String,
+    home: String,
+    launch: String,
+    tasks: Option<String>,
+}
+
+/// O mais próximo subindo a partir do diretório do painel: um painel numa
+/// subpasta do projeto ainda roda o launch.json da raiz, como no VS Code aberto
+/// na raiz do repositório.
+#[tauri::command]
+fn launch_ler(cwd: String) -> Option<Launch> {
+    std::path::Path::new(&cwd).ancestors().find_map(|dir| {
+        let vscode = dir.join(".vscode");
+        let launch = std::fs::read_to_string(vscode.join("launch.json")).ok()?;
+        Some(Launch {
+            pasta: dir.display().to_string(),
+            home: dirs_home().unwrap_or_default(),
+            launch,
+            tasks: std::fs::read_to_string(vscode.join("tasks.json")).ok(),
+        })
+    })
+}
+
+/// Um projeto Dart é Flutter quando o pubspec depende do SDK do Flutter — é o
+/// que decide entre `flutter run` e `dart run`, como a extensão do Dart decide.
+#[tauri::command]
+fn projeto_flutter(pasta: String) -> bool {
+    std::fs::read_to_string(std::path::Path::new(&pasta).join("pubspec.yaml"))
+        .map(|pubspec| pubspec.contains("sdk: flutter"))
+        .unwrap_or(false)
 }
 
 /// Escuta os eventos que os hooks do Claude Code mandam e entrega pra webview.
@@ -721,6 +794,10 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
         &[
             &PredefinedMenuItem::about(app, None, Some(AboutMetadata::default()))?,
             &PredefinedMenuItem::separator(app)?,
+            // ⌘, é onde todo app do macOS guarda isto — e, sendo item de menu,
+            // a tecla nem chega na webview: o menu fica com ela antes.
+            &MenuItem::with_id(app, "preferencias", "Preferências…", true, Some("CmdOrCtrl+,"))?,
+            &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::services(app, None)?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::hide(app, None)?,
@@ -805,12 +882,16 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // O differ guarda num JSON, na pasta de dados do app, a branch alvo de
+        // cada repositório e o que já foi revisado.
+        .plugin(tauri_plugin_store::Builder::new().build())
         .setup(|app| {
             let cfg = Config::default();
             ouvir_hooks(app.handle().clone(), cfg.socket.clone());
             app.manage(cfg);
             app.manage(Ptys::default());
             app.manage(Escuta::default());
+            app.manage(differ::Vigia::default());
             let atividade = Atividade::default();
             app.manage(abrir_voz(atividade.clone()));
             app.manage(atividade);
@@ -826,6 +907,7 @@ pub fn run() {
             "dividir-abaixo" => { let _ = app.emit("menu://dividir-abaixo", ()); }
             "fechar" => { let _ = app.emit("menu://fechar", ()); }
             "colar-caminho" => { let _ = app.emit("menu://colar-caminho", ()); }
+            "preferencias" => { let _ = app.emit("menu://preferencias", ()); }
             "escutar" => { let _ = app.emit("menu://escutar", ()); }
             "voz" => { let _ = app.emit("menu://voz", ()); }
             _ => {}
@@ -845,7 +927,17 @@ pub fn run() {
             escuta_baixar_modelo,
             escuta_comecar,
             escuta_parar,
+            pty_ocupado,
+            pty_sinal,
+            launch_ler,
+            projeto_flutter,
             area::area_colar,
+            differ::open_repo,
+            differ::load_diff,
+            differ::load_diff_since,
+            differ::read_blob,
+            differ::read_blob_bytes,
+            differ::watch_repo,
             js_log
         ])
         .build(tauri::generate_context!())

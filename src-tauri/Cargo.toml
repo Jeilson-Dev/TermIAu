@@ -31,12 +31,24 @@ ureq = "3.2"
 # é o outro motivo de a primeira build demorar.
 fala_nucleo = { path = "crates/fala_nucleo" }
 
+# O differ (a aba presa com o diff da branch). Ele fala com o `git` da linha de
+# comando, então não entra biblioteca de git nenhuma; o store é o JSON que
+# lembra a branch alvo de cada repositório e o que já foi revisado.
+serde_json = "1"
+tauri-plugin-store = "2"
+# Vigia do .git, para a aba do diff se refazer sozinha a cada commit.
+notify = "8"
+
 # Área de transferência (o ⌘⇧V). O Tauri não expõe os arquivos que estão na
 # área, só texto — e o Finder não põe texto nenhum lá quando você copia um
 # arquivo. Estas duas já vêm com o wry, então não custam build.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSPasteboardItem"] }
 objc2-foundation = { version = "0.3", features = ["NSURL"] }
+
+# Os testes do differ montam repositórios git de verdade numa pasta temporária.
+[dev-dependencies]
+tempfile = "3"
 
 [profile.release]
 opt-level = "s"
