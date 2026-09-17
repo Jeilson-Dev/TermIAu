@@ -896,29 +896,11 @@ type EventoClaude = {
   painel: number;
   hook_event_name: string;
   cwd?: string;
-  message?: string;
-  title?: string;
-  delta?: string;
-  message_id?: string;
-  index?: number;
-  final?: boolean;
 };
-
-/// Acima disto, em vez de ler a mensagem inteira em voz alta, pedimos uma frase.
-const LIMITE_RESUMO = 440;
-/// Teto do que se fala de uma vez. Passar disso vira monólogo.
-const MAX_FALA = 220;
-
-/// Pedaços de mensagem sendo remontados, por `message_id`.
-const remontagem = new Map<string, Map<number, string>>();
 
 function folhaPorPainel(id: number): Folha | undefined {
   for (const a of abas) for (const f of folhas(a.raiz)) if (f.id === id) return f;
   return undefined;
-}
-
-function* sessoes(): Generator<Folha> {
-  for (const a of abas) for (const f of folhas(a.raiz)) if (f.claude) yield f;
 }
 
 /// Redesenha os sinais de estado: bolinha em cada aba, contorno no painel que
@@ -943,82 +925,11 @@ function pintar() {
   janela.setBadgeCount(esperando || undefined).catch(() => {});
 }
 
-/// Fala, dizendo de quem é a vez quando há mais de uma sessão aberta. Com uma
-/// só não há a quem confundir, e o nome vira ruído em toda frase.
-function anunciar(folha: Folha, frase: string) {
-  const texto = frase.trim();
-  if (!texto) return;
-  let vivas = 0;
-  for (const _ of sessoes()) vivas++;
-  const quem = vivas > 1 && folha.claude ? `${folha.claude.nome}: ` : "";
-  // O chamador escolhe a voz: cada projeto ganha uma do rodízio e fica com ela.
-  // É a segunda pista de origem, e essa não custa uma palavra em cada frase.
-  invoke("falar", { texto: quem + texto, chamador: folha.claude?.nome })
-    .catch((e) => jlog(`falar: ${e}`));
-}
-
-/// Tira do texto o que é marcação para os olhos e não diz nada em voz alta.
-function paraOuvido(t: string): string {
-  return t
-    .replace(/`+/g, "")
-    .replace(/\*+/g, "")
-    .replace(/^#+\s*/gm, "")
-    .replace(/^\s*[-+]\s+/gm, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/// Espera uma condição sem travar nada; devolve mesmo se ela não vier.
-function aguardar(pronto: () => boolean, limite: number): Promise<void> {
-  return new Promise((resolve) => {
-    const fim = Date.now() + limite;
-    const tenta = () =>
-      pronto() || Date.now() > fim ? resolve() : setTimeout(tenta, 50);
-    tenta();
-  });
-}
-
-/// O MessageDisplay chega em pedaços, um evento por `delta`. Só dá pra falar
-/// quando a mensagem fecha — e como cada hook é um processo próprio, o pedaço
-/// marcado como último pode chegar antes de um do meio.
-async function remontar(folha: Folha, ev: EventoClaude) {
-  if (!ev.message_id) return;
-  let pedacos = remontagem.get(ev.message_id);
-  if (!pedacos) remontagem.set(ev.message_id, (pedacos = new Map()));
-  if (ev.delta) pedacos.set(ev.index ?? 0, ev.delta);
-  if (!ev.final) return;
-
-  const total = (ev.index ?? 0) + 1;
-  await aguardar(() => pedacos.size >= total, 2000);
-  remontagem.delete(ev.message_id);
-
-  const inteiro = paraOuvido(
-    [...pedacos.entries()].sort(([a], [b]) => a - b).map(([, t]) => t).join(""),
-  );
-  if (!inteiro) return;
-
-  // Mensagem curta se fala como veio; longa, o Haiku destila numa frase.
-  const frase =
-    inteiro.length <= LIMITE_RESUMO
-      ? inteiro
-      : paraOuvido(await invoke<string>("resumir", { texto: inteiro }).catch(() => ""));
-
-  anunciar(folha, frase.slice(0, MAX_FALA));
-}
-
-/// As mensagens do Claude Code vêm em inglês; as recorrentes viram frase nossa,
-/// o resto se fala como veio.
-function aviso(msg: string): string {
-  if (/permission|approve/i.test(msg)) return "precisa da sua permissão";
-  if (/waiting|idle/i.test(msg)) return "está esperando você";
-  return paraOuvido(msg).slice(0, MAX_FALA);
-}
-
 function receber(ev: EventoClaude) {
   const folha = folhaPorPainel(ev.painel);
   if (!folha) return; // o painel fechou antes do evento chegar
 
-  // O nome da pasta é o que a voz usa e o que aparece na aba.
+  // O nome da pasta é o que aparece na aba.
   const nome = ev.cwd?.split("/").filter(Boolean).pop() || `painel ${ev.painel}`;
   folha.claude = { nome, estado: folha.claude?.estado ?? "ocioso" };
 
@@ -1027,16 +938,9 @@ function receber(ev: EventoClaude) {
       folha.claude.estado = "trabalhando";
       break;
     case "PermissionRequest":
-      folha.claude.estado = "esperando";
-      anunciar(folha, "precisa da sua permissão");
-      break;
     case "Notification":
       folha.claude.estado = "esperando";
-      anunciar(folha, aviso(ev.message || ev.title || ""));
       break;
-    case "MessageDisplay":
-      remontar(folha, ev);
-      return; // o estado não muda; pintar sairia à toa a cada pedaço
     case "SessionEnd":
       folha.claude = undefined;
       break;
@@ -1065,8 +969,8 @@ function irParaEsperando() {
 
 /// Depois de você parar de falar, o ditado vai sozinho.
 const ESPERA_ENVIO_MS = 5000;
-/// O mesmo limiar que abaixa a voz do lado do Rust (LIMIAR_MIC). Se os dois
-/// divergirem, a onda mostraria "falando" enquanto a contagem conta silêncio.
+/// Acima disto o pico do microfone conta como fala: é o que a onda desenha e o
+/// que segura a contagem do Enter enquanto você ainda está falando.
 const LIMIAR_FALA = 0.1;
 /// Enquanto a última sílaba for recente, a faixa mostra o parcial e não a
 /// contagem — senão os dois brigariam pela mesma linha a cada 200 ms.
@@ -1296,22 +1200,6 @@ async function ligarEscuta() {
   });
 
   await listen("menu://escutar", () => alternarEscuta());
-
-  // Ctrl+Espaço liga e desliga a voz. Sem indicador fixo em lugar nenhum, então
-  // a própria faixa diz como ficou e depois se cala — o silêncio de uma voz
-  // desligada é indistinguível do silêncio de uma que não tinha nada a dizer.
-  await listen("menu://voz", async () => {
-    try {
-      const ligada = await invoke<boolean>("voz_alternar");
-      // A faixa já tem dono: o parcial, ou uma contagem que não pode ser
-      // tapada por um aviso passageiro.
-      if (escutando || envio) return;
-      mostrarVoz(ligada ? "voz ligada" : "voz desligada");
-      setTimeout(fecharVoz, 1800);
-    } catch (e) {
-      jlog(`voz_alternar: ${e}`);
-    }
-  });
 }
 
 // ---------- caminhos: arrastar e colar arquivos ----------

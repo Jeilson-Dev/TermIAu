@@ -1,6 +1,3 @@
-[workspace]
-members = ["crates/fala_nucleo"]
-
 [package]
 name = "termiau"
 version = "0.1.0"
@@ -26,10 +23,6 @@ cpal = "0.18"
 serde = { version = "1", features = ["derive"] }
 whisper-rs = { version = "0.16.0", features = ["metal"] }
 ureq = "3.2"
-
-# Voz (o antigo Fala Cláudio). Traz o espeak-ng e o ONNX Runtime junto —
-# é o outro motivo de a primeira build demorar.
-fala_nucleo = { path = "crates/fala_nucleo" }
 
 # O differ (a aba presa com o diff da branch). Ele fala com o `git` da linha de
 # comando, então não entra biblioteca de git nenhuma; o store é o JSON que

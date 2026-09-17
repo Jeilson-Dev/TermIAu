@@ -1,8 +1,8 @@
 //! Reamostragem por sinc janelado (Blackman). Qualquer razão de taxas,
 //! qualidade muito acima do que se precisa aqui, sem dependências.
 //!
-//! Serve as duas pontas: o microfone descendo para os 16 kHz do Whisper e a
-//! voz subindo dos 24 kHz do Kokoro para a taxa da placa de som.
+//! Serve o microfone descendo da taxa nativa da placa para os 16 kHz do
+//! Whisper.
 
 const TAPS: isize = 24; // meia-largura do kernel
 

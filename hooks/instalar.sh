@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Liga os hooks do Claude Code ao TermIAu.
 #
-# O TermIAu só fala o que chega pelo socket, e quem escreve nele é o
-# `termiau-evento.sh` — que precisa estar registrado no settings.json do Claude
-# Code. Sem este passo o app fica de pé, com a fila vazia, enquanto qualquer
-# outro sistema de voz instalado na máquina fala por fora dela.
+# O TermIAu só sabe em que pé está cada sessão pelo que chega no socket, e quem
+# escreve nele é o `termiau-evento.sh` — que precisa estar registrado no
+# settings.json do Claude Code. Sem este passo o app fica de pé, mas as abas
+# nunca acendem a bolinha de "esperando".
 #
 # O script é idempotente: rodar de novo só reescreve o mesmo bloco.
 set -euo pipefail
@@ -28,27 +28,17 @@ chmod +x "$DESTINO"
 BACKUP="$SETTINGS.bak-$(date +%s)"
 cp "$SETTINGS" "$BACKUP"
 
-# Os cinco eventos que o `receber` do main.ts trata. `SessionEnd` entra porque
+# Os quatro eventos que o `receber` do main.ts trata. `SessionEnd` entra porque
 # é ele que apaga o estado do painel — sem ele uma aba fica com a bolinha de
 # "esperando" de uma sessão que já morreu.
 #
 # Sem `async`: o hook devolve na hora (manda o JSON pro socket em segundo plano
 # e sai), então não há turno do Claude para segurar.
-EVENTOS='["UserPromptSubmit","PermissionRequest","Notification","MessageDisplay","SessionEnd"]'
+EVENTOS='["UserPromptSubmit","PermissionRequest","Notification","SessionEnd"]'
 
 jq --arg cmd "bash $DESTINO" --argjson eventos "$EVENTOS" '
-  # Tira o sistema de voz antigo: ele fala por processos próprios, fora da fila
-  # do TermIAu, e é isso que faz duas vozes saírem por cima uma da outra.
-  # Só o que casa com "hooks/fala/" sai; qualquer outro hook seu fica.
-  .hooks = ((.hooks // {})
-    | map_values(
-        map(.hooks |= map(select((.command // "") | test("hooks/fala/") | not)))
-        | map(select((.hooks | length) > 0))
-      )
-    | map_values(select(length > 0)))
-  |
-  # E põe o do TermIAu, um por evento, substituindo qualquer registro anterior
-  # dele — é o que torna rodar de novo inofensivo.
+  # Põe o hook do TermIAu, um por evento, substituindo qualquer registro
+  # anterior dele — é o que torna rodar de novo inofensivo.
   reduce $eventos[] as $e (.;
     .hooks[$e] = (((.hooks[$e] // [])
       | map(.hooks |= map(select((.command // "") | contains("termiau-evento") | not)))

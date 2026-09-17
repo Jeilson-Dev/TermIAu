@@ -62,11 +62,11 @@ npm run tauri build
 
 Os artefatos saem em `src-tauri/target/release/bundle/`.
 
-## Ligando a voz
+## Ligando os avisos do Claude
 
-O TermIAu fala o que o Claude Code responde, mas só fala o que chega pelo
-socket dele — e quem escreve ali é um hook, que precisa estar registrado no
-`settings.json` do Claude Code:
+As abas mostram em que pé está cada sessão do Claude Code — trabalhando,
+esperando você —, e isso só chega pelo socket do app. Quem escreve ali é um
+hook, que precisa estar registrado no `settings.json` do Claude Code:
 
 ```bash
 ./hooks/instalar.sh
@@ -74,20 +74,12 @@ socket dele — e quem escreve ali é um hook, que precisa estar registrado no
 
 O script copia o `termiau-evento.sh` para `~/.claude/hooks/` (e não aponta para
 o repo: ele pode estar num volume que não está montado quando o Claude roda),
-registra os cinco eventos que o app trata — `UserPromptSubmit`,
-`PermissionRequest`, `Notification`, `MessageDisplay`, `SessionEnd` — e guarda
-um backup do settings anterior. Rodar de novo é inofensivo.
+registra os quatro eventos que o app trata — `UserPromptSubmit`,
+`PermissionRequest`, `Notification`, `SessionEnd` — e guarda um backup do
+settings anterior. Rodar de novo é inofensivo.
 
-**Um sistema de voz por máquina.** O instalador também remove do settings
-qualquer hook que aponte para `~/.claude/hooks/fala/` — o sistema antigo, em
-que cada evento virava um `fala_claudio` próprio. Aqueles processos não passam
-pela fila do app, e três hooks assíncronos disparando juntos viram três vozes
-por cima umas das outras. Quem garante a vez aqui é a thread única da fila
-(`abrir_voz` no `lib.rs`) mais o `Palco`, um `flock` num arquivo fixo que vale
-entre processos.
-
-Sem o hook instalado o app sobe normal, com a fila vazia: as abas não mostram
-estado do Claude e nada é falado.
+Sem o hook instalado o app sobe normal, só calado: as abas não mostram estado
+do Claude e o badge do Dock fica vazio.
 
 ## Atalhos
 
@@ -103,7 +95,6 @@ estado do Claude e nada é falado.
 | `⌘K` | Limpa a tela |
 | `⌘⇧V` | Cola o **caminho** do arquivo que está na área de transferência |
 | `⌘E` | Liga e desliga a escuta (falar em vez de digitar) |
-| `⌃Espaço` | Liga e desliga a voz |
 
 Todo o resto vai direto para o shell. `⌥` compõe caractere como no resto do
 macOS — `⌥C` dá `ç`, `⌥E`+`E` dá `é` —, então não serve de Meta: `⌥F` e `⌥B`
@@ -141,11 +132,10 @@ hooks/
 scripts/
   instalar.sh         empacota e põe em /Applications (canal dev ou prod)
 src-tauri/
-  src/lib.rs          PTY, comandos, menu, fila da voz e o socket dos hooks
+  src/lib.rs          PTY, comandos, menu e o socket dos hooks
   src/main.rs         entrypoint
   src/area.rs         a área de transferência do macOS, para o ⌘⇧V
   src/escuta/         transcrição local: microfone (audio), whisper (stt), modelo
-  crates/fala_nucleo/ a voz: espeak-ng e ONNX Runtime
   tauri.conf.json     janela, bundle e build
   tauri.dev.conf.json o mesmo com outro nome e identificador, para o canal dev
   capabilities/       permissões da janela principal
