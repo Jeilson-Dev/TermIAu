@@ -368,12 +368,31 @@ body {
   transform: scale(1.06);
   /* O anel cobre o chip inteiro, inclusive o X de fechar. */
   pointer-events: none;
-  transition: opacity var(--tempo) ease, transform var(--tempo) cubic-bezier(0.2, 0.7, 0.3, 1);
+  transition: opacity var(--tempo) ease, transform var(--tempo) cubic-bezier(0.2, 0.7, 0.3, 1),
+    border-color var(--tempo) ease;
 }
 
 .tab.ativa::after {
   opacity: 1;
   transform: none;
+}
+
+/* Aba armada: o primeiro clique no ✕ acendeu o anel de vermelho, e o segundo,
+   dentro de CONFIRMA_FECHAR (src/main.ts), fecha. O aviso é o anel e não o ✕
+   porque o que importa saber não é que o botão foi apertado, é QUAL aba vai
+   embora — o anel contorna a aba inteira e responde isso sozinho.
+
+   `transition: none` aqui e não no `.tab::after`: o anel do foco chega devagar
+   de propósito (--tempo, 560ms), mas isto é um aviso dentro de uma janela de
+   1s, e um aviso que leva meio segundo pra aparecer chega tarde. Então entra
+   seco. Sair é o contrário: tirada a classe, valem de novo os tempos lá de
+   cima, e o vermelho se desfaz no mesmo compasso do resto da barra — que é o
+   jeito de a aba dizer que não vai fechar mais. */
+.tab.armada::after {
+  border-color: var(--red);
+  opacity: 1;
+  transform: none;
+  transition: none;
 }
 
 .tab:hover {

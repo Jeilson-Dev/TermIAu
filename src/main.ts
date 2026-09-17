@@ -377,6 +377,15 @@ async function criarFolha(
   return folha;
 }
 
+/// Quanto tempo o ✕ fica armado esperando o segundo clique. Curto de propósito:
+/// é uma confirmação, não um modo — passou disso, a aba volta a ser uma aba.
+const CONFIRMA_FECHAR = 1000;
+
+/// Como desarmar a aba que está armada agora, se houver uma. Duas abas de
+/// vermelho ao mesmo tempo diriam que as duas vão fechar, e só uma vai: armar
+/// uma desarma a outra.
+let desarmarFechar: (() => void) | undefined;
+
 async function novaAba() {
   if (ocupado) return;
   ocupado = true;
@@ -418,15 +427,46 @@ async function novaAba() {
     const aba: Aba = { corpo, chip, rotulo, raiz: folha, foco: folha };
     folha.el.classList.add("focada");
 
+    // Fechar aba não tem desfazer: o shell morre junto, e com ele o que estava
+    // rodando ali. Por isso o ✕ pede duas vezes — o primeiro clique só acende o
+    // anel de vermelho, que é o aviso de que é ESTA aba que vai embora, e o
+    // segundo, dentro de CONFIRMA_FECHAR, é que fecha. Sem o segundo, o anel
+    // se desfaz sozinho e nada aconteceu.
+    let espera: ReturnType<typeof setTimeout> | undefined;
+    const desarmar = () => {
+      if (espera === undefined) return;
+      clearTimeout(espera);
+      espera = undefined;
+      chip.classList.remove("armada");
+      if (desarmarFechar === desarmar) desarmarFechar = undefined;
+    };
+
     chip.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return;
       // O ✕ fecha a aba inteira; no resto do chip, só ativa.
-      if (e.target === fechar) fecharAba(aba);
-      else ativar(aba);
+      if (e.target === fechar) {
+        // Segundo clique dentro da janela: é o que ele queria mesmo.
+        if (espera !== undefined) {
+          desarmar();
+          fecharAba(aba);
+          return;
+        }
+        desarmarFechar?.();
+        chip.classList.add("armada");
+        espera = setTimeout(desarmar, CONFIRMA_FECHAR);
+        desarmarFechar = desarmar;
+      } else {
+        // Clicou no chip, não no ✕: mudou de ideia sobre fechar.
+        desarmar();
+        ativar(aba);
+      }
     });
-    // Botão do meio fecha, como no navegador.
+    // Botão do meio fecha, como no navegador. É um gesto que ninguém dá sem
+    // querer, então este não passa pela confirmação.
     chip.addEventListener("auxclick", (e) => {
-      if (e.button === 1) fecharAba(aba);
+      if (e.button !== 1) return;
+      desarmar();
+      fecharAba(aba);
     });
 
     abas.push(aba);
