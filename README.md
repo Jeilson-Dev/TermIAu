@@ -81,6 +81,40 @@ settings anterior. Rodar de novo é inofensivo.
 Sem o hook instalado o app sobe normal, só calado: as abas não mostram estado
 do Claude e o badge do Dock fica vazio.
 
+## A rádio
+
+No canto direito do rodapé, do outro lado da onda da escuta: ▶, as setas de
+estação, o volume e o nome do que está tocando. São as oito estações do
+[lofi.cafe](https://www.lofi.cafe/) — lives 24/7 do YouTube, tocadas por um
+iframe de 1px escondido na janela.
+
+É rádio e não playlist, então as setas andam de **estação**, não de faixa. A
+lista, a estação da vez e o volume ficam no `localStorage` e voltam na próxima
+vez. A iframe API do YouTube só é baixada no primeiro ▶: sem ela o rodapé sobe
+mudo e sem esperar a rede, que é como o app fica se você nunca apertar o play.
+
+No fim da faixa vai um analisador de espectro: dez colunas recortadas em
+segmentos, como um mostrador de LEDs, com o pico que fica no ar e desce sozinho.
+
+As alturas dele são **modeladas, não medidas**. O áudio toca dentro do iframe
+do YouTube, que é de outra origem — nem o Web Audio nem nada na página alcança
+a amostra de lá, e sem amostra não há FFT. O modelo é o de uma faixa de lofi:
+grave sustentando e pulsando na batida, agudo baixo e nervoso, ataque rápido e
+queda lenta. Para medir de verdade, o áudio teria de sair de um `<audio>` nosso
+(stream direto, com CORS) em vez de um iframe de terceiro, ou ser capturado da
+saída do sistema pelo Rust.
+
+### Suas estações
+
+**Rádio ▸ Estações…** abre o editor. Cole um link do YouTube (a URL do vídeo, a
+do embed, a `youtu.be` ou o id cru) e tecle ↵: o nome vem do oEmbed do YouTube,
+buscado pelo Rust (`lofi_titulo`) porque aquele endpoint não manda
+`Access-Control-Allow-Origin` e o `fetch` da webview esbarraria no CORS. Se o
+nome não vier, fica o id. O ✕ de cada linha remove; clicar no nome põe no ar.
+
+Tirar todas é permitido — o rodapé passa a dizer "sem estações" e o ▶ desliga
+até você colar a primeira.
+
 ## Atalhos
 
 | Atalho | Ação |

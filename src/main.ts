@@ -1822,6 +1822,535 @@ async function parar(ex: Execucao) {
   }
 }
 
+// ---------- lofi: a rádio do rodapé ----------
+
+type Estacao = { id: string; nome: string };
+
+/// As que vêm de fábrica — as do lofi.cafe, lives 24/7 do YouTube. São só o
+/// ponto de partida: a lista é sua, editável em Rádio ▸ Estações…, e a partir
+/// da primeira mexida o que vale é o que está no localStorage.
+///
+/// Sete são as do site; a oitava de lá (`AzwgsZUcTfM`, Autumn Chill) saiu do ar
+/// e deu lugar à da Lofi Girl. Um id morto não falha no build: falha no ▶, e só
+/// em cima daquela estação.
+const ESTACOES_PADRAO: Estacao[] = [
+  { id: "7NOSDKb0HlU", nome: "lofi hip hop radio 🐾 beats to study/relax to" },
+  { id: "5yx6BWlEVcY", nome: "Chillhop Radio — jazzy & lofi hip hop beats" },
+  { id: "lP26UCnoH9s", nome: "coffee shop radio — 24/7 lofi hip-hop beats" },
+  { id: "1wckb-eWOxw", nome: "jazz/lofi hip hop radio 🌱 chill beats" },
+  { id: "apCom1TeTiA", nome: "24/7 lofi hip hop radio — study/chill/relax" },
+  { id: "qH3fETPsqXU", nome: "chill lofi hip hop radio — sleep/relax/study" },
+  { id: "jfKfPfyJRdk", nome: "lofi hip hop radio 📚 beats to relax/study to" },
+  { id: "tNkZsRW7h2c", nome: "Space Ambient — music for stress relief" },
+];
+
+const CHAVE_ESTACOES = "termiau:lofi:estacoes";
+/// A estação de agora vai guardada pelo id, e não pelo índice: a lista muda de
+/// tamanho quando você tira uma, e o índice passaria a apontar para outra.
+const CHAVE_ATUAL = "termiau:lofi:atual";
+const CHAVE_VOLUME = "termiau:lofi:volume";
+
+/// O que está guardado pode ter vindo de uma versão anterior, de uma mão no
+/// devtools ou de um JSON pela metade. Só passa o que tem a forma certa — e uma
+/// lista vazia é resposta legítima: é o que sobra de tirar todas.
+function carregarEstacoes(): Estacao[] {
+  const bruto = localStorage.getItem(CHAVE_ESTACOES);
+  if (bruto === null) return [...ESTACOES_PADRAO];
+  try {
+    const lista: unknown = JSON.parse(bruto);
+    if (!Array.isArray(lista)) return [...ESTACOES_PADRAO];
+    return lista.filter((e): e is Estacao => {
+      const o = e as Partial<Estacao> | null;
+      return !!o && typeof o.id === "string" && o.id !== "" && typeof o.nome === "string";
+    });
+  } catch {
+    return [...ESTACOES_PADRAO];
+  }
+}
+
+/// Chave ausente e chave com lixo dão no mesmo: o padrão. `Number(null)` é 0, e
+/// sem a checagem de nulo o volume nasceria mudo na primeira execução.
+function lembrado(chave: string, padrao: number, teto: number): number {
+  const bruto = localStorage.getItem(chave);
+  const n = bruto === null ? NaN : Number(bruto);
+  return Number.isFinite(n) && n >= 0 && n <= teto ? Math.round(n) : padrao;
+}
+
+let estacoes = carregarEstacoes();
+let estacao = Math.max(0, estacoes.findIndex((e) => e.id === localStorage.getItem(CHAVE_ATUAL)));
+let volumeLofi = lembrado(CHAVE_VOLUME, 55, 100);
+
+/// Sem estação nenhuma não há o que tocar, e todo o resto tem de aguentar isso.
+const atual = (): Estacao | undefined => estacoes[estacao];
+
+function guardarEstacoes() {
+  localStorage.setItem(CHAVE_ESTACOES, JSON.stringify(estacoes));
+}
+
+function guardarAtual() {
+  const e = atual();
+  if (e) localStorage.setItem(CHAVE_ATUAL, e.id);
+}
+
+/// O punhado da iframe API do YouTube que usamos. Cinco métodos e três eventos:
+/// um pacote de tipos inteiro não se paga por eles.
+type PlayerYT = {
+  playVideo(): void;
+  pauseVideo(): void;
+  setVolume(v: number): void;
+  loadVideoById(id: string): void;
+  cueVideoById(id: string): void;
+};
+
+type ApiYT = { Player: new (alvo: HTMLElement, opcoes: Record<string, unknown>) => PlayerYT };
+
+declare global {
+  interface Window {
+    YT?: ApiYT;
+    onYouTubeIframeAPIReady?: () => void;
+  }
+}
+
+/// Os estados que chegam em `onStateChange`, crus. O `YT.PlayerState`, que os
+/// nomeia, só existe depois que o script carregou — e o número não muda.
+const YT_TOCANDO = 1;
+const YT_CARREGANDO = 3;
+
+const ICONE_PAUSA = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="4" y="3.5" width="3" height="9" rx="1"/><rect x="9" y="3.5" width="3" height="9" rx="1"/></svg>`;
+const ICONE_ANTERIOR = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="3.6" y="3.6" width="1.7" height="8.8" rx=".85"/><path d="M12.2 4.2v7.6a.6.6 0 0 1-.92.5l-5.2-3.8a.6.6 0 0 1 0-1l5.2-3.8a.6.6 0 0 1 .92.5Z"/></svg>`;
+const ICONE_PROXIMA = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="10.7" y="3.6" width="1.7" height="8.8" rx=".85"/><path d="M3.8 4.2v7.6a.6.6 0 0 0 .92.5l5.2-3.8a.6.6 0 0 0 0-1L4.72 3.7a.6.6 0 0 0-.92.5Z"/></svg>`;
+const ICONE_TIRAR = traco("M4.8 4.8l6.4 6.4M11.2 4.8l-6.4 6.4");
+
+const lofiEl = document.getElementById("lofi") as HTMLDivElement;
+
+/// Como os botões da barra do painel: o clique não tira o teclado do terminal.
+/// Você aperta o ▶ e continua digitando de onde parou.
+function botaoLofi(classe: string, icone: string, titulo: string): HTMLButtonElement {
+  const b = elemento("button", `lofi-btn ${classe}`);
+  b.innerHTML = icone;
+  b.title = titulo;
+  b.addEventListener("mousedown", (e) => e.preventDefault());
+  return b;
+}
+
+const lofiAnterior = botaoLofi("lofi-anterior", ICONE_ANTERIOR, "Estação anterior");
+const lofiTocar = botaoLofi("lofi-tocar", ICONE_PLAY, "Tocar");
+const lofiProxima = botaoLofi("lofi-proxima", ICONE_PROXIMA, "Próxima estação");
+
+const lofiVolume = elemento("input", "lofi-volume");
+lofiVolume.type = "range";
+lofiVolume.min = "0";
+lofiVolume.max = "100";
+lofiVolume.value = String(volumeLofi);
+lofiVolume.title = "Volume da rádio";
+
+const lofiTitulo = elemento("span", "lofi-titulo");
+
+/// O analisador de espectro: uma coluna por faixa de frequência, cada uma
+/// recortada em segmentos como um mostrador de LEDs, com o pico que fica no ar
+/// e desce sozinho.
+///
+/// As alturas são MODELADAS, não medidas. O áudio toca dentro do iframe do
+/// YouTube, que é de outra origem: nem o Web Audio nem nada nesta página
+/// alcança a amostra de lá, e sem amostra não há FFT. O modelo é o da curva de
+/// um lofi — grave mandando e pulsando na batida, agudo baixo e nervoso — com
+/// ataque rápido e queda lenta, que é o que faz um mostrador parecer um VU.
+/// Para o espectro de verdade o áudio teria de sair de um `<audio>` nosso, e
+/// não de um iframe de terceiro.
+const SPEC_BANDAS = 10;
+/// Cinco segmentos de 2px com 1px de vão dão exatamente os 14px da faixa.
+const SPEC_SEGMENTOS = 5;
+/// O mesmo compasso da onda da escuta: ~20 quadros por segundo.
+const SPEC_MS = 50;
+/// A batida: um quadro em cada oito, uns 150 por minuto.
+const SPEC_BATIDA = 8;
+/// Quanto o nível e o pico caem por quadro. O pico desce bem mais devagar — é
+/// disso que ele serve, de deixar no ar por um instante o que já passou.
+const SPEC_QUEDA = 0.075;
+const SPEC_QUEDA_PICO = 0.014;
+
+const lofiSpec = elemento("span", "spec");
+lofiSpec.setAttribute("aria-hidden", "true");
+
+const specNiveis = new Array<number>(SPEC_BANDAS).fill(0);
+const specPicos = new Array<number>(SPEC_BANDAS).fill(0);
+const specColunas = Array.from({ length: SPEC_BANDAS }, () => {
+  const coluna = elemento("span", "spec-col");
+  const nivel = elemento("span", "spec-nivel");
+  const pico = elemento("span", "spec-pico");
+  coluna.append(nivel, pico);
+  lofiSpec.appendChild(coluna);
+  return { nivel, pico };
+});
+
+lofiEl.append(lofiAnterior, lofiTocar, lofiProxima, lofiVolume, lofiTitulo, lofiSpec);
+
+/// De 0..1 para a altura em pixels, encaixada na grade dos segmentos: é o
+/// degrau que faz o mostrador parecer LED e não uma barra lisa esticando.
+function alturaSpec(v: number): number {
+  const acesos = Math.round(Math.max(0, Math.min(1, v)) * SPEC_SEGMENTOS);
+  return acesos === 0 ? 0 : acesos * 3 - 1;
+}
+
+let quadroSpec = 0;
+
+function moverSpec() {
+  quadroSpec++;
+  const batendo = quadroSpec % SPEC_BATIDA === 0;
+  const tempo = quadroSpec / 20;
+
+  for (let b = 0; b < SPEC_BANDAS; b++) {
+    // 1 na primeira coluna (o grave), 0 na última (o agudo).
+    const grave = 1 - b / (SPEC_BANDAS - 1);
+    // A curva de um lofi: o grave sustenta e o agudo é quase só o chiado do
+    // prato. Sem ela as dez colunas ficariam na mesma altura média, que é a
+    // cara de um gerador de números e não a de uma música.
+    const corpo = (0.22 + 0.6 * grave ** 1.4) * (0.7 + 0.3 * Math.sin(tempo + b * 0.7));
+    const batida = batendo ? 0.45 * grave + 0.08 : 0;
+    const tremor = Math.random() * (0.1 + 0.28 * (1 - grave));
+    const alvo = corpo + batida + tremor;
+
+    // Sobe no quadro, desce aos poucos.
+    specNiveis[b] =
+      alvo > specNiveis[b] ? Math.min(1, alvo) : Math.max(0, specNiveis[b] - SPEC_QUEDA);
+    specPicos[b] = Math.max(specNiveis[b], specPicos[b] - SPEC_QUEDA_PICO);
+
+    const { nivel, pico } = specColunas[b];
+    const alto = alturaSpec(specNiveis[b]);
+    const altoPico = alturaSpec(specPicos[b]);
+    nivel.style.height = `${alto}px`;
+    // O pico só aparece acima da barra: em cima dela não diria nada.
+    pico.hidden = altoPico <= alto;
+    pico.style.bottom = `${Math.max(0, altoPico - 2)}px`;
+  }
+}
+
+let pulsoSpec: ReturnType<typeof setInterval> | undefined;
+
+/// Liga e desliga a animação. A saída rápida importa: `desenharLofi` roda a cada
+/// evento do player, e reiniciar o intervalo em cada um zeraria a fase da
+/// batida — o mostrador andaria aos trancos.
+function animarSpec(ligado: boolean) {
+  if (ligado === !!pulsoSpec) return;
+  clearInterval(pulsoSpec);
+  pulsoSpec = undefined;
+  if (ligado) {
+    pulsoSpec = setInterval(moverSpec, SPEC_MS);
+    return;
+  }
+  // Parado, tudo no chão: um mostrador congelado no meio pareceria travado.
+  specNiveis.fill(0);
+  specPicos.fill(0);
+  for (const { nivel, pico } of specColunas) {
+    nivel.style.height = "0px";
+    pico.hidden = true;
+  }
+}
+
+const lofiPalco = elemento("div", "lofi-palco");
+document.body.appendChild(lofiPalco);
+
+let player: PlayerYT | undefined;
+let tocandoLofi = false;
+let carregandoLofi = false;
+/// Sem rede, ou estação fora do ar: o motivo toma o lugar do nome até o próximo
+/// clique que der certo. A faixa cabe uma linha, e o nome pode esperar.
+let avisoLofi: string | undefined;
+
+function desenharLofi() {
+  const e = atual();
+  lofiTocar.innerHTML = tocandoLofi ? ICONE_PAUSA : ICONE_PLAY;
+  lofiTocar.title = tocandoLofi ? "Pausar" : "Tocar";
+  lofiTocar.disabled = !e;
+  lofiAnterior.disabled = estacoes.length < 2;
+  lofiProxima.disabled = estacoes.length < 2;
+  lofiEl.classList.toggle("tocando", tocandoLofi);
+  lofiEl.classList.toggle("carregando", carregandoLofi && !tocandoLofi);
+  const texto = avisoLofi ?? e?.nome ?? "sem estações — Rádio ▸ Estações…";
+  lofiTitulo.textContent = texto;
+  lofiTitulo.title = texto;
+  animarSpec(tocandoLofi);
+}
+
+/// Carrega a iframe API uma vez, no primeiro ▶ — e não no boot. É script de
+/// terceiro vindo da rede: o rodapé tem que subir mudo e sem esperar por ela.
+let apiYT: Promise<ApiYT> | undefined;
+
+function carregarYT(): Promise<ApiYT> {
+  if (apiYT) return apiYT;
+  const pedido = new Promise<ApiYT>((resolve, reject) => {
+    // Este nome global é o único aviso de que a API ficou pronta.
+    window.onYouTubeIframeAPIReady = () =>
+      window.YT ? resolve(window.YT) : reject(new Error("a API carregou sem o YT"));
+    const script = document.createElement("script");
+    script.src = "https://www.youtube.com/iframe_api";
+    script.onerror = () => reject(new Error("sem rede"));
+    document.head.appendChild(script);
+  });
+  // Uma falha não fica guardada: o próximo ▶ tenta de novo, que é o que se quer
+  // de uma rede que caiu por um minuto.
+  pedido.catch(() => (apiYT = undefined));
+  return (apiYT = pedido);
+}
+
+/// Abre o player e resolve quando ele está pronto para receber ordens. O teto de
+/// espera existe porque um `onReady` que nunca chega deixaria o ▶ piscando para
+/// sempre — e piscar para sempre não é um estado, é um bug silencioso.
+async function abrirPlayer(id: string): Promise<PlayerYT> {
+  const YT = await carregarYT();
+  return new Promise<PlayerYT>((resolve, reject) => {
+    const limite = setTimeout(() => reject(new Error("o YouTube não respondeu")), 15_000);
+    const alvo = document.createElement("div");
+    lofiPalco.appendChild(alvo);
+    new YT.Player(alvo, {
+      videoId: id,
+      // Sem controles nem teclado: a caixa tem 1px, e quem manda é o rodapé.
+      playerVars: { autoplay: 1, controls: 0, disablekb: 1, playsinline: 1 },
+      events: {
+        onReady: (e: { target: PlayerYT }) => {
+          clearTimeout(limite);
+          e.target.setVolume(volumeLofi);
+          e.target.playVideo();
+          resolve(e.target);
+        },
+        onStateChange: (e: { data: number }) => {
+          tocandoLofi = e.data === YT_TOCANDO;
+          carregandoLofi = e.data === YT_CARREGANDO;
+          if (tocandoLofi) avisoLofi = undefined;
+          desenharLofi();
+        },
+        onError: () => {
+          carregandoLofi = false;
+          avisoLofi = "estação fora do ar — tente a próxima";
+          desenharLofi();
+        },
+      },
+    });
+  });
+}
+
+async function tocarLofi() {
+  const e = atual();
+  if (!e) return;
+  if (player) return player.playVideo();
+  carregandoLofi = true;
+  avisoLofi = undefined;
+  desenharLofi();
+  try {
+    player = await abrirPlayer(e.id);
+  } catch (erro) {
+    carregandoLofi = false;
+    avisoLofi = `a rádio não abriu: ${erro}`;
+    desenharLofi();
+    jlog(`lofi: ${erro}`);
+  }
+}
+
+function pausarLofi() {
+  player?.pauseVideo();
+  // Não espera o `onStateChange`: o botão tem que responder no mesmo quadro do
+  // clique, e o evento chega logo atrás confirmando.
+  tocandoLofi = false;
+  carregandoLofi = false;
+  desenharLofi();
+}
+
+/// Põe uma estação no ar. Com a rádio parada ela fica só engatilhada: trocar de
+/// estação não é pedido para começar a tocar.
+function irPara(i: number) {
+  if (!estacoes.length) return;
+  const n = estacoes.length;
+  estacao = ((i % n) + n) % n;
+  guardarAtual();
+  avisoLofi = undefined;
+  if (player) {
+    if (tocandoLofi || carregandoLofi) {
+      carregandoLofi = true;
+      player.loadVideoById(estacoes[estacao].id);
+    } else {
+      player.cueVideoById(estacoes[estacao].id);
+    }
+  }
+  desenharLofi();
+  desenharLista();
+}
+
+lofiAnterior.addEventListener("click", () => irPara(estacao - 1));
+lofiProxima.addEventListener("click", () => irPara(estacao + 1));
+lofiTocar.addEventListener("click", () => (tocandoLofi ? pausarLofi() : void tocarLofi()));
+
+lofiVolume.addEventListener("input", () => {
+  volumeLofi = Number(lofiVolume.value);
+  player?.setVolume(volumeLofi);
+});
+
+lofiVolume.addEventListener("change", () => {
+  localStorage.setItem(CHAVE_VOLUME, String(volumeLofi));
+});
+
+// Solto o slider, o teclado volta para o terminal: sem isto as setas passariam a
+// mexer no volume em vez de andar na linha de comando. No `pointerup`, e não no
+// `change`: um clique que não moveu o slider não dispara `change` nenhum, e
+// deixaria o foco preso aqui.
+lofiVolume.addEventListener("pointerup", () => {
+  if (ativa?.foco) focar(ativa.foco);
+});
+
+// ---------- lofi: o editor de estações ----------
+
+/// Aberto por Rádio ▸ Estações…, na barra de menu. Uma caixa no meio da janela e
+/// não uma lista presa ao rodapé: tem campo de texto, e um campo de texto dentro
+/// de uma faixa de 30px é um alvo de 30px.
+const lofiEditor = elemento("div", "lofi-editor");
+lofiEditor.hidden = true;
+const lofiCaixa = elemento("div", "lofi-caixa");
+const lofiCabeca = elemento("div", "lofi-cabeca");
+const lofiCabecaTitulo = elemento("span", "lofi-cabeca-titulo");
+lofiCabecaTitulo.textContent = "Estações";
+const lofiFechar = botaoLofi("lofi-fechar", ICONE_TIRAR, "Fechar (esc)");
+lofiCabeca.append(lofiCabecaTitulo, lofiFechar);
+const lofiLista = elemento("div", "lofi-lista");
+const lofiCampo = elemento("input", "lofi-campo");
+lofiCampo.type = "text";
+lofiCampo.placeholder = "cole um link do YouTube e tecle ↵";
+lofiCampo.spellcheck = false;
+const lofiRecado = elemento("div", "lofi-recado");
+lofiCaixa.append(lofiCabeca, lofiLista, lofiCampo, lofiRecado);
+lofiEditor.appendChild(lofiCaixa);
+document.body.appendChild(lofiEditor);
+
+function dizer(texto: string) {
+  lofiRecado.textContent = texto;
+}
+
+function desenharLista() {
+  lofiLista.textContent = "";
+  if (!estacoes.length) {
+    const vazio = elemento("div", "lofi-vazio");
+    vazio.textContent = "Nenhuma estação. Cole um link do YouTube aqui embaixo.";
+    lofiLista.appendChild(vazio);
+    return;
+  }
+  estacoes.forEach((e, i) => {
+    const linha = elemento("div", "lofi-linha");
+    linha.classList.toggle("atual", i === estacao);
+    const nome = elemento("button", "lofi-nome");
+    nome.textContent = e.nome;
+    nome.title = `Tocar ${e.nome}`;
+    nome.addEventListener("click", () => irPara(i));
+    const tirar = botaoLofi("lofi-tirar", ICONE_TIRAR, `Remover ${e.nome}`);
+    tirar.addEventListener("click", () => removerEstacao(i));
+    linha.append(nome, tirar);
+    lofiLista.appendChild(linha);
+  });
+}
+
+/// Aceita o que o YouTube dá para copiar: a URL do vídeo, a do embed, a da live,
+/// a curta do youtu.be — ou o id cru, que é o que sobra quando nada casa.
+function idDoYouTube(bruto: string): string | undefined {
+  const texto = bruto.trim();
+  if (/^[\w-]{11}$/.test(texto)) return texto;
+  try {
+    const u = new URL(texto);
+    if (u.hostname.endsWith("youtu.be")) {
+      const curto = u.pathname.slice(1).split("/")[0];
+      return /^[\w-]{11}$/.test(curto) ? curto : undefined;
+    }
+    const v = u.searchParams.get("v");
+    if (v && /^[\w-]{11}$/.test(v)) return v;
+    const m = u.pathname.match(/\/(?:embed|live|shorts|v)\/([\w-]{11})/);
+    return m?.[1];
+  } catch {
+    return undefined; // não era uma URL
+  }
+}
+
+async function adicionarEstacao(bruto: string) {
+  const id = idDoYouTube(bruto);
+  if (!id) return dizer("não achei um id do YouTube nisso");
+  if (estacoes.some((e) => e.id === id)) return dizer("essa estação já está na lista");
+
+  dizer("procurando o nome…");
+  // O nome vem do oEmbed, pelo Rust (ver `lofi_titulo`). Se não vier, o id
+  // serve: melhor uma estação de nome feio do que um link que você colou e que
+  // sumiu sem explicação.
+  const nome = await invoke<string>("lofi_titulo", { id }).catch((e) => {
+    jlog(`lofi_titulo: ${e}`);
+    return id;
+  });
+
+  estacoes.push({ id, nome });
+  guardarEstacoes();
+  // A primeira de uma lista vazia já vira a da vez: senão o rodapé continuaria
+  // dizendo "sem estações" com uma estação na lista.
+  if (estacoes.length === 1) guardarAtual();
+  lofiCampo.value = "";
+  dizer(`adicionada: ${nome}`);
+  desenharLofi();
+  desenharLista();
+}
+
+function removerEstacao(i: number) {
+  const eraAtual = i === estacao;
+  const noAr = eraAtual && (tocandoLofi || carregandoLofi);
+  estacoes.splice(i, 1);
+  guardarEstacoes();
+  // A de baixo sobe para o lugar da que saiu, e é nela que o dedo continua.
+  if (i < estacao) estacao--;
+  if (estacao >= estacoes.length) estacao = 0;
+
+  if (!estacoes.length) {
+    pausarLofi();
+  } else if (eraAtual && player) {
+    // Tirar a que está no ar passa para a seguinte. Parar seria uma punição por
+    // arrumar a fila.
+    if (noAr) {
+      carregandoLofi = true;
+      player.loadVideoById(estacoes[estacao].id);
+    } else {
+      player.cueVideoById(estacoes[estacao].id);
+    }
+  }
+  guardarAtual();
+  dizer("");
+  desenharLofi();
+  desenharLista();
+}
+
+function abrirEditor() {
+  lofiEditor.hidden = false;
+  lofiCampo.value = "";
+  dizer("");
+  desenharLista();
+  lofiCampo.focus();
+}
+
+function fecharEditor() {
+  lofiEditor.hidden = true;
+  // O teclado volta para onde estava: o editor é uma visita, não um destino.
+  if (ativa?.foco) focar(ativa.foco);
+}
+
+// Clique no escuro fecha; clique na caixa, não — `e.target` é o fundo só quando
+// o ponteiro caiu fora dela.
+lofiEditor.addEventListener("mousedown", (e) => {
+  if (e.target === lofiEditor) fecharEditor();
+});
+
+lofiFechar.addEventListener("click", () => fecharEditor());
+
+lofiCampo.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    void adicionarEstacao(lofiCampo.value);
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    fecharEditor();
+  }
+});
+
+desenharLofi();
+
 // ---------- teclado ----------
 
 function atalho(e: Atalho) {
@@ -1931,6 +2460,7 @@ async function iniciar() {
   });
   await listen("menu://colar-caminho", () => colarCaminho());
   await listen("menu://preferencias", () => abrirPreferencias());
+  await listen("menu://estacoes", () => abrirEditor());
 
   // O .git do repositório aberto na aba do diff mexeu. Só repassa: quem decide
   // o que fazer com isso é a aba, e ela só existe depois de alguém abri-la.

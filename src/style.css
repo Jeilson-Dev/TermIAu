@@ -853,6 +853,289 @@ body {
 }
 
 
+/* ---------- a rádio do rodapé ---------- */
+
+/* Do outro lado da mesma faixa. O `margin-left: auto` é o que a encosta na
+   direita sem precisar que o `.voz-texto` tenha largura nenhuma: com o
+   microfone fechado o parcial é vazio, e a rádio fica no lugar de sempre. */
+#lofi {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  padding-left: 10px;
+}
+
+.lofi-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--comment);
+  font: inherit;
+  cursor: pointer;
+}
+
+.lofi-btn:hover:not(:disabled) {
+  background: var(--bg-light);
+  color: var(--fg);
+}
+
+/* Sem estação não há o que tocar, e com uma só não há para onde andar. */
+.lofi-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Tocando, o ▶/⏸ acende: é o único jeito de saber, sem som, que a rádio está
+   no ar — as outras pistas (o título, o volume) ficam iguais paradas. */
+#lofi.tocando .lofi-tocar {
+  color: var(--purple);
+}
+
+/* Enquanto o YouTube carrega o primeiro segundo o botão não responde, e piscar
+   é o que diz que ele ouviu o clique. */
+#lofi.carregando .lofi-tocar {
+  color: var(--purple);
+  animation: lofi-pulso 1s ease-in-out infinite;
+}
+
+@keyframes lofi-pulso {
+  50% { opacity: 0.35; }
+}
+
+/* Fininho de propósito: é um controle secundário numa faixa de 30px, e um
+   slider de altura normal empurraria o resto para fora do alinhamento. */
+.lofi-volume {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 54px;
+  height: 3px;
+  margin: 0 6px 0 4px;
+  border-radius: 2px;
+  background: var(--selection);
+  cursor: pointer;
+}
+
+.lofi-volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--comment);
+}
+
+.lofi-volume:hover::-webkit-slider-thumb {
+  background: var(--purple);
+}
+
+/* O nome da estação. Teto de largura porque os títulos do YouTube são frases
+   inteiras, e uma delas empurraria o parcial da escuta para fora da faixa. */
+/* O analisador de espectro. Dez colunas de 3px com 1px de vão: 39px no canto
+   apertado da faixa, que ele divide com o nome da estação. */
+.spec {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 14px;
+  margin-left: 8px;
+  opacity: 0;
+  transition: opacity 140ms linear;
+}
+
+#lofi.tocando .spec {
+  opacity: 1;
+}
+
+.spec-col {
+  position: relative;
+  width: 3px;
+  height: 100%;
+}
+
+/* A barra e o pico crescem do chão da coluna. A cor é da COLUNA e não da barra:
+   o degradê é medido nos 14px inteiros e fica preso embaixo (`background-size`
+   + `bottom`), então o vermelho só aparece quando a barra chega mesmo lá em
+   cima — se ele acompanhasse a altura da barra, qualquer barrinha de um
+   segmento já nasceria vermelha no topo dela.
+
+   A máscara é o que a recorta em LEDs em vez de barra lisa. Ela também corre
+   `to top`, do chão: fosse `to bottom`, os segmentos começariam no topo de cada
+   barra e as dez colunas ficariam desalinhadas entre si. */
+.spec-nivel,
+.spec-pico {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: linear-gradient(to top, var(--purple) 0%, var(--purple) 52%, var(--pink) 100%);
+  background-size: 100% 14px;
+  background-position: bottom;
+  background-repeat: no-repeat;
+  -webkit-mask-image: repeating-linear-gradient(to top, #000 0 2px, transparent 2px 3px);
+  mask-image: repeating-linear-gradient(to top, #000 0 2px, transparent 2px 3px);
+}
+
+/* O pico é um segmento solto, e por isso não usa a máscara: ele JÁ é do tamanho
+   de um LED, e com ela cairia no vão entre dois e sumiria metade das vezes.
+   Cor chapada, e não o degradê: flutuando a alturas diferentes, o degradê seria
+   medido a partir do PRÓPRIO pico, e ele sairia roxo em qualquer altura. */
+.spec-pico {
+  height: 2px;
+  background-image: none;
+  background-color: var(--fg);
+  -webkit-mask-image: none;
+  mask-image: none;
+  opacity: 0.9;
+}
+
+.lofi-titulo {
+  max-width: 200px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* O YouTube toca escondido — só o áudio interessa. A caixa fica dentro da
+   janela, de 1px e transparente, e não `display: none`: um iframe sem caixa
+   nenhuma corre o risco de ter a mídia suspensa pelo WebKit. */
+.lofi-palco {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lofi-palco iframe {
+  width: 1px;
+  height: 1px;
+  border: 0;
+}
+
+
+/* ---------- o editor de estações (Rádio ▸ Estações…) ---------- */
+
+/* A regra do `hidden` vem junto: o `display: flex` aqui embaixo venceria o
+   `display: none` que o atributo traz de fábrica, e a caixa nunca sumiria. */
+.lofi-editor {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0007;
+}
+
+.lofi-editor[hidden] {
+  display: none;
+}
+
+.lofi-caixa {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 420px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 96px);
+  padding: 12px;
+  background: var(--bg-light);
+  border: 1px solid var(--selection);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px #000a;
+  font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  color: var(--fg-dim);
+}
+
+.lofi-cabeca {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lofi-cabeca-titulo {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.lofi-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.lofi-linha {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 5px;
+}
+
+.lofi-linha:hover {
+  background: var(--bg-lighter);
+}
+
+/* A que está no ar fica no mesmo roxo do ▶ lá embaixo: é a mesma informação, e
+   duas cores para ela fariam procurar a diferença. */
+.lofi-linha.atual .lofi-nome {
+  color: var(--purple);
+}
+
+.lofi-nome {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.lofi-vazio {
+  padding: 10px 8px;
+  color: var(--comment);
+}
+
+.lofi-campo {
+  padding: 7px 9px;
+  border: 1px solid var(--selection);
+  border-radius: 5px;
+  background: var(--bg-dark);
+  color: var(--fg);
+  font: inherit;
+}
+
+.lofi-campo:focus {
+  outline: none;
+  border-color: var(--purple);
+}
+
+/* Altura reservada: o recado aparece e some a cada link colado, e sem ela a
+   caixa inteira subiria e desceria junto. */
+.lofi-recado {
+  min-height: 16px;
+  color: var(--comment);
+}
+
+
 /* A barra de rolagem do terminal. Escopada no xterm: sem o escopo ela pegaria
    a página inteira, e a aba do diff já tem a dela. */
 .xterm .xterm-viewport::-webkit-scrollbar {
