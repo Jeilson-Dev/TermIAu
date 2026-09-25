@@ -11,6 +11,7 @@
 mod diff;
 mod error;
 mod git;
+mod pergunta;
 mod review;
 
 use std::path::{Path, PathBuf};
@@ -21,6 +22,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use error::{Error, Result};
 use review::{RepoInfo, ReviewDiff};
+
+pub use pergunta::Perguntas;
 
 /// As chamadas ao git bloqueiam, e as threads do runtime assíncrono são poucas:
 /// um `git diff` de repositório grande seguraria o resto do app junto.
@@ -57,6 +60,13 @@ pub async fn load_diff_working(path: PathBuf) -> Result<ReviewDiff> {
 #[tauri::command]
 pub async fn repo_root(path: PathBuf) -> Result<Option<String>> {
     blocking(move || Ok(git::Repo::open(&path).ok().map(|r| r.root().display().to_string()))).await
+}
+
+/// A branch em que a pasta está, para a barra do painel. `None` fora de um
+/// repositório e com o HEAD solto — aí não há nome para mostrar.
+#[tauri::command]
+pub async fn repo_branch(path: PathBuf) -> Result<Option<String>> {
+    blocking(move || Ok(git::Repo::open(&path).ok().and_then(|r| r.current_branch()))).await
 }
 
 /// Assinatura do estado da árvore de trabalho, para a aba saber que mudou sem
@@ -163,4 +173,45 @@ pub async fn read_blob_bytes(path: PathBuf, oid: String) -> Result<tauri::ipc::R
 pub async fn read_worktree_bytes(path: PathBuf, file: String) -> Result<tauri::ipc::Response> {
     let bytes = blocking(move || review::read_worktree_bytes(&path, &file)).await?;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// As sessões do Claude Code abertas neste repositório, para a pergunta poder
+/// mencionar uma delas e responder sabendo do que já foi conversado ali.
+#[tauri::command]
+pub async fn claude_sessions(path: PathBuf) -> Result<Vec<pergunta::Sessao>> {
+    blocking(move || pergunta::sessoes(&path)).await
+}
+
+/// Pergunta ao Claude sobre um trecho, sem abrir sessão nem salvar nada. `id` é
+/// da webview: é por ele que `cancel_ask` acha o processo. Só conversa, a menos
+/// que `allow_edits` libere a edição dos arquivos do repositório.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn ask_claude(
+    app: AppHandle,
+    path: PathBuf,
+    id: String,
+    question: String,
+    context: String,
+    model: Option<String>,
+    session: Option<String>,
+    allow_edits: bool,
+) -> Result<pergunta::Resposta> {
+    blocking(move || {
+        let pids = app.state::<Perguntas>();
+        pergunta::perguntar(&path, &pids, &id, &question, &context, model.as_deref(), session.as_deref(), allow_edits)
+    })
+    .await
+}
+
+/// Volta ao que eram os arquivos que uma pergunta alterou. Devolve os que não
+/// deu para voltar — os que alguém mexeu de novo depois dela.
+#[tauri::command]
+pub async fn undo_ask(path: PathBuf, changes: Vec<pergunta::Alteracao>) -> Result<Vec<String>> {
+    blocking(move || pergunta::desfazer(&path, &changes)).await
+}
+
+#[tauri::command]
+pub fn cancel_ask(app: AppHandle, id: String) {
+    pergunta::cancelar(&app.state::<Perguntas>(), &id);
 }

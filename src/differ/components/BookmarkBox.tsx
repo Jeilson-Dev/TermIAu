@@ -98,6 +98,7 @@ export function BookmarkBox({
   onEdit,
   onRemove,
   onToggleResolved,
+  onAsk,
 }: {
   bookmark: Bookmark;
   reference: string;
@@ -105,6 +106,8 @@ export function BookmarkBox({
   onEdit(): void;
   onRemove(): void;
   onToggleResolved(): void;
+  /** Tirar a dúvida com o Claude antes de decidir o que o marcador diz. */
+  onAsk?(): void;
 }) {
   return (
     <div className={bookmark.resolved ? "bookmark resolved" : "bookmark"}>
@@ -115,6 +118,11 @@ export function BookmarkBox({
         <span className="spacer" />
         <ResolveButton resolved={!!bookmark.resolved} onToggle={onToggleResolved} />
         <CopyReferenceButton reference={reference} />
+        {onAsk && (
+          <button className="icon-btn" title="Perguntar ao Claude sobre este trecho" onClick={onAsk}>
+            <Icon name="sparkle" />
+          </button>
+        )}
         <button className="icon-btn" title="Editar marcador" onClick={onEdit}>
           <Icon name="edit" />
         </button>
@@ -134,6 +142,7 @@ export function BookmarkEditor({
   initial = "",
   onSave,
   onCancel,
+  onAsk,
 }: {
   label: string;
   /** The selected passage the note is about, if it's not about whole lines. */
@@ -141,6 +150,8 @@ export function BookmarkEditor({
   initial?: string;
   onSave(note: string): void | Promise<void>;
   onCancel(): void;
+  /** Em vez de anotar, perguntar ao Claude — levando o que já foi escrito como pergunta. */
+  onAsk?(text: string): void;
 }) {
   const [note, setNote] = useState(initial);
   const [saving, setSaving] = useState(false);
@@ -170,7 +181,10 @@ export function BookmarkEditor({
         placeholder={quote ? "O que merece melhoria neste trecho?" : "O que merece melhoria aqui?"}
         onChange={(e) => setNote(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+          if (e.key === "Enter" && e.shiftKey && (e.metaKey || e.ctrlKey) && onAsk) {
+            e.preventDefault();
+            onAsk(note.trim());
+          } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
             submit();
           } else if (e.key === "Escape") {
@@ -184,6 +198,12 @@ export function BookmarkEditor({
         <button className="btn" onClick={onCancel}>
           Cancelar
         </button>
+        {onAsk && (
+          <button className="btn" title="Tirar a dúvida antes de anotar (⌘⇧↩)" onClick={() => onAsk(note.trim())}>
+            <Icon name="sparkle" size={13} />
+            Perguntar ao Claude
+          </button>
+        )}
         <button className="btn primary" disabled={!note.trim() || saving} onClick={submit}>
           {initial ? "Salvar" : "Adicionar marcador"}
         </button>

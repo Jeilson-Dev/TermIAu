@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { RepoInfo, ReviewDiff } from "./types";
+import type { ClaudeSession, RepoInfo, ReviewDiff } from "./types";
 
 export const openRepo = (path: string) => invoke<RepoInfo>("open_repo", { path });
 
@@ -42,3 +42,41 @@ export const readBlobBytes = (path: string, oid: string) =>
 
 export const readWorktreeBytes = (path: string, file: string) =>
   invoke<ArrayBuffer>("read_worktree_bytes", { path, file });
+
+/** As sessões do Claude Code abertas neste repositório, da mais recente para a mais antiga. */
+export const claudeSessions = (path: string) => invoke<ClaudeSession[]>("claude_sessions", { path });
+
+/**
+ * Pergunta ao Claude (`claude -p`) sem salvar sessão nenhuma. `context` vai pelo stdin; `session`
+ * faz a pergunta rodar numa cópia dessa sessão, sabendo do que já foi conversado nela. Só conversa:
+ * editar os arquivos do repositório só com `allowEdits`.
+ */
+export const askClaude = (
+  path: string,
+  id: string,
+  question: string,
+  context: string,
+  model: string | null,
+  session: string | null,
+  allowEdits = false,
+) => invoke<AskResult>("ask_claude", { path, id, question, context, model, session, allowEdits });
+
+/** Um arquivo que o Claude mexeu: como estava e como ficou (`null`: não existia / foi apagado). */
+export interface AskChange {
+  path: string;
+  before: string | null;
+  after: string | null;
+  /** Dá para voltar ao `before`. Sem ele (binário, ignorado pelo git), só se sabe que mexeu. */
+  undoable: boolean;
+}
+
+export interface AskResult {
+  answer: string;
+  /** Só com alterações liberadas; vazio quando ele não mexeu em nada. */
+  changes: AskChange[];
+}
+
+/** Volta os arquivos ao que eram antes da pergunta; devolve os que não deu (mexidos de novo depois). */
+export const undoAsk = (path: string, changes: AskChange[]) => invoke<string[]>("undo_ask", { path, changes });
+
+export const cancelAsk = (id: string) => invoke<void>("cancel_ask", { id });

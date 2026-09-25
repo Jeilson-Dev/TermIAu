@@ -12,6 +12,8 @@ pub enum Error {
     Io(std::io::Error),
     /// The blob is a Git LFS pointer whose content was never downloaded.
     LfsMissing,
+    /// A pergunta ao Claude falhou; a mensagem já vem pronta para mostrar.
+    Claude(String),
     Internal(String),
 }
 
@@ -31,6 +33,7 @@ impl std::fmt::Display for Error {
                 f,
                 "Arquivo guardado no Git LFS e ainda não baixado. Rode `git lfs pull` no repositório."
             ),
+            Error::Claude(msg) => write!(f, "Claude: {msg}"),
             Error::Internal(msg) => write!(f, "Erro interno: {msg}"),
         }
     }

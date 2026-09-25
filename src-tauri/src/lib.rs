@@ -397,35 +397,6 @@ fn limpar_sockets_orfaos(atual: &PathBuf) {
     }
 }
 
-// ---------- rádio: o nome da estação ----------
-
-/// O título do vídeo, pelo oEmbed do YouTube. É o que dá nome à estação quando
-/// você cola um link no editor — daqui, e não da webview, porque o endpoint não
-/// manda `Access-Control-Allow-Origin` e o fetch de lá esbarraria no CORS.
-#[tauri::command]
-async fn lofi_titulo(id: String) -> Result<String, String> {
-    // Um id do YouTube são onze caracteres de [A-Za-z0-9_-]. A checagem não é
-    // capricho: o id entra numa URL montada à mão, e o que chega aqui é o que
-    // você colou.
-    if id.len() != 11 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
-        return Err("isso não é um id do YouTube".into());
-    }
-    tauri::async_runtime::spawn_blocking(move || {
-        let url = format!(
-            "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={id}&format=json"
-        );
-        let resp = ureq::get(&url).call().map_err(|e| format!("o YouTube não respondeu: {e}"))?;
-        let corpo = resp.into_body().read_to_string().map_err(|e| e.to_string())?;
-        let json: serde_json::Value = serde_json::from_str(&corpo).map_err(|e| e.to_string())?;
-        json.get("title")
-            .and_then(|t| t.as_str())
-            .map(str::to_owned)
-            .ok_or_else(|| "o oEmbed veio sem título".to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
 // ---------- escuta: transcrição da fala ----------
 
 /// Equilíbrio recomendado para português — 466 MB. Os outros do catálogo
@@ -614,6 +585,14 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
                 true,
                 Some("CmdOrCtrl+Shift+D"),
             )?,
+            // Alterna: maximiza o painel em foco ou devolve os outros à tela.
+            &MenuItem::with_id(
+                app,
+                "maximizar",
+                "Maximizar ou Recolher Painel",
+                true,
+                Some("CmdOrCtrl+Shift+Enter"),
+            )?,
             &PredefinedMenuItem::separator(app)?,
             // Fecha o painel em foco; com um só painel, é a aba inteira que vai.
             &MenuItem::with_id(app, "fechar", "Fechar", true, Some("CmdOrCtrl+W"))?,
@@ -672,7 +651,19 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
         ],
     )?;
 
-    app.set_menu(Menu::with_items(app, &[&sobre, &arquivo, &editar, &escuta, &radio, &janela])?)?;
+    // A lista de atalhos. ⌘/ é o de ajuda na maioria dos apps; como item de
+    // menu, a tecla fica com o menu e não chega ao shell.
+    let ajuda = Submenu::with_items(
+        app,
+        "Ajuda",
+        true,
+        &[&MenuItem::with_id(app, "atalhos", "Atalhos do Teclado", true, Some("CmdOrCtrl+/"))?],
+    )?;
+
+    app.set_menu(Menu::with_items(
+        app,
+        &[&sobre, &arquivo, &editar, &escuta, &radio, &janela, &ajuda],
+    )?)?;
     Ok(())
 }
 
@@ -689,6 +680,7 @@ pub fn run() {
             app.manage(Ptys::default());
             app.manage(Escuta::default());
             app.manage(differ::Vigia::default());
+            app.manage(differ::Perguntas::default());
             // Sem isto o whisper.cpp despeja o log dele na saída do processo.
             whisper_rs::install_logging_hooks();
             montar_menu(app.handle())?;
@@ -699,11 +691,13 @@ pub fn run() {
             "nova-aba" => { let _ = app.emit("menu://nova-aba", ()); }
             "dividir-lado" => { let _ = app.emit("menu://dividir-lado", ()); }
             "dividir-abaixo" => { let _ = app.emit("menu://dividir-abaixo", ()); }
+            "maximizar" => { let _ = app.emit("menu://maximizar", ()); }
             "fechar" => { let _ = app.emit("menu://fechar", ()); }
             "colar-caminho" => { let _ = app.emit("menu://colar-caminho", ()); }
             "preferencias" => { let _ = app.emit("menu://preferencias", ()); }
             "escutar" => { let _ = app.emit("menu://escutar", ()); }
             "estacoes" => { let _ = app.emit("menu://estacoes", ()); }
+            "atalhos" => { let _ = app.emit("menu://atalhos", ()); }
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
@@ -714,7 +708,6 @@ pub fn run() {
             pty_cwd,
             pty_close,
             pty_close_all,
-            lofi_titulo,
             escuta_modelo_pronto,
             escuta_baixar_modelo,
             escuta_comecar,
@@ -733,11 +726,16 @@ pub fn run() {
             differ::read_worktree,
             differ::read_worktree_bytes,
             differ::repo_root,
+            differ::repo_branch,
             differ::working_stamp,
             differ::stage,
             differ::unstage,
             differ::commit,
             differ::watch_repo,
+            differ::claude_sessions,
+            differ::ask_claude,
+            differ::cancel_ask,
+            differ::undo_ask,
             js_log
         ])
         .build(tauri::generate_context!())

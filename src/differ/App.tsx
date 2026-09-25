@@ -47,18 +47,27 @@ function omit<T>(record: Record<string, T>, key: string): Record<string, T> {
 /** Pause between the steps of the "V" sequence (close → scroll → highlight). */
 const STEP_PAUSE_MS = 150;
 
-/** Scrolls with the same duration as the file open/close animation, then calls `done`. */
+/** Por quanto tempo, depois de chegar, a rolagem segue o arquivo enquanto o que está acima dele assenta. */
+const SETTLE_MS = 900;
+
+/**
+ * Scrolls with the same duration as the file open/close animation, then calls `done`.
+ *
+ * O destino é medido de novo a cada quadro, e não uma vez na partida: os arquivos
+ * pelos quais a rolagem passa só são desenhados quando chegam perto da tela, e até
+ * lá ocupam uma altura estimada. Medido na partida, o alvo sai do lugar no caminho
+ * — e a rolagem para antes do arquivo ou passa dele, escondendo os de cima.
+ */
 function animateScroll(
   scroller: HTMLElement,
-  top: number,
+  target: () => number,
   duration: number,
   done: () => void,
   cancelada: () => boolean,
 ) {
   const start = scroller.scrollTop;
-  const distance = top - start;
-  if (Math.abs(distance) < 1 || matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    scroller.scrollTop = top;
+  if (Math.abs(target() - start) < 1 || matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    scroller.scrollTop = target();
     done();
     return;
   }
@@ -69,11 +78,36 @@ function animateScroll(
     // ir a um destino que já não é o destino.
     if (cancelada()) return;
     const t = Math.min(1, (now - startedAt) / duration);
-    scroller.scrollTop = start + distance * easeInOut(t);
+    scroller.scrollTop = start + (target() - start) * easeInOut(t);
     if (t < 1) requestAnimationFrame(step);
     else done();
   };
   requestAnimationFrame(step);
+}
+
+/**
+ * Depois de chegar, segura o arquivo no topo enquanto o que está acima dele termina de
+ * ser desenhado (o WebKit não tem scroll anchoring que faça isso sozinho). Solta no
+ * primeiro gesto do usuário, numa rolagem nova ou quando o tempo acaba.
+ */
+function settleOn(scroller: HTMLElement, target: () => number, cancelada: () => boolean) {
+  const content = scroller.firstElementChild;
+  if (!content || typeof ResizeObserver === "undefined") return;
+  const align = () => {
+    if (cancelada()) return stop();
+    const top = target();
+    if (Math.abs(scroller.scrollTop - top) >= 1) scroller.scrollTop = top;
+  };
+  const observer = new ResizeObserver(align);
+  const gestures = ["wheel", "touchstart", "mousedown", "keydown"] as const;
+  const timer = setTimeout(() => stop(), SETTLE_MS);
+  function stop() {
+    observer.disconnect();
+    clearTimeout(timer);
+    for (const g of gestures) scroller.removeEventListener(g, stop);
+  }
+  observer.observe(content);
+  for (const g of gestures) scroller.addEventListener(g, stop, { passive: true });
 }
 
 /** Single-key shortcuts must not fire while the user types (bookmark notes, file filter). */
@@ -347,17 +381,30 @@ export default function App() {
   /// Pôr no índice e tirar de lá. O alvo é um arquivo, uma pasta ou "." — o
   /// repositório inteiro. O diff é refeito porque foi o próprio diff que mudou:
   /// o que está no índice e o que está no disco deixaram de ser o mesmo.
+  ///
+  /// Um de cada vez: na aba do que está para ser commitado o "v" também põe no
+  /// índice, e uma rajada de "v" dispararia vários `git add` juntos — o segundo
+  /// daria de cara com o `index.lock` do primeiro. O diff só é refeito quando a
+  /// fila esvazia, e o erro é mostrado depois dele, que senão o apagaria.
+  const filaIndice = useRef<Promise<void>>(Promise.resolve());
+  const naFila = useRef(0);
+  const erroNaFila = useRef<string | null>(null);
   const setStaged = useCallback(
-    async (alvo: string, dentro: boolean) => {
+    (alvo: string, dentro: boolean) => {
       if (!repo) return;
-      try {
-        await (dentro ? stage : unstage)(repo.root, alvo);
-        marcaNaTela.current = null;
-      } catch (err) {
-        setError(String(err));
-        return;
-      }
-      await refresh(repo.root, target, scope);
+      naFila.current++;
+      filaIndice.current = filaIndice.current.then(async () => {
+        try {
+          await (dentro ? stage : unstage)(repo.root, alvo);
+          marcaNaTela.current = null;
+        } catch (err) {
+          erroNaFila.current = String(err);
+        }
+        if (--naFila.current > 0) return;
+        await refresh(repo.root, target, scope);
+        if (erroNaFila.current) setError(erroNaFila.current);
+        erroNaFila.current = null;
+      });
     },
     [repo, target, scope, refresh],
   );
@@ -479,9 +526,18 @@ export default function App() {
     ];
   }, [working, files]);
   const reviewedMap = review?.state.reviewed;
+  // Na aba do que está para ser commitado, revisar é aprovar para o commit: o
+  // revisado é o próprio índice, e não uma marca guardada à parte. Assim um
+  // `git add` dado no terminal também aparece revisado, e um arquivo que só foi
+  // para o índice pela metade ainda não foi — falta aprovar o resto dele.
   const viewedPaths = useMemo(
-    () => new Set(files.filter((f) => reviewedMap?.[fileKey(f)] !== undefined).map((f) => f.path)),
-    [files, reviewedMap],
+    () =>
+      new Set(
+        files
+          .filter((f) => (working ? f.staged === "staged" : reviewedMap?.[fileKey(f)] !== undefined))
+          .map((f) => f.path),
+      ),
+    [files, reviewedMap, working],
   );
   const bookmarks = review?.state.bookmarks ?? EMPTY_BOOKMARKS;
   const bookmarksByPath = useMemo(() => {
@@ -513,14 +569,18 @@ export default function App() {
   const markViewed = useCallback(
     (file: FileDiff, value: boolean) => {
       const key = fileKey(file);
-      updateReview((s) => ({
-        ...s,
-        reviewed: value ? { ...s.reviewed, [key]: Date.now() } : omit(s.reviewed, key),
-      }));
+      // Revisado aqui é estar no índice (ver `viewedPaths`): marcar é `git add`,
+      // desmarcar é `git restore --staged`.
+      if (working) setStaged(file.path, value);
+      else
+        updateReview((s) => ({
+          ...s,
+          reviewed: value ? { ...s.reviewed, [key]: Date.now() } : omit(s.reviewed, key),
+        }));
       // Back to the default: viewed files collapse, unviewed ones open.
       setCollapsedOverrides((o) => omit(o, key));
     },
-    [updateReview],
+    [updateReview, working, setStaged],
   );
 
   const addBookmark = useCallback(
@@ -598,9 +658,13 @@ export default function App() {
       arrive();
     } else if (smooth) {
       const gap = parseFloat(getComputedStyle(scroller).getPropertyValue("--sticky-gap")) || 0;
-      const target =
+      const target = () =>
         scroller.scrollTop + el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - gap;
-      animateScroll(scroller, target, COLLAPSE_MS, arrive, () => id !== scrollAnim.current);
+      const cancelada = () => id !== scrollAnim.current;
+      animateScroll(scroller, target, COLLAPSE_MS, () => {
+        arrive();
+        settleOn(scroller, target, cancelada);
+      }, cancelada);
     } else {
       el.scrollIntoView({ block: "start" });
       arrive();
@@ -909,6 +973,7 @@ export default function App() {
                       file={file}
                       viewMode={viewMode}
                       viewed={isViewed}
+                      staging={working}
                       active={file.path === currentPath}
                       collapsed={collapsedOverrides[key] ?? (isViewed || isGenerated(file.path))}
                       bookmarks={bookmarksByPath.get(file.path) ?? EMPTY_BOOKMARKS}

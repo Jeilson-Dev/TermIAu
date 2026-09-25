@@ -58,6 +58,7 @@ const PATHS = {
   ),
   warning: <path d="M8 2.5l6 10.5H2zM8 6.5v3M8 11.5v.01" />,
   history: <path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v3h3M8 5.5V8l2 1.5" />,
+  sparkle: <path d="M8 2l1.4 4.6L14 8l-4.6 1.4L8 14l-1.4-4.6L2 8l4.6-1.4z" />,
   /// O commit: o ponto na linha da branch, que é o lado velho do diff do que está por commitar.
   "git-commit": (
     <>

@@ -116,3 +116,11 @@ export interface ReviewDiff {
   deletions: number;
   files: FileDiff[];
 }
+
+/** Uma sessão do Claude Code deste repositório, que uma pergunta pode mencionar. */
+export interface ClaudeSession {
+  id: string;
+  title: string;
+  /** Última escrita na sessão, em ms desde a época. */
+  modified: number;
+}

@@ -10,7 +10,7 @@ export type Atalho = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "shiftKey"
 
 /// O xterm precisa saber quais são para não mandar a tecla pro shell antes de o
 /// handler da janela agir.
-/// ⌘T, ⌘W e ⌘D não entram: são itens de menu, e no macOS o menu fica com a
+/// ⌘T, ⌘W, ⌘D e ⌘⇧↩ não entram: são itens de menu, e no macOS o menu fica com a
 /// tecla antes de qualquer coisa chegar na página (ver `montar_menu` no Rust).
 export function nossoAtalho(e: Atalho): boolean {
   if (!e.metaKey) return false;

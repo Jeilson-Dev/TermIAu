@@ -83,37 +83,123 @@ do Claude e o badge do Dock fica vazio.
 
 ## A rádio
 
-No canto direito do rodapé, do outro lado da onda da escuta: ▶, as setas de
-estação, o volume e o nome do que está tocando. São as oito estações do
-[lofi.cafe](https://www.lofi.cafe/) — lives 24/7 do YouTube, tocadas por um
-iframe de 1px escondido na janela.
+No canto direito do rodapé, do outro lado da onda da escuta: ☰ para a lista, ▶,
+a seta de próxima estação, o volume e o nome do que está tocando. São **257
+rádios em 15 gêneros** — eletrônica underground, freeform, jazz, ambient, campus,
+chiptune, world, metal —, tocadas por um `<audio>` da própria página.
 
-É rádio e não playlist, então as setas andam de **estação**, não de faixa. A
-lista, a estação da vez e o volume ficam no `localStorage` e voltam na próxima
-vez. A iframe API do YouTube só é baixada no primeiro ▶: sem ela o rodapé sobe
-mudo e sem esperar a rede, que é como o app fica se você nunca apertar o play.
+A lista vem de
+[recommended-radio-streams](https://github.com/deroverda/recommended-radio-streams),
+uma curadoria em CC0. O CC0 cobre a **lista**; cada estação tem os termos dela.
+As 430 originais passaram por três filtros, e cada um foi **medido**, não
+presumido:
 
-No fim da faixa vai um analisador de espectro: dez colunas recortadas em
-segmentos, como um mostrador de LEDs, com o pico que fica no ar e desce sozinho.
+1. **Só `https`.** De uma página `tauri://` o WebKit recusa stream `http` como
+   conteúdo misto — `NotSupportedError` no `play()`. Corta 113.
+2. **Só as que responderam** a uma sondagem tocando de verdade numa WebView: 55
+   deram erro, recusa ou silêncio.
+3. As 257 que sobraram entram, marcadas pelo que o Web Audio consegue ver.
 
-As alturas dele são **modeladas, não medidas**. O áudio toca dentro do iframe
-do YouTube, que é de outra origem — nem o Web Audio nem nada na página alcança
-a amostra de lá, e sem amostra não há FFT. O modelo é o de uma faixa de lofi:
-grave sustentando e pulsando na batida, agudo baixo e nervoso, ataque rápido e
-queda lenta. Para medir de verdade, o áudio teria de sair de um `<audio>` nosso
-(stream direto, com CORS) em vez de um iframe de terceiro, ou ser capturado da
-saída do sistema pelo Rust.
+> Antes daqui a rádio foi a SomaFM, e antes disso lives do YouTube.
+>
+> O YouTube tocava em `npm run app:dev` e **não tocava no app instalado**: em
+> release a janela roda em `tauri://localhost`, e dessa origem o YouTube recusa o
+> embed com o erro 153 — o player abre, responde ao `onReady` e fica mudo. O
+> esquema não é escolha nossa: no macOS o Tauri sempre serve a janela por
+> `tauri://`, e o `useHttpsScheme` só vale para Windows e Android.
+>
+> A SomaFM saiu por licença, não por técnica. Os termos deles, atualizados em
+> 04/09/2026, dizem que **não podem autorizar cliente de terceiro, nem sem fins
+> lucrativos**, e que o polling de now-playing é motivo de bloqueio. Tocava
+> perfeito; não podia ficar.
 
-### Suas estações
+### Os dois caminhos de áudio
 
-**Rádio ▸ Estações…** abre o editor. Cole um link do YouTube (a URL do vídeo, a
-do embed, a `youtu.be` ou o id cru) e tecle ↵: o nome vem do oEmbed do YouTube,
-buscado pelo Rust (`lofi_titulo`) porque aquele endpoint não manda
-`Access-Control-Allow-Origin` e o `fetch` da webview esbarraria no CORS. Se o
-nome não vier, fica o id. O ✕ de cada linha remove; clicar no nome põe no ar.
+São **dois** elementos `<audio>`, e não um. Uma fonte de outra origem que não
+libera CORS entra no Web Audio zerada — e como o grafo é quem fala com o
+alto-falante, ela tocaria em silêncio.
 
-Tirar todas é permitido — o rodapé passa a dizer "sem estações" e o ▶ desliga
-até você colar a primeira.
+O cabeçalho não basta para saber quem é quem: das 312 sondadas, **249 mandavam
+`Access-Control-Allow-Origin` e só 56 entregam amostra de verdade**. Por isso a
+marca no `estacoes.ts` saiu de playback real, e não de um `curl`.
+
+- **56 estações** vão pelo `audioGrafo`: `crossOrigin="anonymous"` → analisador →
+  ganho → alto-falante. Espectro e anel de volume.
+- **201 estações** vão pelo `audioDireto`: fora do grafo, volume pelo `volume` do
+  elemento, mostrador parado. No seletor elas levam a marca "sem espectro".
+
+A marca envelhece — servidor muda de configuração. Três segundos depois de
+começar, se a estação entrou pelo grafo e o grafo não recebeu nada, ela é
+rebaixada e recomeça pelo caminho direto: tocar mudo é pior que tocar sem
+mostrador.
+
+Nada de rede antes do ▶ (`preload="none"`): sem apertar o play o rodapé sobe mudo
+e o app não fala com ninguém. E tudo o que o ▶ precisa acontece dentro do gesto
+do clique, sem `await` no meio — o WebKit só libera áudio sob um gesto seu, e o
+gesto não atravessa uma espera. Com um `await ctx.resume()` antes do `play()`, o
+play cai do outro lado do clique e é recusado, com um `NotSupportedError` que
+ainda por cima não parece o que é.
+
+### O volume e o nome
+
+O volume é um **anel de cinco estágios**: mudo, 25, 50, 75, 100. Um clique sobe um
+degrau e, depois do cheio, volta ao mudo; o anel acende no sentido do relógio no
+mesmo roxo do ▶, e no mudo apaga e aparece um corte. Era um slider, e um slider
+quer um alvo comprido para o ponteiro andar — comprido é o que não sobra numa
+faixa de 30px. Assim o rodapé inteiro cabe em 219px.
+
+No grafo o volume mora num `GainNode`, e não no `volume` do `<audio>`: desviado o
+elemento para dentro do Web Audio, o WebKit para de aplicar aquele atributo — ele
+aceita o valor, o `a.volume` passa a valer o que você pôs e o som sai igual. Com
+`volume = 0` a amostra continua cheia. Fora do grafo o atributo volta a valer, e
+é ele que o caminho direto usa.
+
+A faixa do nome tem **largura fixa**, de 100px. Com um teto de largura ela
+encolhia e crescia a cada estação nova, e os botões e o volume, que vêm antes
+dela na mesma linha, pulavam de um lado para o outro. O que não cabe passeia lá
+dentro: anda até o fim a ~33 px/s, espera com o rabo do texto à vista, volta ao
+começo de uma vez e para trinta segundos antes de andar de novo.
+
+Não há "tocando agora": rádio comunitária não tem API de now-playing, e ler o
+`icy-name` de cada uma exigiria uma segunda conexão ao servidor delas só para
+isso — o que dobra a banda que se consome de uma rádio pequena.
+
+### O espectro
+
+Dez colunas recortadas em segmentos, como um mostrador de LEDs, com o pico que
+fica no ar e desce sozinho. As alturas são **medidas**: FFT de 2048 pontos, dez
+bandas espaçadas em oitavas entre 40 Hz e 16 kHz, cada coluna com o maior valor
+da sua banda.
+
+A escala de cada banda é **móvel**. Um teto fixo não existe: medido, a banda mais
+grave vive a -45 dB e a mais aguda a -77, e essa distância muda com o gênero —
+com uma janela fixa as colunas ficam todas no topo. Então cada banda carrega o
+próprio teto, que sobe no pico e desce ~1,2 dB/s, e o mostrador cobre os 16 dB
+abaixo dele. Dá três segmentos no corpo da música e cinco nos picos. O teto tem
+piso (-58 dB) porque sem ele o silêncio entre faixas viraria ganho infinito e o
+chiado subiria até em cima.
+
+Os valores vêm em dB crus (`getFloatFrequencyData`): o byte do
+`getByteFrequencyData` já chega espremido numa janela fixa de -100 a -30 dB, e é
+justamente a janela que não podia ser fixa. As bandas também não podem se
+empilhar — a 2048 pontos a resolução é de 23 Hz, e a 512 as três primeiras
+caíam todas nas duas primeiras raias, uma delas a componente contínua, que não é
+som e não sai do lugar.
+
+O analisador vem **antes** do ganho, para medir pré-fader como qualquer mesa: no
+volume baixo as colunas continuam contando o que está tocando em vez de morrerem
+junto com o som.
+
+### O seletor
+
+O ☰ do rodapé ou **Rádio ▸ Estações…** abrem a lista, com o gênero ao lado de
+cada nome — duzentos e cinquenta nomes não dizem o que tocam. As 56 com espectro
+vêm primeiro; as outras levam a marca "sem espectro". Clicar num nome põe a
+estação no ar; a que está tocando fica em roxo e entra na vista sozinha quando a
+lista abre. `esc`, o ✕ ou um clique no escuro fecham.
+
+Refazer a lista é rodar a sondagem de novo: rádio pequena sai do ar, e o seletor
+avisa quando uma não abre.
 
 ## Atalhos
 

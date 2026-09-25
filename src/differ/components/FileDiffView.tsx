@@ -17,6 +17,9 @@ import { EXPAND_STEP, buildRows, fileGaps, revealLine, splitRows, type Expansion
 import { readTextSelection, type TextSelection } from "../lib/textSelection";
 import { useFileSources } from "../lib/useFileSources";
 import type { Bookmark, FileDiff, FocusTarget, Side, ViewMode } from "../types";
+import * as askStore from "../lib/asks";
+import type { Ask, AskState } from "../lib/asks";
+import { AskBox } from "./AskBox";
 import { BookmarkBox, BookmarkEditor } from "./BookmarkBox";
 import { SplitTable, UnifiedTable, type RowContext, type Selection } from "./DiffTable";
 import { DiffStat, Icon, StatusIcon } from "./Icons";
@@ -51,6 +54,8 @@ interface Props {
   file: FileDiff;
   viewMode: ViewMode;
   viewed: boolean;
+  /** Aba do que está para ser commitado: lá, revisado é estar no índice. */
+  staging?: boolean;
   /** The file keyboard shortcuts act on. */
   active: boolean;
   collapsed: boolean;
@@ -95,6 +100,8 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pick, setPick] = useState<CommentOffer | null>(null);
+  // Fora do componente: a aba pendente o remonta quando o disco muda, e a conversa tem de ficar.
+  const asks = askStore.useAsks(file.path);
   const pendingFocus = useRef<FocusTarget | null>(null);
 
   // The body stays mounted while it animates closed and is dropped afterwards, so collapsed
@@ -226,6 +233,15 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
     window.getSelection()?.removeAllRanges();
   };
 
+  const openAsk = (ask: Omit<Ask, "id" | "path">, question?: string) => askStore.open({ ...ask, path: file.path }, question);
+
+  const askPick = () => {
+    if (!pick) return;
+    openAsk({ side: pick.side, start: pick.start, end: pick.end, quote: pick.quote });
+    setPick(null);
+    window.getSelection()?.removeAllRanges();
+  };
+
   const inline = useMemo(() => {
     const at = new Map<string, Bookmark[]>();
     const marked = new Set<string>();
@@ -278,27 +294,55 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
     setSelection(null);
   };
 
-  async function saveDraft(note: string) {
-    if (!draft) return;
-    const oid = draft.side === "new" ? file.newOid : file.oldOid;
+  async function addBookmark(range: Draft, note: string) {
+    const oid = range.side === "new" ? file.newOid : file.oldOid;
     let snapshot: string[] = [];
     try {
-      if (oid) snapshot = (await getBlob(root, oid)).slice(draft.start - 1, draft.end);
+      if (oid) snapshot = (await getBlob(root, oid)).slice(range.start - 1, range.end);
     } catch {
       // Without a snapshot the bookmark shows as outdated once the file changes.
     }
     onAddBookmark({
       path: file.path,
-      side: draft.side,
-      startLine: draft.start,
-      endLine: draft.end,
+      side: range.side,
+      startLine: range.start,
+      endLine: range.end,
       note,
-      quote: draft.quote,
+      quote: range.quote,
       snapshot,
       fingerprint: file.fingerprint,
     });
+  }
+
+  async function saveDraft(note: string) {
+    if (!draft) return;
+    await addBookmark(draft, note);
     cancelDraft();
   }
+
+  // A decisão tomada com o Claude vira o marcador — ou reescreve aquele de onde a pergunta saiu.
+  async function decide(ask: AskState, note: string) {
+    if (ask.bookmarkId) onUpdateBookmark(ask.bookmarkId, note);
+    else await addBookmark(ask, note);
+    askStore.close(ask.id);
+  }
+
+  const askBox = (a: AskState) => (
+    <AskBox key={a.id} root={root} file={file} ask={a} onDecide={(note) => decide(a, note)} />
+  );
+
+  // Uma alteração pode tirar do diff a linha em que a pergunta estava presa. Ela não some por
+  // isso: vai para o topo do arquivo, onde a conversa (e o desfazer) continuam à mão.
+  const orphans = useMemo(() => {
+    if (!asks.length || !rows.length) return [];
+    const anchors = new Set<string>();
+    for (const row of rows) {
+      if (row.type === "gap") continue;
+      if (row.kind !== "add" && row.oldNo !== null) anchors.add(`old:${row.oldNo}`);
+      if (row.kind !== "del" && row.newNo !== null) anchors.add(`new:${row.newNo}`);
+    }
+    return asks.filter((a) => !anchors.has(`${a.side}:${a.end}`));
+  }, [asks, rows]);
 
   const ctx: RowContext = {
     sources,
@@ -332,7 +376,8 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
     renderAfter(side, line) {
       const list = inline.at.get(`${side}:${line}`);
       const showDraft = draft !== null && draft.side === side && draft.end === line;
-      if (!list && !showDraft) return null;
+      const here = asks.filter((a) => a.side === side && a.end === line);
+      if (!list && !showDraft && !here.length) return null;
       return (
         <div className="annotations" key={side}>
           {list?.map((b) =>
@@ -357,15 +402,30 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
                 onEdit={() => setEditingId(b.id)}
                 onRemove={() => onRemoveBookmark(b.id)}
                 onToggleResolved={() => onToggleResolved(b.id)}
+                onAsk={() =>
+                  openAsk({
+                    side: b.side,
+                    start: b.startLine,
+                    end: b.endLine,
+                    quote: b.quote,
+                    note: b.note,
+                    bookmarkId: b.id,
+                  })
+                }
               />
             ),
           )}
+          {here.map(askBox)}
           {showDraft && (
             <BookmarkEditor
               label={rangeLabel({ side: draft.side, startLine: draft.start, endLine: draft.end })}
               quote={draft.quote}
               onSave={saveDraft}
               onCancel={cancelDraft}
+              onAsk={(question) => {
+                openAsk({ side: draft.side, start: draft.start, end: draft.end, quote: draft.quote }, question);
+                cancelDraft();
+              }}
             />
           )}
         </div>
@@ -390,7 +450,12 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
   } else if (!inView) {
     body = <div style={{ height: totalLines * ROW_HEIGHT }} />;
   } else {
-    body = pairs ? <SplitTable rows={pairs} ctx={ctx} /> : <UnifiedTable rows={rows} ctx={ctx} />;
+    body = (
+      <>
+        {orphans.length > 0 && <div className="annotations orphan-asks">{orphans.map(askBox)}</div>}
+        {pairs ? <SplitTable rows={pairs} ctx={ctx} /> : <UnifiedTable rows={rows} ctx={ctx} />}
+      </>
+    );
   }
 
   const modeChanged =
@@ -445,7 +510,10 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
         )}
         <label
           className={viewed ? "viewed-toggle on" : "viewed-toggle"}
-          title={active ? "Marcar como revisado (V)" : "Marcar como revisado"}
+          title={
+            (props.staging ? "Revisado põe no índice (git add); desmarcar tira (git restore --staged)" : "Marcar como revisado") +
+            (active ? " (V)" : "")
+          }
         >
           <input type="checkbox" checked={viewed} onChange={() => onSetViewed(file, !viewed)} />
           Revisado
@@ -470,17 +538,21 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
         </div>
       )}
       {pick && (
-        <button
-          className="btn primary comment-selection"
-          style={{ top: pick.top, left: pick.left }}
-          title={`Comentar o trecho selecionado (${rangeLabel({ side: pick.side, startLine: pick.start, endLine: pick.end }).toLowerCase()})`}
-          // Keep the selection alive until the click lands.
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={commentPick}
-        >
-          <Icon name="bookmark" size={13} />
-          Comentar
-        </button>
+        // Keep the selection alive until the click lands.
+        <div className="comment-selection" style={{ top: pick.top, left: pick.left }} onMouseDown={(e) => e.preventDefault()}>
+          <button
+            title={`Comentar o trecho selecionado (${rangeLabel({ side: pick.side, startLine: pick.start, endLine: pick.end }).toLowerCase()})`}
+            onClick={commentPick}
+          >
+            <Icon name="bookmark" size={13} />
+            Comentar
+          </button>
+          <span className="sep" />
+          <button className="ask-pick" title="Perguntar ao Claude sobre o trecho selecionado" onClick={askPick}>
+            <Icon name="sparkle" size={13} />
+            Perguntar
+          </button>
+        </div>
       )}
     </section>
   );

@@ -9,6 +9,7 @@ import { nossoAtalho, type Atalho } from "./atalhos";
 import { configsDe, listaDoPlay, tarefaAntes, tarefasDe, type ConfigLaunch, type Tarefa } from "./run/launch";
 import { linhaDeComando, runnerPara, type Plano } from "./run/runners";
 import { citar, palavra } from "./run/shell";
+import { ESTACOES, type Estacao } from "./estacoes";
 import "@xterm/xterm/css/xterm.css";
 import "./style.css";
 
@@ -119,9 +120,14 @@ type Aba = {
   corpo: HTMLDivElement;
   chip: HTMLDivElement;
   rotulo: HTMLSpanElement;
+  /// A branch do painel em foco, logo depois do título do chip.
+  ramo: Ramo;
   raiz: No;
   /// Painel que recebe o teclado; é o título dele que a aba mostra.
   foco: Folha;
+  /// O painel que ocupa a aba inteira, com os outros escondidos por um tempo.
+  /// Eles continuam vivos na árvore — recolher devolve o layout como estava.
+  maximizada?: Folha;
 };
 
 /// O terminal do app que o play de um painel roda: dentro do painel, embaixo do
@@ -186,7 +192,9 @@ function abaDe(no: No): Aba | undefined {
 /// Os painéis que estão na tela: os da árvore, e as gavetas abertas. Escondida,
 /// a gaveta guarda o último tamanho, como uma aba escondida (ver `ativar`).
 function* visiveis(aba: Aba): Generator<Folha> {
-  for (const f of folhas(aba.raiz)) {
+  // Maximizado, só ele está na tela. Os escondidos guardam a grade que tinham,
+  // como uma aba escondida: sem medida, nada de SIGWINCH pra zero.
+  for (const f of aba.maximizada ? [aba.maximizada] : folhas(aba.raiz)) {
     // A gaveta antes do dono: ela está dentro do elemento dele, e quem procura
     // o painel sob o ponteiro (`folhaEm`) tem de achá-la primeiro.
     if (f.gaveta?.aberta) yield f.gaveta.folha;
@@ -245,6 +253,10 @@ function agendarSync(aba: Aba) {
 function focar(folha: Folha) {
   const aba = abaDe(folha);
   if (!aba) return;
+  // Ir pra um painel escondido (o ⌘⇧A, um que espera por você) é querer vê-lo:
+  // o layout volta antes. A gaveta do maximizado está na tela, e fica.
+  const dono = folha.dono ?? folha;
+  if (aba.maximizada && aba.maximizada !== dono) recolher(aba);
   aba.foco.el.classList.remove("focada");
   aba.foco = folha;
   folha.el.classList.add("focada");
@@ -258,6 +270,7 @@ function focar(folha: Folha) {
 function rotular(aba: Aba) {
   aba.rotulo.textContent = aba.foco.titulo;
   aba.chip.title = aba.foco.titulo;
+  mostrarRamos(aba);
   if (aba === ativa && !noDiff) janela.setTitle(`${aba.foco.titulo} — TermIAu`).catch(() => {});
 }
 
@@ -273,6 +286,8 @@ function ativar(aba: Aba) {
   // da janela nesse meio-tempo: remede agora, antes de devolver o foco.
   medir(aba);
   sincronizar(aba);
+  // A branch que chegou com a aba escondida mediu zero e não saiu andando.
+  for (const f of visiveis(aba)) if (f.barra) repassear(f.barra.ramo);
   aba.foco.term.focus();
   rotular(aba);
 }
@@ -373,6 +388,7 @@ async function criarFolha(
   });
 
   desenharBarra(folha);
+  desenharMaximizar(folha);
   agendarProjeto(folha);
   return folha;
 }
@@ -418,13 +434,14 @@ async function novaAba() {
     const rotulo = document.createElement("span");
     rotulo.className = "tab-titulo";
     rotulo.textContent = folha.titulo;
+    const ramo = criarRamo("tab-ramo");
     const fechar = document.createElement("span");
     fechar.className = "tab-fechar";
     fechar.textContent = "✕";
-    chip.append(sinal, rotulo, fechar);
+    chip.append(sinal, rotulo, ramo.el, fechar);
     barra.appendChild(chip);
 
-    const aba: Aba = { corpo, chip, rotulo, raiz: folha, foco: folha };
+    const aba: Aba = { corpo, chip, rotulo, ramo, raiz: folha, foco: folha };
     folha.el.classList.add("focada");
 
     // Fechar aba não tem desfazer: o shell morre junto, e com ele o que estava
@@ -721,6 +738,9 @@ async function dividir(eixo: Eixo) {
   if (ocupado || noDiff || !ativa) return;
   ocupado = true;
   const aba = ativa;
+  // Dividir é mexer no layout, e ele tem de estar à vista pra isso.
+  terminarAnimacao();
+  if (aba.maximizada) recolher(aba, false);
   const alvo = aba.foco;
   try {
     const cwd = await invoke<string | null>("pty_cwd", { id: alvo.id });
@@ -763,6 +783,7 @@ async function dividir(eixo: Eixo) {
     if (d.pai) trocarFilho(d.pai, alvo, d);
     else aba.raiz = d;
     aba.corpo.classList.add("dividida");
+    marcarMaximizada(aba);
 
     medir(aba);
     sincronizar(aba);
@@ -798,6 +819,10 @@ function fecharFolha(folha: Folha, opts: { jaMorto?: boolean } = {}) {
 
   const pai = folha.pai;
   const irmao = pai.filhos[pai.filhos[0] === folha ? 1 : 0];
+  // A animação anda pelos cortes da árvore, e a árvore vai mudar.
+  terminarAnimacao();
+  // Fechou o maximizado: não há mais o que manter em tela cheia.
+  if (aba.maximizada === folha) aba.maximizada = undefined;
   destruirFolha(folha, opts.jaMorto ?? false);
 
   // O irmão sobe e ocupa sozinho o espaço que era dos dois. Sai do DOM junto com
@@ -810,6 +835,9 @@ function fecharFolha(folha: Folha, opts: { jaMorto?: boolean } = {}) {
   if (pai.pai) trocarFilho(pai.pai, pai, irmao);
   else aba.raiz = irmao;
   aba.corpo.classList.toggle("dividida", aba.raiz.tipo === "divisao");
+  // Um escondido que fechou sozinho (um `exit`, o shell caiu) mudou a árvore
+  // por baixo do maximizado: o caminho até ele é outro agora.
+  marcarMaximizada(aba);
 
   medir(aba);
   sincronizar(aba);
@@ -840,6 +868,129 @@ function fecharAba(aba: Aba) {
   if (ativa === aba) ativar(abas[Math.min(i, abas.length - 1)]);
 }
 
+// ---------- maximizar ----------
+
+/// Marca no DOM o caminho da raiz até o painel maximizado: é o que o CSS usa
+/// pra esconder o resto sem tirar nada da árvore. Refeito a cada mudança nela.
+/// Com um painel só não há o que esconder, e o estado se desfaz sozinho.
+function marcarMaximizada(aba: Aba) {
+  if (aba.maximizada && (aba.maximizada.morta || aba.raiz.tipo === "folha")) {
+    aba.maximizada = undefined;
+  }
+  for (const el of aba.corpo.querySelectorAll(".caminho")) el.classList.remove("caminho");
+  const m = aba.maximizada;
+  aba.corpo.classList.toggle("maximizada", !!m);
+  if (m) {
+    let no: No | undefined = m;
+    for (; no; no = no.pai) no.el.classList.add("caminho");
+  }
+  for (const f of folhas(aba.raiz)) desenharMaximizar(f);
+}
+
+/// Mais curta que o `--tempo` do CSS: aquele é de sinais que acendem e apagam;
+/// este é o layout inteiro andando, e ele tem de parecer resposta ao clique.
+const DURACAO_MAXIMIZAR = 240;
+const movimentoReduzido = matchMedia("(prefers-reduced-motion: reduce)");
+
+/// A animação em curso, se houver. Terminar é pular pro último quadro: quem
+/// mexe na árvore (dividir, fechar) ou alterna de novo no meio não espera.
+let animacao: { terminar: () => void } | undefined;
+
+function terminarAnimacao() {
+  animacao?.terminar();
+}
+
+/// Um quadro do caminho até `m`, de 0 (o layout de sempre) a 1 (ele sozinho).
+/// Cada corte do caminho entrega a fatia inteira ao lado de `m` e o vão fecha.
+/// É o grid que anda, não um `transform`: escalar o terminal borraria o texto.
+/// A grade do xterm não acompanha — quem está espremido é cortado pelo cartão,
+/// e todo mundo é remedido uma vez só, no fim.
+function quadroMaximizar(m: Folha, t: number) {
+  let filho: No = m;
+  for (let d = m.pai; d; filho = d, d = d.pai) {
+    const alvo = d.filhos[0] === filho ? 1 : 0;
+    const f = d.fracao + (alvo - d.fracao) * t;
+    const tracks = `${f}fr calc(var(--vao) * ${1 - t}) ${1 - f}fr`;
+    d.el.style.gridTemplate = d.eixo === "lado" ? `1fr / ${tracks}` : `${tracks} / 1fr`;
+  }
+}
+
+function animarMaximizar(m: Folha, de: number, para: number, fim: () => void) {
+  terminarAnimacao();
+  const inicio = performance.now();
+  let raf = 0;
+  const esta = {
+    terminar() {
+      if (animacao !== esta) return;
+      animacao = undefined;
+      cancelAnimationFrame(raf);
+      // O grid volta às frações de verdade; com o painel maximizado quem manda
+      // no layout é o CSS, e elas ficam guardadas pra quando recolher.
+      for (let d = m.pai; d; d = d.pai) aplicarFracao(d);
+      fim();
+    },
+  };
+  animacao = esta;
+  if (movimentoReduzido.matches) return esta.terminar();
+  const quadro = (agora: number) => {
+    const p = Math.min(1, (agora - inicio) / DURACAO_MAXIMIZAR);
+    // Sai rápido e pousa devagar, como o resto das animações do app.
+    const e = 1 - Math.pow(1 - p, 3);
+    quadroMaximizar(m, de + (para - de) * e);
+    if (p < 1) raf = requestAnimationFrame(quadro);
+    else esta.terminar();
+  };
+  raf = requestAnimationFrame(quadro);
+}
+
+function maximizar(folha: Folha) {
+  const aba = abaDe(folha);
+  if (!aba || aba.raiz.tipo === "folha") return;
+  terminarAnimacao();
+  aba.maximizada = folha;
+  for (const f of folhas(aba.raiz)) desenharMaximizar(f);
+  focar(folha);
+  // Os outros só somem no fim: até lá eles estão sendo espremidos, à vista.
+  animarMaximizar(folha, 0, 1, () => {
+    marcarMaximizada(aba);
+    medir(aba);
+    sincronizar(aba);
+  });
+}
+
+/// `animar: false` é pra quem vai mexer na árvore logo em seguida (dividir):
+/// o layout tem de estar no lugar já, não daqui a um quarto de segundo.
+function recolher(aba: Aba, animar = true) {
+  terminarAnimacao();
+  const m = aba.maximizada;
+  if (!m) return;
+  const voltar = () => {
+    // Os que estavam escondidos voltam com a grade de antes; a janela pode ter
+    // mudado de tamanho nesse meio-tempo.
+    medir(aba);
+    sincronizar(aba);
+    // O painel sai do lugar de tela cheia sem `blur`: reencosta o teclado.
+    aba.foco.term.focus();
+  };
+  aba.maximizada = undefined;
+  if (!animar) {
+    marcarMaximizada(aba);
+    return voltar();
+  }
+  // O grid é posto no último quadro ANTES de o CSS soltar os outros painéis:
+  // tirar as classes com as frações de sempre no grid piscaria o layout todo.
+  quadroMaximizar(m, 1);
+  marcarMaximizada(aba);
+  animarMaximizar(m, 1, 0, voltar);
+}
+
+function alternarMaximizar(folha: Folha) {
+  const aba = abaDe(folha);
+  if (!aba) return;
+  if (aba.maximizada) recolher(aba);
+  else maximizar(folha);
+}
+
 // ---------- navegação entre painéis ----------
 
 /// Painel mais próximo na direção pedida. Vale a geometria na tela, não a forma
@@ -852,8 +1003,15 @@ function vizinho(folha: Folha, dir: "Left" | "Right" | "Up" | "Down"): Folha | u
   const horizontal = dir === "Left" || dir === "Right";
   const sinal = dir === "Left" || dir === "Up" ? -1 : 1;
 
+  // O centro do painel de agora no outro eixo. Entre vários painéis à mesma
+  // distância — um em cima e três embaixo —, vai para o mais alinhado com ele,
+  // que é o do meio. De lá, os dos lados ficam a um passo cada.
+  const centro = (q: DOMRect) => (horizontal ? q.top + q.height / 2 : q.left + q.width / 2);
+  const meu = centro(r);
+
   let melhor: Folha | undefined;
   let menor = Infinity;
+  let desvio = Infinity;
   for (const f of visiveis(aba)) {
     if (f === folha) continue;
     const q = f.el.getBoundingClientRect();
@@ -865,8 +1023,12 @@ function vizinho(folha: Folha, dir: "Left" | "Right" | "Up" | "Down"): Folha | u
       ? q.bottom > r.top && q.top < r.bottom
       : q.right > r.left && q.left < r.right;
     if (!cruza) continue;
-    if (passo < menor) {
+    const d = Math.abs(centro(q) - meu);
+    // A folga de 2px absorve o arredondamento do grid: painéis da mesma fileira
+    // podem começar meio pixel um do outro.
+    if (passo < menor - 2 || (Math.abs(passo - menor) <= 2 && d < desvio)) {
       menor = passo;
+      desvio = d;
       melhor = f;
     }
   }
@@ -921,6 +1083,8 @@ function pintar() {
       }
     }
     aba.chip.dataset.claude = sinal;
+    // Abrir ou fechar um painel muda quantas pastas a aba tem.
+    mostrarRamos(aba);
   }
   janela.setBadgeCount(esperando || undefined).catch(() => {});
 }
@@ -1314,14 +1478,23 @@ type Barra = {
   grupoPlay: HTMLDivElement;
   play: HTMLButtonElement;
   playIcone: HTMLSpanElement;
-  playNome: HTMLSpanElement;
+  /// O nome da configuração escolhida. Mora no botão de escolher, não no play:
+  /// é o rótulo da lista, e é clicando nele que se troca de configuração.
+  nome: HTMLSpanElement;
   escolher: HTMLButtonElement;
   diff: HTMLButtonElement;
+  maximizar: HTMLButtonElement;
   projeto: Projeto | null;
   /// A raiz do repositório git em que o shell deste painel está, ou `null` se
   /// ele não estiver em nenhum. É ela que diz se o botão de diff tem para onde
   /// levar, e é por ela que se sabe se o diff aberto é o deste painel.
   repo: string | null;
+  /// A pasta do shell e a branch dela. Quem decide se a branch aparece na
+  /// barra é `mostrarRamos`: só quando os painéis da aba não estão todos na
+  /// mesma pasta — senão a do chip da aba já diz tudo.
+  pasta: string | null;
+  branch: string | null;
+  ramo: Ramo;
   /// Respostas de `carregarProjeto` chegando fora de ordem (vários `cd`
   /// seguidos) não podem sobrescrever a mais nova.
   pedido: number;
@@ -1337,6 +1510,8 @@ const ICONE_PLAY = `<svg viewBox="0 0 16 16" width="13" height="13" fill="curren
 const ICONE_PARAR = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/></svg>`;
 const ICONE_REINICIAR = traco("M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3");
 const ICONE_ESCOLHER = traco("M4.5 6.5 8 10l3.5-3.5");
+const ICONE_MAXIMIZAR = traco("M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9");
+const ICONE_RECOLHER = traco("M13.5 2.5 9 7M9 3.5V7h3.5M2.5 13.5 7 9M7 12.5V9H3.5");
 const ICONE_GAVETA = traco("M3.5 2.5h9a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12V4a1.5 1.5 0 0 1 1.5-1.5ZM2 9.5h12");
 
 function elemento<K extends keyof HTMLElementTagNameMap>(tag: K, classe: string): HTMLElementTagNameMap[K] {
@@ -1363,21 +1538,34 @@ function criarBarra(): Barra {
   const acoes = elemento("span", "tarefa-acoes");
   const gaveta = botaoTarefa("tarefa-gaveta", ICONE_GAVETA);
   const parar = botaoTarefa("tarefa-parar", ICONE_PARAR);
+  // Dois botões, e não um partido: o play roda, o dropdown escolhe. Enquanto o
+  // nome da configuração morava dentro do play, a caixa inteira parecia uma
+  // lista — e clicar no nome, que é o alvo maior e o que mais parece rótulo de
+  // dropdown, rodava o app. Agora o nome é do dropdown, e o play é só o ▶.
   const playIcone = elemento("span", "tarefa-icone");
-  const playNome = elemento("span", "tarefa-nome");
   const play = botaoTarefa("tarefa-play", "");
-  play.append(playIcone, playNome);
-  const escolher = botaoTarefa("tarefa-escolher", ICONE_ESCOLHER);
-  escolher.title = "Escolher a configuração do launch.json";
+  play.append(playIcone);
+  const nome = elemento("span", "tarefa-nome");
+  const seta = elemento("span", "tarefa-seta");
+  seta.innerHTML = ICONE_ESCOLHER;
+  const escolher = botaoTarefa("tarefa-escolher", "");
+  escolher.append(nome, seta);
   const grupoPlay = elemento("div", "tarefa-play-grupo");
   grupoPlay.append(play, escolher);
   const diff = botaoTarefa("tarefa-diff", ICONE_DIFF);
   diff.title = "Diff da branch deste painel";
-  controles.append(acoes, gaveta, parar, grupoPlay, diff);
-  el.append(titulo, aviso, controles);
+  const maximizar = botaoTarefa("tarefa-maximizar", ICONE_MAXIMIZAR);
+  // Quem decide se aparece é `desenharMaximizar`, quando a folha já tem aba.
+  maximizar.hidden = true;
+  controles.append(acoes, gaveta, parar, grupoPlay, diff, maximizar);
+  const ramo = criarRamo("tarefa-ramo");
+  el.append(titulo, ramo.el, aviso, controles);
   return {
     el,
     titulo,
+    pasta: null,
+    branch: null,
+    ramo,
     aviso,
     acoes,
     gaveta,
@@ -1385,9 +1573,10 @@ function criarBarra(): Barra {
     grupoPlay,
     play,
     playIcone,
-    playNome,
+    nome,
     escolher,
     diff,
+    maximizar,
     projeto: null,
     repo: null,
     pedido: 0,
@@ -1409,6 +1598,25 @@ function ligarBarra(folha: Folha) {
   // O diff é de um repositório, e quem sabe qual é o painel: cada um tem o seu
   // diretório — com a tela dividida em três projetos, cada painel diz o seu.
   b.diff.addEventListener("click", () => void abrirDiff(folha));
+  b.maximizar.addEventListener("click", () => alternarMaximizar(folha));
+  // Duplo clique na barra faz o mesmo — o alvo grande, como a barra de título
+  // de uma janela. Nos botões dela, não: dois cliques no play são dois plays.
+  b.el.addEventListener("dblclick", (e) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    alternarMaximizar(folha);
+  });
+}
+
+/// O botão só existe com a tela dividida: com um painel só ele já é a aba toda.
+function desenharMaximizar(folha: Folha) {
+  const b = folha.barra;
+  const aba = abaDe(folha);
+  if (!b || !aba) return;
+  const cheio = aba.maximizada === folha;
+  b.maximizar.hidden = aba.raiz.tipo === "folha";
+  b.maximizar.classList.toggle("ligado", cheio);
+  b.maximizar.innerHTML = cheio ? ICONE_RECOLHER : ICONE_MAXIMIZAR;
+  b.maximizar.title = cheio ? "Recolher — ver os outros painéis (⌘⇧↩)" : "Ocupar a aba toda (⌘⇧↩)";
 }
 
 function desenharBarra(folha: Folha) {
@@ -1456,11 +1664,19 @@ function desenharBarra(folha: Folha) {
   const cfg = configEscolhida(proj);
   const reiniciar = rodando && ex?.pasta === proj?.pasta && ex?.nome === cfg?.name;
   b.playIcone.innerHTML = reiniciar ? ICONE_REINICIAR : ICONE_PLAY;
-  b.playNome.textContent = cfg?.name ?? "";
   b.play.disabled = !cfg;
   b.play.title =
     proj?.erro ?? (cfg ? `${reiniciar ? "Reiniciar" : "Rodar"} ${cfg.name}` : "O launch.json não tem configurações");
-  b.escolher.hidden = (proj?.configs.length ?? 0) < 2;
+
+  // Com uma configuração só não há o que escolher, mas o nome continua sendo a
+  // única pista do que o ▶ vai rodar. Então o botão fica, sem a seta e sem o
+  // clique: vira rótulo. Some de vez só quando não há nome nenhum a mostrar.
+  const varias = (proj?.configs.length ?? 0) > 1;
+  b.nome.textContent = cfg?.name ?? "";
+  b.escolher.hidden = !cfg;
+  b.escolher.disabled = !varias;
+  b.escolher.classList.toggle("rotulo", !varias);
+  b.escolher.title = varias ? "Escolher a configuração do launch.json" : (cfg?.name ?? "");
 }
 
 /// Refeito na criação do painel e a cada título novo — um `cd` muda o título, e
@@ -1484,6 +1700,11 @@ async function carregarProjeto(folha: Folha) {
   const raiz = cwd
     ? await invoke<string | null>("repo_root", { path: cwd }).catch(() => null)
     : null;
+  // Fora de repositório nem pergunta. Com o HEAD solto também volta nulo: não
+  // há nome de branch para mostrar.
+  const branch = raiz
+    ? await invoke<string | null>("repo_branch", { path: cwd }).catch(() => null)
+    : null;
   if (achado) {
     const { pasta, home } = achado;
     let tarefasDoProjeto: Tarefa[] = [];
@@ -1501,6 +1722,10 @@ async function carregarProjeto(folha: Folha) {
   if (pedido !== b.pedido || folha.morta) return;
   b.repo = raiz;
   b.projeto = novo;
+  b.pasta = cwd;
+  b.branch = branch;
+  const aba = abaDe(folha);
+  if (aba) mostrarRamos(aba);
   desenharBarra(folha);
 }
 
@@ -1527,6 +1752,11 @@ function lembrarConfig(pasta: string, nome: string) {
 /// A lista de configurações. Uma só para a janela, posta junto do botão de quem
 /// a abriu: dentro de um painel ela seria cortada pela borda dele.
 const menuEl = elemento("div", "tarefa-menu");
+/// O vão entre o botão e a lista.
+const VAO_MENU = 4;
+/// Quanto a lista guarda da borda da janela. Encostada, ela parece cortada
+/// mesmo quando cabe inteira.
+const MARGEM_MENU = 24;
 let menuDe: Folha | undefined;
 
 function montarMenu() {
@@ -1576,12 +1806,32 @@ function alternarMenu(folha: Folha) {
       return item;
     }),
   );
-  const r = b.escolher.getBoundingClientRect();
-  menuEl.style.top = `${r.bottom + 4}px`;
-  menuEl.style.right = `${window.innerWidth - r.right}px`;
-  // Um launch.json com dezenas de configurações passa da janela: a lista rola.
-  menuEl.style.maxHeight = `${window.innerHeight - r.bottom - 12}px`;
+  // Mede a lista na altura natural antes de decidir onde ela vai: é essa altura
+  // que diz se cabe embaixo. Tudo no mesmo quadro, então nada pisca.
+  menuEl.style.maxHeight = "";
+  menuEl.style.top = "0px";
+  menuEl.style.bottom = "";
   menuEl.hidden = false;
+  const altura = menuEl.offsetHeight;
+
+  const r = b.escolher.getBoundingClientRect();
+  menuEl.style.right = `${window.innerWidth - r.right}px`;
+  const embaixo = window.innerHeight - r.bottom - VAO_MENU - MARGEM_MENU;
+  const emCima = r.top - VAO_MENU - MARGEM_MENU;
+  // Abre para baixo, como todo dropdown. Sobe só quando embaixo não cabe e em
+  // cima há mais espaço: um painel na metade de baixo da janela tem a barra
+  // perto da borda, e embaixo dela a lista teria dois itens de altura — ou
+  // nenhum, que era o que acontecia quando a conta dava negativa e o navegador
+  // jogava o max-height fora. Nos dois lados a altura é limitada ao espaço que
+  // sobra: um launch.json com dezenas de configurações rola em vez de vazar.
+  if (altura <= embaixo || embaixo >= emCima) {
+    menuEl.style.top = `${r.bottom + VAO_MENU}px`;
+    menuEl.style.maxHeight = `${Math.max(embaixo, 0)}px`;
+  } else {
+    menuEl.style.top = "";
+    menuEl.style.bottom = `${window.innerHeight - r.top + VAO_MENU}px`;
+    menuEl.style.maxHeight = `${Math.max(emCima, 0)}px`;
+  }
   menuEl.querySelector(".escolhida")?.scrollIntoView({ block: "nearest" });
   menuDe = folha;
 }
@@ -1822,51 +2072,34 @@ async function parar(ex: Execucao) {
   }
 }
 
-// ---------- lofi: a rádio do rodapé ----------
+// ---------- rádio: a do rodapé ----------
 
-type Estacao = { id: string; nome: string };
+/// A lista mora no `estacoes.ts`, com a explicação de onde ela vem e do que o
+/// `espectro` de cada uma quer dizer.
+const estacoes = ESTACOES;
 
-/// As que vêm de fábrica — as do lofi.cafe, lives 24/7 do YouTube. São só o
-/// ponto de partida: a lista é sua, editável em Rádio ▸ Estações…, e a partir
-/// da primeira mexida o que vale é o que está no localStorage.
-///
-/// Sete são as do site; a oitava de lá (`AzwgsZUcTfM`, Autumn Chill) saiu do ar
-/// e deu lugar à da Lofi Girl. Um id morto não falha no build: falha no ▶, e só
-/// em cima daquela estação.
-const ESTACOES_PADRAO: Estacao[] = [
-  { id: "7NOSDKb0HlU", nome: "lofi hip hop radio 🐾 beats to study/relax to" },
-  { id: "5yx6BWlEVcY", nome: "Chillhop Radio — jazzy & lofi hip hop beats" },
-  { id: "lP26UCnoH9s", nome: "coffee shop radio — 24/7 lofi hip-hop beats" },
-  { id: "1wckb-eWOxw", nome: "jazz/lofi hip hop radio 🌱 chill beats" },
-  { id: "apCom1TeTiA", nome: "24/7 lofi hip hop radio — study/chill/relax" },
-  { id: "qH3fETPsqXU", nome: "chill lofi hip hop radio — sleep/relax/study" },
-  { id: "jfKfPfyJRdk", nome: "lofi hip hop radio 📚 beats to relax/study to" },
-  { id: "tNkZsRW7h2c", nome: "Space Ambient — music for stress relief" },
-];
-
-const CHAVE_ESTACOES = "termiau:lofi:estacoes";
-/// A estação de agora vai guardada pelo id, e não pelo índice: a lista muda de
-/// tamanho quando você tira uma, e o índice passaria a apontar para outra.
-const CHAVE_ATUAL = "termiau:lofi:atual";
+/// A estação de agora vai guardada pelo endereço, e não pelo índice: a lista é
+/// refeita a cada sondagem, e o índice passaria a apontar para outra. O volume é
+/// um número de 0 a 100.
+const CHAVE_ATUAL = "termiau:radio:atual";
 const CHAVE_VOLUME = "termiau:lofi:volume";
 
-/// O que está guardado pode ter vindo de uma versão anterior, de uma mão no
-/// devtools ou de um JSON pela metade. Só passa o que tem a forma certa — e uma
-/// lista vazia é resposta legítima: é o que sobra de tirar todas.
-function carregarEstacoes(): Estacao[] {
-  const bruto = localStorage.getItem(CHAVE_ESTACOES);
-  if (bruto === null) return [...ESTACOES_PADRAO];
-  try {
-    const lista: unknown = JSON.parse(bruto);
-    if (!Array.isArray(lista)) return [...ESTACOES_PADRAO];
-    return lista.filter((e): e is Estacao => {
-      const o = e as Partial<Estacao> | null;
-      return !!o && typeof o.id === "string" && o.id !== "" && typeof o.nome === "string";
-    });
-  } catch {
-    return [...ESTACOES_PADRAO];
-  }
-}
+/// Os cinco estágios do volume. Um clique sobe um; depois do cheio, mudo. É o
+/// que cabe num rodapé de 30px: um slider precisa de um alvo comprido para o
+/// ponteiro andar, e comprido é exatamente o que não sobra aqui.
+///
+/// Fica AQUI, e não lá embaixo com o botão que o usa: o `volumeLofi` logo abaixo
+/// já o lê, e uma `const` declarada depois disso não existe ainda na hora de
+/// ler. O `tsc` não pega — a leitura acontece dentro de uma função, e de lá ele
+/// não sabe dizer quem roda antes de quem. O app é que não sobe: `ReferenceError:
+/// Cannot access 'VOLUMES' before initialization`, e a janela fica branca.
+const VOLUMES = [0, 25, 50, 75, 100];
+
+/// O valor guardado pode ser de uma versão em que o volume era contínuo — ou
+/// qualquer número entre 0 e 100. Encaixa no estágio mais próximo: um volume
+/// fora da escada não teria como subir um degrau.
+const estagio = (v: number): number =>
+  VOLUMES.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
 
 /// Chave ausente e chave com lixo dão no mesmo: o padrão. `Number(null)` é 0, e
 /// sem a checagem de nulo o volume nasceria mudo na primeira execução.
@@ -1876,48 +2109,22 @@ function lembrado(chave: string, padrao: number, teto: number): number {
   return Number.isFinite(n) && n >= 0 && n <= teto ? Math.round(n) : padrao;
 }
 
-let estacoes = carregarEstacoes();
-let estacao = Math.max(0, estacoes.findIndex((e) => e.id === localStorage.getItem(CHAVE_ATUAL)));
-let volumeLofi = lembrado(CHAVE_VOLUME, 55, 100);
+let estacao = Math.max(
+  0,
+  estacoes.findIndex((e) => e.url === localStorage.getItem(CHAVE_ATUAL)),
+);
+let volumeLofi = estagio(lembrado(CHAVE_VOLUME, 50, 100));
 
-/// Sem estação nenhuma não há o que tocar, e todo o resto tem de aguentar isso.
 const atual = (): Estacao | undefined => estacoes[estacao];
-
-function guardarEstacoes() {
-  localStorage.setItem(CHAVE_ESTACOES, JSON.stringify(estacoes));
-}
 
 function guardarAtual() {
   const e = atual();
-  if (e) localStorage.setItem(CHAVE_ATUAL, e.id);
+  if (e) localStorage.setItem(CHAVE_ATUAL, e.url);
 }
-
-/// O punhado da iframe API do YouTube que usamos. Cinco métodos e três eventos:
-/// um pacote de tipos inteiro não se paga por eles.
-type PlayerYT = {
-  playVideo(): void;
-  pauseVideo(): void;
-  setVolume(v: number): void;
-  loadVideoById(id: string): void;
-  cueVideoById(id: string): void;
-};
-
-type ApiYT = { Player: new (alvo: HTMLElement, opcoes: Record<string, unknown>) => PlayerYT };
-
-declare global {
-  interface Window {
-    YT?: ApiYT;
-    onYouTubeIframeAPIReady?: () => void;
-  }
-}
-
-/// Os estados que chegam em `onStateChange`, crus. O `YT.PlayerState`, que os
-/// nomeia, só existe depois que o script carregou — e o número não muda.
-const YT_TOCANDO = 1;
-const YT_CARREGANDO = 3;
+// ---------- rádio: os controles do rodapé ----------
 
 const ICONE_PAUSA = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="4" y="3.5" width="3" height="9" rx="1"/><rect x="9" y="3.5" width="3" height="9" rx="1"/></svg>`;
-const ICONE_ANTERIOR = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="3.6" y="3.6" width="1.7" height="8.8" rx=".85"/><path d="M12.2 4.2v7.6a.6.6 0 0 1-.92.5l-5.2-3.8a.6.6 0 0 1 0-1l5.2-3.8a.6.6 0 0 1 .92.5Z"/></svg>`;
+const ICONE_ESTACOES = traco("M3.5 4.5h9M3.5 8h9M3.5 11.5h9");
 const ICONE_PROXIMA = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="10.7" y="3.6" width="1.7" height="8.8" rx=".85"/><path d="M3.8 4.2v7.6a.6.6 0 0 0 .92.5l5.2-3.8a.6.6 0 0 0 0-1L4.72 3.7a.6.6 0 0 0-.92.5Z"/></svg>`;
 const ICONE_TIRAR = traco("M4.8 4.8l6.4 6.4M11.2 4.8l-6.4 6.4");
 
@@ -1933,47 +2140,221 @@ function botaoLofi(classe: string, icone: string, titulo: string): HTMLButtonEle
   return b;
 }
 
-const lofiAnterior = botaoLofi("lofi-anterior", ICONE_ANTERIOR, "Estação anterior");
+/// No lugar onde morava a seta de voltar. Com quarenta e seis estações, andar
+/// para trás de uma em uma não leva a lugar nenhum — a lista leva.
+const lofiEstacoes = botaoLofi("lofi-estacoes", ICONE_ESTACOES, "Estações (lista)");
 const lofiTocar = botaoLofi("lofi-tocar", ICONE_PLAY, "Tocar");
 const lofiProxima = botaoLofi("lofi-proxima", ICONE_PROXIMA, "Próxima estação");
 
-const lofiVolume = elemento("input", "lofi-volume");
-lofiVolume.type = "range";
-lofiVolume.min = "0";
-lofiVolume.max = "100";
-lofiVolume.value = String(volumeLofi);
-lofiVolume.title = "Volume da rádio";
+/// O anel tem raio 5,5 no viewBox de 16 — o perímetro é o comprimento do traço
+/// inteiro, e é dele que sai a fração acesa.
+const VOLUME_ANEL = 2 * Math.PI * 5.5;
+
+const ICONE_VOLUME = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.6" opacity=".26"/><circle class="anel" cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" transform="rotate(-90 8 8)" stroke-dasharray="${VOLUME_ANEL}" stroke-dashoffset="${VOLUME_ANEL}"/><path class="corte" d="M5.1 5.1l5.8 5.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
+
+const lofiVolume = botaoLofi("lofi-volume", ICONE_VOLUME, "Volume");
+const volumeAnel = lofiVolume.querySelector(".anel") as SVGCircleElement;
+const volumeCorte = lofiVolume.querySelector(".corte") as SVGPathElement;
+
+/// O anel acende de cima para baixo no sentido do relógio (daí o `rotate(-90)`
+/// no ícone): cheio é uma volta inteira, mudo é um corte e nenhum traço.
+function desenharVolume() {
+  volumeAnel.style.strokeDashoffset = String(VOLUME_ANEL * (1 - volumeLofi / 100));
+  // `style.display`, e não o atributo `hidden`: num SVG dentro de HTML o
+  // `hidden` não apaga nada sem uma regra de CSS para ele.
+  volumeCorte.style.display = volumeLofi > 0 ? "none" : "";
+  const proximo = VOLUMES[(VOLUMES.indexOf(volumeLofi) + 1) % VOLUMES.length];
+  lofiVolume.title = `${volumeLofi === 0 ? "Mudo" : `Volume ${volumeLofi}%`} — clique para ${
+    proximo === 0 ? "mudo" : `${proximo}%`
+  }`;
+}
 
 const lofiTitulo = elemento("span", "lofi-titulo");
+/// A caixa tem largura fixa; quem anda é este de dentro.
+const lofiTituloTexto = elemento("span", "lofi-titulo-texto");
+lofiTitulo.appendChild(lofiTituloTexto);
 
-/// O analisador de espectro: uma coluna por faixa de frequência, cada uma
-/// recortada em segmentos como um mostrador de LEDs, com o pico que fica no ar
-/// e desce sozinho.
+/// Quanto tempo o texto leva para andar um pixel. ~33 px/s: dá para ler sem
+/// correr atrás, e é devagar o bastante para não puxar o olho de quem está
+/// olhando o terminal.
+const TITULO_MS_POR_PX = 30;
+/// A parada, depois de ter passado o texto todo. É o estado normal da faixa —
+/// o passeio é a exceção, e acontece duas vezes por minuto.
+const TITULO_PARADA_MS = 30_000;
+/// Um beco no fim, com o rabo do texto à vista, antes de voltar ao começo. Sem
+/// ele a última palavra apareceria e sumiria no mesmo quadro.
+const TITULO_FIM_MS = 1_500;
+/// E um no começo, para o texto novo ser lido do início antes de sair andando.
+const TITULO_INICIO_MS = 1_200;
+
+/// Um `[branch]`: os colchetes fora, o nome numa caixa com teto de largura, e
+/// o que não cabe passeia lá dentro como o nome da estação da rádio.
+type Ramo = { el: HTMLSpanElement; caixa: HTMLSpanElement; texto: HTMLSpanElement };
+
+function criarRamo(classe: string): Ramo {
+  const texto = elemento("span", "ramo-texto");
+  const caixa = elemento("span", "ramo-caixa");
+  caixa.append(texto);
+  const el = elemento("span", `ramo ${classe}`);
+  el.append("[", caixa, "]");
+  el.hidden = true;
+  return { el, caixa, texto };
+}
+
+/// Só mexe quando o nome ou a visibilidade mudam: refazer o passeio a cada
+/// prompt o deixaria preso no primeiro pixel.
+function exibirRamo(r: Ramo, nome: string | null) {
+  const novo = nome ?? "";
+  if (r.texto.textContent === novo && r.el.hidden === !nome) return;
+  r.texto.textContent = novo;
+  r.el.hidden = !nome;
+  r.el.title = nome ? `Branch ${nome}` : "";
+  passear(r.caixa, r.texto);
+}
+
+/// Mede de novo quem ficou sem passeio por ter chegado escondido (medindo zero).
+function repassear(r: Ramo) {
+  if (!r.el.hidden && !passeios.has(r.caixa)) passear(r.caixa, r.texto);
+}
+
+/// O chip da aba mostra a branch do painel em foco. Os painéis mostram a deles
+/// só quando nem todos estão na mesma pasta: com todos juntos, repetir em cada
+/// barra o que o chip já diz é só ruído.
+function mostrarRamos(aba: Aba) {
+  const barras = [...folhas(aba.raiz)].flatMap((f) => (f.barra ? [f.barra] : []));
+  const misturadas = new Set(barras.map((b) => b.pasta)).size > 1;
+  for (const b of barras) exibirRamo(b.ramo, misturadas ? b.branch : null);
+  exibirRamo(aba.ramo, aba.foco.barra?.branch ?? null);
+}
+
+/// O passeio em curso de cada caixa. É por caixa porque são várias: a rádio e
+/// a branch de cada painel.
+const passeios = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
+
+/// Põe o texto para passear quando ele não cabe na caixa: anda até o fim, dá
+/// um tempo, volta ao começo e para trinta segundos — e de novo. Cabendo, não
+/// faz nada: passear um texto inteiro à vista seria só mexer por mexer.
 ///
-/// As alturas são MODELADAS, não medidas. O áudio toca dentro do iframe do
-/// YouTube, que é de outra origem: nem o Web Audio nem nada nesta página
-/// alcança a amostra de lá, e sem amostra não há FFT. O modelo é o da curva de
-/// um lofi — grave mandando e pulsando na batida, agudo baixo e nervoso — com
-/// ataque rápido e queda lenta, que é o que faz um mostrador parecer um VU.
-/// Para o espectro de verdade o áudio teria de sair de um `<audio>` nosso, e
-/// não de um iframe de terceiro.
+/// Chamada só quando o texto MUDA. A cada evento do áudio o rodapé se redesenha,
+/// e refazer o passeio em cada um o deixaria preso no primeiro pixel.
+function passear(caixa: HTMLElement, texto: HTMLElement) {
+  clearTimeout(passeios.get(caixa));
+  passeios.delete(caixa);
+  texto.style.transition = "none";
+  texto.style.transform = "translateX(0)";
+
+  // Antes da janela aparecer tudo mede zero. Não é caso de erro: o próximo
+  // texto — e sempre vem um — mede de novo com a caixa já na tela.
+  const sobra = texto.scrollWidth - caixa.clientWidth;
+  if (sobra <= 1) return;
+
+  const andar = () => {
+    const quanto = sobra * TITULO_MS_POR_PX;
+    texto.style.transition = `transform ${quanto}ms linear`;
+    texto.style.transform = `translateX(${-sobra}px)`;
+    passeios.set(caixa, setTimeout(voltar, quanto + TITULO_FIM_MS));
+  };
+
+  const voltar = () => {
+    // De volta ao começo sem transição: o caminho de volta não tem nada para
+    // ler, e desandar o texto na frente de quem leu é pior que um corte.
+    texto.style.transition = "none";
+    texto.style.transform = "translateX(0)";
+    passeios.set(caixa, setTimeout(andar, TITULO_PARADA_MS));
+  };
+
+  passeios.set(caixa, setTimeout(andar, TITULO_INICIO_MS));
+}
+
+const passearTitulo = () => passear(lofiTitulo, lofiTituloTexto);
+
+/// O que está escrito na faixa agora, para saber quando mudou de verdade.
+let tituloNoAr: string | undefined;
+
+// ---------- rádio: o som ----------
+
+/// São DOIS elementos, e não um, porque o Web Audio não serve para toda
+/// estação.
+///
+/// Uma fonte de outra origem que não libera CORS entra no grafo zerada — e como
+/// o grafo é quem fala com o alto-falante, ela tocaria em silêncio. Medido: das
+/// 312 sondadas, 249 mandavam `Access-Control-Allow-Origin` no cabeçalho e só
+/// 56 entregam amostra de verdade. O cabeçalho não basta.
+///
+/// Então a estação que entrega vai pelo `audioGrafo`, com espectro e ganho; a
+/// que não entrega vai pelo `audioDireto`, que nunca entra no grafo e sai
+/// direto no alto-falante. Um elemento não pode ser os dois: o
+/// `createMediaElementSource` é para sempre, e depois dele o som do elemento
+/// não volta a sair sozinho.
+const audioGrafo = new Audio();
+audioGrafo.crossOrigin = "anonymous";
+audioGrafo.preload = "none";
+
+const audioDireto = new Audio();
+audioDireto.preload = "none";
+
+/// O que está tocando agora — um dos dois de cima.
+let audio = audioGrafo;
+
+let tocandoLofi = false;
+let carregandoLofi = false;
+/// Se você pediu play. É o que separa um stream que caiu de um `src` que nós
+/// mesmos tiramos ao pausar.
+let noAr = false;
+/// Sem rede, ou estação fora do ar: o motivo toma o lugar do nome até o próximo
+/// clique que der certo. A faixa cabe uma linha, e o nome pode esperar.
+let avisoLofi: string | undefined;
+// ---------- rádio: o analisador de espectro ----------
+
+/// Uma coluna por faixa de frequência, cada uma recortada em segmentos como um
+/// mostrador de LEDs, com o pico que fica no ar e desce sozinho.
+///
+/// As alturas são MEDIDAS: saem de uma FFT do áudio que está tocando, que é
+/// nosso e veio com CORS. Até a v1 eram modeladas — uma curva de lofi inventada
+/// em cima de um relógio — porque o som vinha de dentro de um iframe do YouTube
+/// e não havia amostra a que chegar.
 const SPEC_BANDAS = 10;
 /// Cinco segmentos de 2px com 1px de vão dão exatamente os 14px da faixa.
 const SPEC_SEGMENTOS = 5;
 /// O mesmo compasso da onda da escuta: ~20 quadros por segundo.
 const SPEC_MS = 50;
-/// A batida: um quadro em cada oito, uns 150 por minuto.
-const SPEC_BATIDA = 8;
 /// Quanto o nível e o pico caem por quadro. O pico desce bem mais devagar — é
-/// disso que ele serve, de deixar no ar por um instante o que já passou.
+/// disso que ele serve, de deixar no ar por um instante o que já passou. A
+/// subida não tem freio: é o ataque que faz um mostrador parecer um VU.
 const SPEC_QUEDA = 0.075;
 const SPEC_QUEDA_PICO = 0.014;
+/// 2048 pontos a 48 kHz dão raias de ~23 Hz. Com 512 as raias saíam a ~94 Hz e
+/// as três primeiras bandas caíam todas nas duas primeiras raias — três colunas
+/// mostrando a mesma coisa, e a primeira delas mostrando a raia DC, que não é
+/// som nenhum.
+const SPEC_FFT = 2048;
+/// A faixa que o mostrador cobre. Abaixo de 40 Hz é ronco de sala, e acima de
+/// 16 kHz um MP3 de 128 kbps não guarda nada: as duas pontas só gastariam
+/// coluna para mostrar chão.
+const SPEC_HZ_MIN = 40;
+const SPEC_HZ_MAX = 16_000;
+/// Quantos dB o mostrador cobre, do chão ao topo da coluna. Medido: numa faixa
+/// de electronic, cada banda vive uns 7 dB abaixo do próprio pico, e as de cima
+/// uns 14. Com 16 dB de escala isso vira três segmentos acesos no corpo da
+/// música e cinco nos picos — que é um mostrador respirando, e não uma parede.
+const SPEC_ALCANCE = 16;
+/// O teto de cada banda é MÓVEL: sobe no pico e desce sozinho, ~1,2 dB/s. É o
+/// que faz o mostrador valer para qualquer estação. Um teto fixo não existe:
+/// medido no Groove Salad, a banda mais grave vive a -45 dB e a mais aguda a
+/// -77, e essa distância muda com o gênero. Era isso que deixava tudo no topo.
+const SPEC_REF_QUEDA = 0.06;
+/// Só que o teto não desce para sempre: sem um piso, o silêncio entre faixas
+/// viraria ganho infinito e o chiado subiria até o topo.
+const SPEC_REF_MINIMA = -58;
 
 const lofiSpec = elemento("span", "spec");
 lofiSpec.setAttribute("aria-hidden", "true");
 
 const specNiveis = new Array<number>(SPEC_BANDAS).fill(0);
 const specPicos = new Array<number>(SPEC_BANDAS).fill(0);
+/// O teto de cada banda, em dB. Começa no piso: a primeira música que entrar o
+/// levanta, e levantar é imediato.
+const specRefs = new Array<number>(SPEC_BANDAS).fill(SPEC_REF_MINIMA);
 const specColunas = Array.from({ length: SPEC_BANDAS }, () => {
   const coluna = elemento("span", "spec-col");
   const nivel = elemento("span", "spec-nivel");
@@ -1983,7 +2364,70 @@ const specColunas = Array.from({ length: SPEC_BANDAS }, () => {
   return { nivel, pico };
 });
 
-lofiEl.append(lofiAnterior, lofiTocar, lofiProxima, lofiVolume, lofiTitulo, lofiSpec);
+lofiEl.append(lofiEstacoes, lofiTocar, lofiProxima, lofiVolume, lofiTitulo, lofiSpec);
+
+let analisador: AudioAnalisador | undefined;
+
+type AudioAnalisador = {
+  no: AnalyserNode;
+  raias: Float32Array<ArrayBuffer>;
+  bandas: Array<{ de: number; ate: number }>;
+  ganho: GainNode;
+  contexto: AudioContext;
+};
+
+/// O Web Audio se monta uma vez só, e no primeiro ▶ — não no boot. Um
+/// `AudioContext` criado à toa nasce suspenso e mesmo assim prende a saída de
+/// som do sistema à página: o indicador de áudio acenderia numa janela calada.
+///
+/// `createMediaElementSource` desvia o `<audio>` para dentro do grafo: a partir
+/// daí só se ouve o que chega em `destination`, e esquecer de ligar essa ponta
+/// é o jeito clássico de ficar sem som nenhum.
+function ligarAnalisador(): AudioAnalisador {
+  if (analisador) return analisador;
+  const contexto = new AudioContext();
+  const no = contexto.createAnalyser();
+  no.fftSize = SPEC_FFT;
+  // O amortecimento do próprio analisador faz metade do trabalho do VU; o resto
+  // é a queda lenta do `SPEC_QUEDA`.
+  no.smoothingTimeConstant = 0.6;
+
+  // O volume mora aqui, num ganho, e não no `volume` do `<audio>`: desviado o
+  // elemento para dentro do grafo, o WebKit para de aplicar aquele atributo —
+  // ele aceita o valor, o `a.volume` passa a valer o que você pôs e o som sai
+  // igual. Dá para ver num analisador: com `volume = 0` a amostra continua
+  // cheia. O slider girava à toa.
+  const ganho = contexto.createGain();
+  ganho.gain.value = volumeLofi / 100;
+
+  // O analisador vem ANTES do ganho: o mostrador mede a música, não o quanto
+  // você escolheu ouvir dela. É a medição pré-fader de qualquer mesa — no
+  // volume baixo as colunas continuam contando o que está tocando, em vez de
+  // morrerem no chão junto com o som.
+  contexto.createMediaElementSource(audio).connect(no);
+  no.connect(ganho);
+  ganho.connect(contexto.destination);
+
+  // Bandas espaçadas em oitavas, e não em partes iguais: o ouvido ouve assim, e
+  // em partes iguais as nove primeiras colunas cairiam todas no grave enquanto
+  // a última sozinha cobriria metade do espectro.
+  const porRaia = contexto.sampleRate / SPEC_FFT;
+  const razao = (SPEC_HZ_MAX / SPEC_HZ_MIN) ** (1 / SPEC_BANDAS);
+  // Cada banda começa onde a anterior acabou e tem pelo menos uma raia. Sem as
+  // duas regras as primeiras bandas se empilham na mesma raia, porque lá
+  // embaixo o passo em Hz é menor que a resolução da FFT. E o começo é a raia
+  // 1: a 0 é a componente contínua, que não é som e não sai do lugar.
+  let anterior = 1;
+  const bandas = Array.from({ length: SPEC_BANDAS }, (_, b) => {
+    const de = Math.max(anterior, Math.floor((SPEC_HZ_MIN * razao ** b) / porRaia));
+    const ate = Math.max(de + 1, Math.ceil((SPEC_HZ_MIN * razao ** (b + 1)) / porRaia));
+    anterior = ate;
+    return { de, ate };
+  });
+
+  analisador = { no, raias: new Float32Array(no.frequencyBinCount), bandas, ganho, contexto };
+  return analisador;
+}
 
 /// De 0..1 para a altura em pixels, encaixada na grade dos segmentos: é o
 /// degrau que faz o mostrador parecer LED e não uma barra lisa esticando.
@@ -1992,27 +2436,33 @@ function alturaSpec(v: number): number {
   return acesos === 0 ? 0 : acesos * 3 - 1;
 }
 
-let quadroSpec = 0;
-
 function moverSpec() {
-  quadroSpec++;
-  const batendo = quadroSpec % SPEC_BATIDA === 0;
-  const tempo = quadroSpec / 20;
+  const a = analisador;
+  if (!a) return;
+  // Em dB crus, e não no byte de `getByteFrequencyData`: aquele já vem espremido
+  // numa janela fixa de -100 a -30 dB, e é justamente a janela que não pode ser
+  // fixa. Com o número solto, quem decide a escala é o teto móvel aqui embaixo.
+  a.no.getFloatFrequencyData(a.raias);
 
   for (let b = 0; b < SPEC_BANDAS; b++) {
-    // 1 na primeira coluna (o grave), 0 na última (o agudo).
-    const grave = 1 - b / (SPEC_BANDAS - 1);
-    // A curva de um lofi: o grave sustenta e o agudo é quase só o chiado do
-    // prato. Sem ela as dez colunas ficariam na mesma altura média, que é a
-    // cara de um gerador de números e não a de uma música.
-    const corpo = (0.22 + 0.6 * grave ** 1.4) * (0.7 + 0.3 * Math.sin(tempo + b * 0.7));
-    const batida = batendo ? 0.45 * grave + 0.08 : 0;
-    const tremor = Math.random() * (0.1 + 0.28 * (1 - grave));
-    const alvo = corpo + batida + tremor;
+    const { de, ate } = a.bandas[b];
+    // O maior da banda, e não a média: a média de uma banda larga do agudo
+    // afoga o prato no silêncio que está do lado dele.
+    let maior = -Infinity;
+    for (let r = de; r < ate && r < a.raias.length; r++) maior = Math.max(maior, a.raias[r]);
+    // Silêncio digital vem como -Infinity, que não se compara nem se soma.
+    if (!Number.isFinite(maior)) maior = SPEC_REF_MINIMA - SPEC_ALCANCE;
+
+    // O teto sobe de uma vez e desce devagar. É o que dá ao mostrador a mesma
+    // escala útil num drone e num metal, sem tabela de gênero nenhuma.
+    specRefs[b] = Math.max(
+      SPEC_REF_MINIMA,
+      maior > specRefs[b] ? maior : specRefs[b] - SPEC_REF_QUEDA,
+    );
+    const alvo = Math.max(0, Math.min(1, 1 - (specRefs[b] - maior) / SPEC_ALCANCE));
 
     // Sobe no quadro, desce aos poucos.
-    specNiveis[b] =
-      alvo > specNiveis[b] ? Math.min(1, alvo) : Math.max(0, specNiveis[b] - SPEC_QUEDA);
+    specNiveis[b] = alvo > specNiveis[b] ? alvo : Math.max(0, specNiveis[b] - SPEC_QUEDA);
     specPicos[b] = Math.max(specNiveis[b], specPicos[b] - SPEC_QUEDA_PICO);
 
     const { nivel, pico } = specColunas[b];
@@ -2028,8 +2478,8 @@ function moverSpec() {
 let pulsoSpec: ReturnType<typeof setInterval> | undefined;
 
 /// Liga e desliga a animação. A saída rápida importa: `desenharLofi` roda a cada
-/// evento do player, e reiniciar o intervalo em cada um zeraria a fase da
-/// batida — o mostrador andaria aos trancos.
+/// evento do áudio, e reiniciar o intervalo em cada um faria o mostrador andar
+/// aos trancos.
 function animarSpec(ligado: boolean) {
   if (ligado === !!pulsoSpec) return;
   clearInterval(pulsoSpec);
@@ -2041,166 +2491,220 @@ function animarSpec(ligado: boolean) {
   // Parado, tudo no chão: um mostrador congelado no meio pareceria travado.
   specNiveis.fill(0);
   specPicos.fill(0);
+  specRefs.fill(SPEC_REF_MINIMA);
   for (const { nivel, pico } of specColunas) {
     nivel.style.height = "0px";
     pico.hidden = true;
   }
 }
 
-const lofiPalco = elemento("div", "lofi-palco");
-document.body.appendChild(lofiPalco);
+// ---------- rádio: o rodapé ----------
 
-let player: PlayerYT | undefined;
-let tocandoLofi = false;
-let carregandoLofi = false;
-/// Sem rede, ou estação fora do ar: o motivo toma o lugar do nome até o próximo
-/// clique que der certo. A faixa cabe uma linha, e o nome pode esperar.
-let avisoLofi: string | undefined;
+/// As que prometiam espectro e vieram mudas — só nesta sessão. A marca no
+/// `estacoes.ts` foi medida um dia; servidor muda de configuração, e quem manda
+/// é o que está acontecendo agora.
+const semEspectro = new Set<string>();
+
+const usaGrafo = (e: Estacao): boolean => e.espectro && !semEspectro.has(e.url);
 
 function desenharLofi() {
   const e = atual();
   lofiTocar.innerHTML = tocandoLofi ? ICONE_PAUSA : ICONE_PLAY;
   lofiTocar.title = tocandoLofi ? "Pausar" : "Tocar";
   lofiTocar.disabled = !e;
-  lofiAnterior.disabled = estacoes.length < 2;
   lofiProxima.disabled = estacoes.length < 2;
   lofiEl.classList.toggle("tocando", tocandoLofi);
   lofiEl.classList.toggle("carregando", carregandoLofi && !tocandoLofi);
-  const texto = avisoLofi ?? e?.nome ?? "sem estações — Rádio ▸ Estações…";
-  lofiTitulo.textContent = texto;
-  lofiTitulo.title = texto;
-  animarSpec(tocandoLofi);
+
+  const texto = avisoLofi ?? e?.nome ?? "sem estações";
+  if (texto !== tituloNoAr) {
+    tituloNoAr = texto;
+    lofiTituloTexto.textContent = texto;
+    lofiTitulo.title = texto;
+    passearTitulo();
+  }
+
+  // O mostrador só anda quando há o que medir: pelo caminho direto não há
+  // amostra, e dez colunas paradas no chão dizem isso melhor que dez colunas
+  // inventadas.
+  animarSpec(tocandoLofi && audio === audioGrafo);
 }
 
-/// Carrega a iframe API uma vez, no primeiro ▶ — e não no boot. É script de
-/// terceiro vindo da rede: o rodapé tem que subir mudo e sem esperar por ela.
-let apiYT: Promise<ApiYT> | undefined;
-
-function carregarYT(): Promise<ApiYT> {
-  if (apiYT) return apiYT;
-  const pedido = new Promise<ApiYT>((resolve, reject) => {
-    // Este nome global é o único aviso de que a API ficou pronta.
-    window.onYouTubeIframeAPIReady = () =>
-      window.YT ? resolve(window.YT) : reject(new Error("a API carregou sem o YT"));
-    const script = document.createElement("script");
-    script.src = "https://www.youtube.com/iframe_api";
-    script.onerror = () => reject(new Error("sem rede"));
-    document.head.appendChild(script);
+/// Os dois elementos respondem igual, e só o que está no ar tem voz: o outro
+/// pode estar terminando de soltar o `src` e um evento atrasado dele não pode
+/// mexer no rodapé.
+function ouvir(el: HTMLAudioElement) {
+  el.addEventListener("playing", () => {
+    if (el !== audio) return;
+    tocandoLofi = true;
+    carregandoLofi = false;
+    avisoLofi = undefined;
+    desenharLofi();
+    if (el === audioGrafo) conferirEspectro();
   });
-  // Uma falha não fica guardada: o próximo ▶ tenta de novo, que é o que se quer
-  // de uma rede que caiu por um minuto.
-  pedido.catch(() => (apiYT = undefined));
-  return (apiYT = pedido);
-}
 
-/// Abre o player e resolve quando ele está pronto para receber ordens. O teto de
-/// espera existe porque um `onReady` que nunca chega deixaria o ▶ piscando para
-/// sempre — e piscar para sempre não é um estado, é um bug silencioso.
-async function abrirPlayer(id: string): Promise<PlayerYT> {
-  const YT = await carregarYT();
-  return new Promise<PlayerYT>((resolve, reject) => {
-    const limite = setTimeout(() => reject(new Error("o YouTube não respondeu")), 15_000);
-    const alvo = document.createElement("div");
-    lofiPalco.appendChild(alvo);
-    new YT.Player(alvo, {
-      videoId: id,
-      // Sem controles nem teclado: a caixa tem 1px, e quem manda é o rodapé.
-      playerVars: { autoplay: 1, controls: 0, disablekb: 1, playsinline: 1 },
-      events: {
-        onReady: (e: { target: PlayerYT }) => {
-          clearTimeout(limite);
-          e.target.setVolume(volumeLofi);
-          e.target.playVideo();
-          resolve(e.target);
-        },
-        onStateChange: (e: { data: number }) => {
-          tocandoLofi = e.data === YT_TOCANDO;
-          carregandoLofi = e.data === YT_CARREGANDO;
-          if (tocandoLofi) avisoLofi = undefined;
-          desenharLofi();
-        },
-        onError: () => {
-          carregandoLofi = false;
-          avisoLofi = "estação fora do ar — tente a próxima";
-          desenharLofi();
-        },
-      },
-    });
+  // Buffer vazio no meio do caminho: o ▶ pisca de novo até o som voltar. Não é
+  // erro — numa rádio ao vivo é só a rede respirando.
+  el.addEventListener("waiting", () => {
+    if (el !== audio || !noAr) return;
+    carregandoLofi = true;
+    desenharLofi();
   });
+
+  el.addEventListener("error", () => caiu(el));
+  // Um Icecast que fecha a conexão do lado dele chega como fim de mídia, e não
+  // como erro. Numa rádio, que não acaba, é a mesma coisa.
+  el.addEventListener("ended", () => caiu(el));
 }
 
-async function tocarLofi() {
+ouvir(audioGrafo);
+ouvir(audioDireto);
+
+/// A estação saiu do ar, ou nunca abriu. Sem espelho a que recorrer: a lista é
+/// de endereços únicos, e o que dá para oferecer é a próxima.
+function caiu(el: HTMLAudioElement) {
+  // Sem o `noAr` isto dispararia no `load()` do pause, que é um erro de
+  // propósito; sem a checagem do elemento, o que acabou de ser calado derrubaria
+  // o que acabou de entrar.
+  if (el !== audio || !noAr) return;
+  noAr = false;
+  tocandoLofi = false;
+  carregandoLofi = false;
+  avisoLofi = "estação fora do ar — tente a próxima";
+  desenharLofi();
+}
+
+/// Quanto esperar antes de conferir se o grafo está recebendo alguma coisa.
+/// Menos que isto pega a estação ainda enchendo o buffer e a condena à toa.
+const CONFERIR_MS = 3_000;
+
+let conferencia: ReturnType<typeof setTimeout> | undefined;
+
+/// Toca mudo é pior que tocar sem mostrador: se a estação entrou pelo grafo e o
+/// grafo não recebe nada, ela é rebaixada e recomeça pelo caminho direto. O
+/// preço é uns três segundos de silêncio, uma vez por estação por sessão.
+function conferirEspectro() {
+  clearTimeout(conferencia);
+  conferencia = setTimeout(() => {
+    const a = analisador;
+    const e = atual();
+    if (!a || !e || audio !== audioGrafo || !tocandoLofi) return;
+
+    a.no.getFloatFrequencyData(a.raias);
+    const chao = SPEC_REF_MINIMA - SPEC_ALCANCE;
+    if (a.raias.some((v) => Number.isFinite(v) && v > chao)) return;
+
+    jlog(`radio: ${e.nome} veio muda no grafo — indo pelo caminho direto`);
+    semEspectro.add(e.url);
+    tocarLofi();
+  }, CONFERIR_MS);
+}
+
+/// Solta o socket de um elemento. Uma rádio em pausa continuaria baixando para
+/// jogar fora, e uma rádio ao vivo não tem onde continuar depois.
+function calar(el: HTMLAudioElement) {
+  el.pause();
+  el.removeAttribute("src");
+  el.load();
+}
+
+/// Tudo o que precisa do gesto do clique acontece AQUI DENTRO, de uma vez e sem
+/// `await` no meio. O WebKit só libera áudio sob um gesto seu, e o gesto não
+/// atravessa uma espera: com um `await ctx.resume()` antes do `play()`, o play
+/// cai do outro lado do clique e é recusado — `NotSupportedError`, que ainda
+/// por cima não parece o que é. Então o `play()` sai primeiro, síncrono, e o
+/// contexto é solto logo atrás; o resultado é tratado quando chegar.
+function tocarLofi() {
   const e = atual();
   if (!e) return;
-  if (player) return player.playVideo();
+
+  noAr = true;
   carregandoLofi = true;
   avisoLofi = undefined;
+
+  // O elemento certo para esta estação. Se for o outro, o que estava no ar cala
+  // antes — dois streams tocando juntos é o que acontece sem esta linha.
+  const anterior = audio;
+  audio = usaGrafo(e) ? audioGrafo : audioDireto;
+  if (anterior !== audio) calar(anterior);
   desenharLofi();
-  try {
-    player = await abrirPlayer(e.id);
-  } catch (erro) {
+
+  audio.src = e.url;
+  const pedido = audio.play();
+
+  if (audio === audioGrafo) {
+    // Um contexto que nasceu suspenso volta aqui; um que já está rodando não se
+    // incomoda de ser acordado de novo.
+    void ligarAnalisador().contexto.resume().catch(() => {});
+  } else {
+    // Fora do grafo não há ganho, e aí o `volume` do elemento volta a valer.
+    audio.volume = volumeLofi / 100;
+  }
+
+  pedido.catch((erro: unknown) => {
+    // O `error` do elemento cuida do stream que não abriu; aqui só sobra a
+    // recusa do próprio navegador.
+    noAr = false;
     carregandoLofi = false;
     avisoLofi = `a rádio não abriu: ${erro}`;
     desenharLofi();
-    jlog(`lofi: ${erro}`);
-  }
+    jlog(`radio: ${erro}`);
+  });
 }
 
 function pausarLofi() {
-  player?.pauseVideo();
-  // Não espera o `onStateChange`: o botão tem que responder no mesmo quadro do
-  // clique, e o evento chega logo atrás confirmando.
+  noAr = false;
+  clearTimeout(conferencia);
+  calar(audio);
   tocandoLofi = false;
   carregandoLofi = false;
   desenharLofi();
 }
 
 /// Põe uma estação no ar. Com a rádio parada ela fica só engatilhada: trocar de
-/// estação não é pedido para começar a tocar.
+/// estação não é pedido para começar a tocar, e o endereço só é escolhido no ▶.
 function irPara(i: number) {
   if (!estacoes.length) return;
   const n = estacoes.length;
   estacao = ((i % n) + n) % n;
-  guardarAtual();
   avisoLofi = undefined;
-  if (player) {
-    if (tocandoLofi || carregandoLofi) {
-      carregandoLofi = true;
-      player.loadVideoById(estacoes[estacao].id);
-    } else {
-      player.cueVideoById(estacoes[estacao].id);
-    }
-  }
+  guardarAtual();
+
+  // Tocando, a troca é imediata — e passa pelo `tocarLofi` porque a estação
+  // nova pode querer o outro caminho de áudio.
+  if (noAr) tocarLofi();
   desenharLofi();
   desenharLista();
 }
 
-lofiAnterior.addEventListener("click", () => irPara(estacao - 1));
+lofiEstacoes.addEventListener("click", () => abrirEditor());
 lofiProxima.addEventListener("click", () => irPara(estacao + 1));
-lofiTocar.addEventListener("click", () => (tocandoLofi ? pausarLofi() : void tocarLofi()));
+lofiTocar.addEventListener("click", () => (tocandoLofi ? pausarLofi() : tocarLofi()));
 
-lofiVolume.addEventListener("input", () => {
-  volumeLofi = Number(lofiVolume.value);
-  player?.setVolume(volumeLofi);
-});
-
-lofiVolume.addEventListener("change", () => {
+lofiVolume.addEventListener("click", () => {
+  volumeLofi = VOLUMES[(VOLUMES.indexOf(volumeLofi) + 1) % VOLUMES.length];
+  aplicarVolume();
+  desenharVolume();
   localStorage.setItem(CHAVE_VOLUME, String(volumeLofi));
 });
 
-// Solto o slider, o teclado volta para o terminal: sem isto as setas passariam a
-// mexer no volume em vez de andar na linha de comando. No `pointerup`, e não no
-// `change`: um clique que não moveu o slider não dispara `change` nenhum, e
-// deixaria o foco preso aqui.
-lofiVolume.addEventListener("pointerup", () => {
-  if (ativa?.foco) focar(ativa.foco);
-});
+/// Vale para os dois caminhos: o ganho do grafo e o `volume` do elemento
+/// direto. Uma rampa curta no ganho em vez de um salto, porque `gain.value`
+/// trocado de uma vez estala. Antes do primeiro ▶ não há grafo, e não há o que
+/// aplicar nele — o número fica guardado e entra quando o ganho for montado.
+function aplicarVolume() {
+  audioDireto.volume = volumeLofi / 100;
+  const a = analisador;
+  if (a) a.ganho.gain.setTargetAtTime(volumeLofi / 100, a.contexto.currentTime, 0.01);
+}
 
-// ---------- lofi: o editor de estações ----------
+// ---------- rádio: o seletor de estações ----------
 
-/// Aberto por Rádio ▸ Estações…, na barra de menu. Uma caixa no meio da janela e
-/// não uma lista presa ao rodapé: tem campo de texto, e um campo de texto dentro
-/// de uma faixa de 30px é um alvo de 30px.
+/// Aberto pelo ☰ do rodapé ou por Rádio ▸ Estações…, na barra de menu. É um
+/// seletor e só: clicar num nome põe a estação no ar, e não há nada para
+/// adicionar nem para remover. Uma caixa no meio da janela e não uma lista
+/// presa ao rodapé porque duzentas e cinquenta linhas não cabem numa faixa de
+/// 30px.
 const lofiEditor = elemento("div", "lofi-editor");
 lofiEditor.hidden = true;
 const lofiCaixa = elemento("div", "lofi-caixa");
@@ -2210,124 +2714,54 @@ lofiCabecaTitulo.textContent = "Estações";
 const lofiFechar = botaoLofi("lofi-fechar", ICONE_TIRAR, "Fechar (esc)");
 lofiCabeca.append(lofiCabecaTitulo, lofiFechar);
 const lofiLista = elemento("div", "lofi-lista");
-const lofiCampo = elemento("input", "lofi-campo");
-lofiCampo.type = "text";
-lofiCampo.placeholder = "cole um link do YouTube e tecle ↵";
-lofiCampo.spellcheck = false;
-const lofiRecado = elemento("div", "lofi-recado");
-lofiCaixa.append(lofiCabeca, lofiLista, lofiCampo, lofiRecado);
+lofiCaixa.append(lofiCabeca, lofiLista);
 lofiEditor.appendChild(lofiCaixa);
 document.body.appendChild(lofiEditor);
 
-function dizer(texto: string) {
-  lofiRecado.textContent = texto;
-}
-
 function desenharLista() {
   lofiLista.textContent = "";
-  if (!estacoes.length) {
-    const vazio = elemento("div", "lofi-vazio");
-    vazio.textContent = "Nenhuma estação. Cole um link do YouTube aqui embaixo.";
-    lofiLista.appendChild(vazio);
-    return;
-  }
   estacoes.forEach((e, i) => {
     const linha = elemento("div", "lofi-linha");
     linha.classList.toggle("atual", i === estacao);
     const nome = elemento("button", "lofi-nome");
     nome.textContent = e.nome;
     nome.title = `Tocar ${e.nome}`;
-    nome.addEventListener("click", () => irPara(i));
-    const tirar = botaoLofi("lofi-tirar", ICONE_TIRAR, `Remover ${e.nome}`);
-    tirar.addEventListener("click", () => removerEstacao(i));
-    linha.append(nome, tirar);
+    if (e.genero) {
+      const genero = elemento("span", "lofi-genero");
+      genero.textContent = e.genero;
+      nome.appendChild(genero);
+    }
+    // As que tocam sem mostrador levam uma marca, e não um aviso: é uma
+    // diferença pequena, e quem está escolhendo rádio está escolhendo som.
+    if (!usaGrafo(e)) {
+      const marca = elemento("span", "lofi-sem-spec");
+      marca.textContent = "sem espectro";
+      linha.appendChild(marca);
+    }
+    // Escolher uma estação parada é pedido para tocar: você veio aqui para
+    // ouvir, e não para engatilhar. As setas do rodapé é que trocam sem tocar.
+    nome.addEventListener("click", () => {
+      irPara(i);
+      if (!noAr) tocarLofi();
+    });
+    linha.insertBefore(nome, linha.firstChild);
     lofiLista.appendChild(linha);
   });
-}
-
-/// Aceita o que o YouTube dá para copiar: a URL do vídeo, a do embed, a da live,
-/// a curta do youtu.be — ou o id cru, que é o que sobra quando nada casa.
-function idDoYouTube(bruto: string): string | undefined {
-  const texto = bruto.trim();
-  if (/^[\w-]{11}$/.test(texto)) return texto;
-  try {
-    const u = new URL(texto);
-    if (u.hostname.endsWith("youtu.be")) {
-      const curto = u.pathname.slice(1).split("/")[0];
-      return /^[\w-]{11}$/.test(curto) ? curto : undefined;
-    }
-    const v = u.searchParams.get("v");
-    if (v && /^[\w-]{11}$/.test(v)) return v;
-    const m = u.pathname.match(/\/(?:embed|live|shorts|v)\/([\w-]{11})/);
-    return m?.[1];
-  } catch {
-    return undefined; // não era uma URL
-  }
-}
-
-async function adicionarEstacao(bruto: string) {
-  const id = idDoYouTube(bruto);
-  if (!id) return dizer("não achei um id do YouTube nisso");
-  if (estacoes.some((e) => e.id === id)) return dizer("essa estação já está na lista");
-
-  dizer("procurando o nome…");
-  // O nome vem do oEmbed, pelo Rust (ver `lofi_titulo`). Se não vier, o id
-  // serve: melhor uma estação de nome feio do que um link que você colou e que
-  // sumiu sem explicação.
-  const nome = await invoke<string>("lofi_titulo", { id }).catch((e) => {
-    jlog(`lofi_titulo: ${e}`);
-    return id;
-  });
-
-  estacoes.push({ id, nome });
-  guardarEstacoes();
-  // A primeira de uma lista vazia já vira a da vez: senão o rodapé continuaria
-  // dizendo "sem estações" com uma estação na lista.
-  if (estacoes.length === 1) guardarAtual();
-  lofiCampo.value = "";
-  dizer(`adicionada: ${nome}`);
-  desenharLofi();
-  desenharLista();
-}
-
-function removerEstacao(i: number) {
-  const eraAtual = i === estacao;
-  const noAr = eraAtual && (tocandoLofi || carregandoLofi);
-  estacoes.splice(i, 1);
-  guardarEstacoes();
-  // A de baixo sobe para o lugar da que saiu, e é nela que o dedo continua.
-  if (i < estacao) estacao--;
-  if (estacao >= estacoes.length) estacao = 0;
-
-  if (!estacoes.length) {
-    pausarLofi();
-  } else if (eraAtual && player) {
-    // Tirar a que está no ar passa para a seguinte. Parar seria uma punição por
-    // arrumar a fila.
-    if (noAr) {
-      carregandoLofi = true;
-      player.loadVideoById(estacoes[estacao].id);
-    } else {
-      player.cueVideoById(estacoes[estacao].id);
-    }
-  }
-  guardarAtual();
-  dizer("");
-  desenharLofi();
-  desenharLista();
+  // A que está no ar entra na vista: com duzentas e cinquenta linhas ela quase
+  // sempre está fora dela, e abrir o seletor no topo esconde a resposta da
+  // pergunta que fez você abrir.
+  lofiLista.querySelector(".lofi-linha.atual")?.scrollIntoView({ block: "nearest" });
 }
 
 function abrirEditor() {
   lofiEditor.hidden = false;
-  lofiCampo.value = "";
-  dizer("");
   desenharLista();
-  lofiCampo.focus();
+  lofiFechar.focus();
 }
 
 function fecharEditor() {
   lofiEditor.hidden = true;
-  // O teclado volta para onde estava: o editor é uma visita, não um destino.
+  // O teclado volta para onde estava: o seletor é uma visita, não um destino.
   if (ativa?.foco) focar(ativa.foco);
 }
 
@@ -2339,17 +2773,138 @@ lofiEditor.addEventListener("mousedown", (e) => {
 
 lofiFechar.addEventListener("click", () => fecharEditor());
 
-lofiCampo.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    void adicionarEstacao(lofiCampo.value);
-  } else if (e.key === "Escape") {
+lofiEditor.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
     e.preventDefault();
     fecharEditor();
   }
 });
 
+desenharVolume();
 desenharLofi();
+
+// ---------- ajuda: a lista de atalhos (Ajuda ▸ Atalhos do Teclado) ----------
+
+/// Todos os atalhos do app, por assunto. Escrita à mão, e não tirada do menu:
+/// metade deles não é item de menu (os do `nossoAtalho`, os do differ), e a
+/// lista tem de dizer também o que cada um faz. Mexeu num atalho, mexe aqui.
+/// Mais de uma tecla para a mesma coisa vira mais de uma tecla na linha.
+const ATALHOS: { grupo: string; itens: [string | string[], string][] }[] = [
+  {
+    grupo: "Abas",
+    itens: [
+      ["⌘T", "Nova aba"],
+      ["⌘⇧]", "Próxima aba"],
+      ["⌘⇧[", "Aba anterior"],
+      ["⌘1", "Diff da branch (a aba presa)"],
+      ["⌘2 … ⌘8", "Ir para a aba de número"],
+      ["⌘9", "Última aba"],
+    ],
+  },
+  {
+    grupo: "Painéis",
+    itens: [
+      ["⌘D", "Dividir ao lado"],
+      ["⌘⇧D", "Dividir abaixo"],
+      ["⌘⌥ ← ↑ → ↓", "Ir para o painel naquela direção"],
+      ["⌘⇧A", "Ir para o painel que espera por você"],
+      ["⌘⇧↩", "Maximizar o painel ou recolher de volta"],
+      // ⌃D é o fim de entrada: o shell sai, e o painel vai junto com ele.
+      [["⌘W", "⌃D"], "Fechar o painel (o último fecha a aba)"],
+    ],
+  },
+  {
+    grupo: "Terminal",
+    itens: [
+      ["⌘K", "Limpar a tela"],
+      ["⌘C", "Copiar"],
+      ["⌘V", "Colar"],
+      ["⌘⇧V", "Colar caminho do arquivo copiado"],
+      ["⌘A", "Selecionar tudo"],
+    ],
+  },
+  {
+    grupo: "Diff da branch",
+    itens: [
+      ["V", "Marcar o arquivo como visto"],
+      ["S", "Pôr ou tirar o arquivo do índice"],
+      ["⇧S", "Pôr ou tirar a pasta do arquivo do índice"],
+      ["A", "Pôr ou tirar tudo do índice"],
+      ["⌘↩", "Commitar"],
+      ["⌘R", "Recarregar o diff"],
+    ],
+  },
+  {
+    grupo: "App",
+    itens: [
+      ["⌘,", "Preferências"],
+      ["⌘E", "Escutar (ditado)"],
+      ["⌘/", "Esta lista"],
+      ["⌘M", "Minimizar"],
+      ["⌃⌘F", "Tela cheia"],
+      ["⌘H", "Ocultar o TermIAu"],
+      ["⌘Q", "Sair"],
+    ],
+  },
+];
+
+/// A mesma casca do seletor de estações — fundo escuro, caixa no meio, esc
+/// fecha —, com a lista de atalhos dentro.
+const ajudaEl = elemento("div", "lofi-editor");
+ajudaEl.hidden = true;
+const ajudaCaixa = elemento("div", "lofi-caixa ajuda-caixa");
+const ajudaCabeca = elemento("div", "lofi-cabeca");
+const ajudaTitulo = elemento("span", "lofi-cabeca-titulo");
+ajudaTitulo.textContent = "Atalhos do Teclado";
+const ajudaFechar = botaoLofi("lofi-fechar", ICONE_TIRAR, "Fechar (esc)");
+ajudaCabeca.append(ajudaTitulo, ajudaFechar);
+const ajudaLista = elemento("div", "ajuda-lista");
+for (const { grupo, itens } of ATALHOS) {
+  const secao = elemento("section", "ajuda-grupo");
+  const nome = elemento("h3", "ajuda-grupo-nome");
+  nome.textContent = grupo;
+  secao.append(nome);
+  for (const [tecla, oque] of itens) {
+    const linha = elemento("div", "ajuda-linha");
+    const teclas = elemento("span", "ajuda-teclas");
+    for (const t of Array.isArray(tecla) ? tecla : [tecla]) {
+      const k = elemento("kbd", "ajuda-tecla");
+      k.textContent = t;
+      teclas.append(k);
+    }
+    const d = elemento("span", "ajuda-oque");
+    d.textContent = oque;
+    linha.append(d, teclas);
+    secao.append(linha);
+  }
+  ajudaLista.append(secao);
+}
+ajudaCaixa.append(ajudaCabeca, ajudaLista);
+ajudaEl.appendChild(ajudaCaixa);
+document.body.appendChild(ajudaEl);
+
+/// ⌘/ de novo com a lista aberta fecha: é a mesma tecla que a trouxe.
+function alternarAjuda() {
+  if (!ajudaEl.hidden) return fecharAjuda();
+  ajudaEl.hidden = false;
+  ajudaFechar.focus();
+}
+
+function fecharAjuda() {
+  ajudaEl.hidden = true;
+  if (ativa?.foco && !noDiff) focar(ativa.foco);
+}
+
+ajudaEl.addEventListener("mousedown", (e) => {
+  if (e.target === ajudaEl) fecharAjuda();
+});
+ajudaFechar.addEventListener("click", () => fecharAjuda());
+ajudaEl.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    fecharAjuda();
+  }
+});
 
 // ---------- teclado ----------
 
@@ -2451,16 +3006,20 @@ async function iniciar() {
   // mouse. `void` porque o clique não espera a aba abrir.
   document.getElementById("nova-aba")?.addEventListener("click", () => void novaAba());
 
-  // ⌘T, ⌘D, ⌘⇧D e ⌘W chegam por aqui: quem recebe a tecla é o menu nativo.
+  // ⌘T, ⌘D, ⌘⇧D, ⌘⇧↩ e ⌘W chegam por aqui: quem recebe a tecla é o menu nativo.
   await listen("menu://nova-aba", () => novaAba());
   await listen("menu://dividir-lado", () => dividir("lado"));
   await listen("menu://dividir-abaixo", () => dividir("abaixo"));
+  await listen("menu://maximizar", () => {
+    if (ativa && !noDiff) alternarMaximizar(ativa.foco.dono ?? ativa.foco);
+  });
   await listen("menu://fechar", () => {
     if (ativa && !noDiff) fecharFolha(ativa.foco);
   });
   await listen("menu://colar-caminho", () => colarCaminho());
   await listen("menu://preferencias", () => abrirPreferencias());
   await listen("menu://estacoes", () => abrirEditor());
+  await listen("menu://atalhos", () => alternarAjuda());
 
   // O .git do repositório aberto na aba do diff mexeu. Só repassa: quem decide
   // o que fazer com isso é a aba, e ela só existe depois de alguém abri-la.

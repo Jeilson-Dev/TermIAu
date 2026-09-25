@@ -145,6 +145,30 @@ body {
   transition: opacity var(--tempo) ease;
 }
 
+/* Um painel maximizado: só o caminho da raiz até ele fica na tela (quem marca
+   é o `marcarMaximizada`). Os cortes desse caminho viram flex, e o grid com as
+   frações de cada um fica guardado no `style` pra quando recolher. Os outros
+   painéis só saem de vista — continuam vivos, com o shell rodando. */
+.aba.maximizada .divisao.caminho {
+  display: flex;
+  flex-direction: column;
+}
+
+.aba.maximizada .divisao.caminho > :not(.caminho) {
+  display: none;
+}
+
+.aba.maximizada .divisao.caminho > .caminho {
+  flex: 1;
+}
+
+/* Sozinho na tela, não há de quem se distinguir: o apagado e o anel saem. */
+.aba.maximizada.dividida .divisao > .folha.caminho {
+  opacity: 1;
+  --borda: var(--bg-lighter);
+  box-shadow: 0 1px 4px #000000a6;
+}
+
 /* Um corte: primeiro filho, divisor, segundo filho. Quem escreve os tracks é o
    `aplicarFracao` em src/main.ts, porque a fatia muda ao arrastar o divisor.
    Sem fundo de propósito, inclusive nos cortes aninhados: o que aparece nos vãos
@@ -175,6 +199,16 @@ body {
 .folha-termo {
   flex: 1;
   min-height: 0;
+  box-sizing: border-box;
+}
+
+/* O respiro vai no `.xterm`, e NÃO no `.folha-termo`: o FitAddon mede a altura
+   do pai e desconta só o padding do próprio `.xterm`. Com o padding no pai (e
+   `border-box`), os 10px de cima+baixo entravam na conta como se fossem espaço
+   livre — sempre que a sobra da divisão pela altura da célula dava menos de
+   10px, ganhava-se uma linha a mais do que cabia, e a última saía cortada. */
+.folha-termo > .xterm {
+  height: 100%;
   padding: 6px 4px 4px 8px;
   box-sizing: border-box;
 }
@@ -338,8 +372,11 @@ body {
   flex: 1 1 180px;
   min-width: 0;
   max-width: 220px;
-  padding: 6px 8px 6px 10px;
-  font: 12px/1 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  /* Linha de 18px, e não `line-height: 1`: com a linha do tamanho da fonte, um
+     emoji no título (o 🟢 de um prompt, por exemplo) é mais alto que ela e o
+     `overflow: hidden` do título cortava o topo e a base dele. */
+  padding: 7px 8px 7px 10px;
+  font: 12px/18px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
   color: var(--comment);
   background: var(--bg-dark);
   border: none;
@@ -410,7 +447,9 @@ body {
 }
 
 .tab-titulo {
-  flex: 1;
+  /* Do tamanho do texto: a branch vem colada nele, e o ✕ vai para a direita
+     pelo `margin-left: auto`. */
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -419,6 +458,7 @@ body {
 
 .tab-fechar {
   flex: none;
+  margin-left: auto;
   width: 15px;
   height: 15px;
   border-radius: 4px;
@@ -565,7 +605,9 @@ body {
 }
 
 .tarefa-titulo {
-  flex: 1;
+  /* Do tamanho do texto, e não esticado: a branch vem colada logo depois dele.
+     Quem empurra os controles para a direita é o `margin-left: auto` deles. */
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -575,6 +617,45 @@ body {
 
 .folha.focada > .painel-barra .tarefa-titulo {
   color: var(--fg);
+}
+
+/* A branch, entre colchetes, depois do título — na barra do painel e no chip
+   da aba. Não encolhe: quem cede espaço é o título, que tem reticências. */
+.ramo {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  white-space: nowrap;
+}
+
+.ramo[hidden] {
+  display: none;
+}
+
+.tarefa-ramo {
+  margin-left: -4px;
+  color: var(--purple);
+  opacity: 0.8;
+}
+
+/* O chip já dá 6px de vão; um espaço de texto basta entre título e branch. */
+.tab-ramo {
+  margin-left: -3px;
+}
+
+/* O teto é o tamanho de "branch-longa": o que passa disso passeia lá dentro,
+   do mesmo jeito que o nome da estação no rodapé. */
+.ramo-caixa {
+  display: inline-block;
+  max-width: 12ch;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+
+.ramo-texto {
+  display: inline-block;
+  white-space: nowrap;
+  will-change: transform;
 }
 
 .tarefa-aviso {
@@ -593,6 +674,10 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.tarefa-controles {
+  margin-left: auto;
 }
 
 .tarefa-controles[hidden],
@@ -630,15 +715,14 @@ body {
   display: block;
 }
 
-/* Play e a escolha da configuração são um botão só, partido — como no VS Code. */
+/* Play e escolha eram um botão só, partido, como no VS Code. Não são mais: a
+   caixa costurada lia como uma lista, e o nome da configuração — o alvo maior
+   dela — rodava o app em vez de abrir a escolha. Agora são dois botões soltos,
+   iguais aos outros da barra: o ▶ roda, o nome com a seta escolhe. O grupo
+   sobrou como a unidade que some junto onde não há launch.json. */
 .tarefa-play-grupo {
   display: flex;
-  border: 1px solid var(--selection);
-  border-radius: 6px;
-}
-
-.tarefa-play-grupo .tarefa-btn {
-  border-radius: 5px;
+  gap: 4px;
 }
 
 .tarefa-play .tarefa-icone {
@@ -654,16 +738,35 @@ body {
 }
 
 .tarefa-escolher {
-  padding: 0 4px;
-  border-left: 1px solid var(--selection);
-  border-radius: 0 5px 5px 0;
+  gap: 4px;
+}
+
+.tarefa-seta {
+  display: flex;
+  color: var(--comment);
+}
+
+/* Uma configuração só: não há o que escolher, mas o nome ainda diz o que o ▶
+   roda. O botão fica e vira rótulo — sem seta, sem hover e sem o apagado dos
+   botões desligados, que aqui esconderia justamente a informação. */
+.tarefa-escolher.rotulo {
+  cursor: default;
+}
+
+.tarefa-escolher.rotulo:disabled {
+  opacity: 1;
+}
+
+.tarefa-escolher.rotulo .tarefa-seta {
+  display: none;
 }
 
 .tarefa-parar {
   color: var(--red);
 }
 
-.tarefa-gaveta.ligado {
+.tarefa-gaveta.ligado,
+.tarefa-maximizar.ligado {
   background: var(--bg-light);
   color: var(--fg);
 }
@@ -701,6 +804,10 @@ body {
   border-radius: 6px;
   box-shadow: 0 6px 20px #0009;
   overflow-y: auto;
+  /* O max-height que o alternarMenu escreve é a altura da caixa inteira na
+     tela. Sem isto ele valeria só para o conteúdo, e o padding e a borda
+     empurravam o fim da lista 10px além do limite calculado. */
+  box-sizing: border-box;
 }
 
 /* "──── DEV ────" do launch.json: título do grupo, não se clica. */
@@ -773,6 +880,24 @@ body {
 @keyframes termiau-pulso {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.2; }
+}
+
+/* A aba de trás que espera por você: a bolinha sozinha some no canto do olho,
+   então o anel inteiro acende de laranja e pisca — o mesmo anel que fica roxo
+   na aba de agora e vermelho na armada. Só nas de trás: na da frente o painel
+   já contorna de laranja, e o roxo do foco é que diz onde se está. Armada
+   vence: o vermelho é um aviso de 1s e não pode ser engolido pelo piscar. A
+   aba também deixa de ficar recuada, senão o laranja sairia apagado. */
+.tab[data-claude="esperando"]:not(.ativa) {
+  opacity: 1;
+  color: var(--fg-dim);
+}
+
+.tab[data-claude="esperando"]:not(.ativa):not(.armada)::after {
+  border-color: var(--orange);
+  box-shadow: 0 0 8px #ffb86c66;
+  transform: none;
+  animation: termiau-pulso 1.1s ease-in-out infinite;
 }
 
 /* No painel, `outline` e não `box-shadow`: o box-shadow já é do painel em foco,
@@ -899,7 +1024,7 @@ body {
   color: var(--purple);
 }
 
-/* Enquanto o YouTube carrega o primeiro segundo o botão não responde, e piscar
+/* Enquanto o stream abre o primeiro segundo o botão não responde, e piscar
    é o que diz que ele ouviu o clique. */
 #lofi.carregando .lofi-tocar {
   color: var(--purple);
@@ -912,32 +1037,18 @@ body {
 
 /* Fininho de propósito: é um controle secundário numa faixa de 30px, e um
    slider de altura normal empurraria o resto para fora do alinhamento. */
-.lofi-volume {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 54px;
-  height: 3px;
-  margin: 0 6px 0 4px;
-  border-radius: 2px;
-  background: var(--selection);
-  cursor: pointer;
+/* O volume é um botão como os outros, e o que muda nele é o anel de dentro: a
+   transição é do traço, para o degrau não aparecer como um salto.
+
+   O traço aceso vai no mesmo roxo do ▶ — é a pista de que ali há nível, e duas
+   cores para duas coisas que dizem "ligado" fariam procurar a diferença. O
+   fundo do anel e o corte do mudo ficam na cor da faixa: mudo é a ausência do
+   roxo, e o botão inteiro apaga junto. */
+.lofi-volume .anel {
+  stroke: var(--purple);
+  transition: stroke-dashoffset 140ms ease-out;
 }
 
-.lofi-volume::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--comment);
-}
-
-.lofi-volume:hover::-webkit-slider-thumb {
-  background: var(--purple);
-}
-
-/* O nome da estação. Teto de largura porque os títulos do YouTube são frases
-   inteiras, e uma delas empurraria o parcial da escuta para fora da faixa. */
 /* O analisador de espectro. Dez colunas de 3px com 1px de vão: 39px no canto
    apertado da faixa, que ele divide com o nome da estação. */
 .spec {
@@ -997,33 +1108,26 @@ body {
   opacity: 0.9;
 }
 
+/* O nome da estação, e a faixa do momento atrás dele. Largura FIXA, e não um
+   teto: a faixa troca sozinha a cada música, e com um teto a caixa encolhia e
+   crescia junto com o texto — os botões e o volume, que vêm antes dela na
+   mesma linha, pulavam de um lado para o outro a cada troca de música. Fixa,
+   nada anda: o que não cabe passeia lá dentro. */
 .lofi-titulo {
-  max-width: 200px;
+  flex: none;
+  width: 100px;
   overflow: hidden;
+}
+
+/* O que passeia. `inline-block` para ter largura própria: é a diferença entre
+   ela e a da caixa que diz o quanto há para andar, e um `span` comum mediria
+   sempre a largura da caixa. A transição é montada e desmontada pelo JS, que é
+   quem sabe a distância — e distância depende do texto. */
+.lofi-titulo-texto {
+  display: inline-block;
   white-space: nowrap;
-  text-overflow: ellipsis;
+  will-change: transform;
 }
-
-/* O YouTube toca escondido — só o áudio interessa. A caixa fica dentro da
-   janela, de 1px e transparente, e não `display: none`: um iframe sem caixa
-   nenhuma corre o risco de ter a mídia suspensa pelo WebKit. */
-.lofi-palco {
-  position: fixed;
-  right: 0;
-  bottom: 0;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.lofi-palco iframe {
-  width: 1px;
-  height: 1px;
-  border: 0;
-}
-
 
 /* ---------- o editor de estações (Rádio ▸ Estações…) ---------- */
 
@@ -1047,7 +1151,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  width: 420px;
+  width: 540px;
   max-width: calc(100vw - 48px);
   max-height: calc(100vh - 96px);
   padding: 12px;
@@ -1070,11 +1174,39 @@ body {
   font-weight: 600;
 }
 
+/* A lista das quarenta e seis. `flex-basis: auto` — e NÃO `flex: 1 1 0` — porque
+   a caixa se dimensiona pelo conteúdo: com base zero a lista nasce com altura
+   zero, o conteúdo fica lá dentro rolável e invisível, e a caixa aparece vazia.
+   Com `auto` ela pede a altura do conteúdo, o `max-height` corta, e o resto
+   rola. */
 .lofi-lista {
   display: flex;
   flex-direction: column;
   gap: 2px;
   overflow-y: auto;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 60vh;
+}
+
+/* O gênero, atrás do nome da estação. Serve para escolher entre duzentos e
+   cinquenta nomes que não dizem o que tocam — "Moss Garden" e "Limbik
+   Frequencies" não se explicam. */
+.lofi-genero {
+  margin-left: 8px;
+  color: var(--comment);
+  font-size: 11px;
+}
+
+/* A marca das que tocam sem mostrador. No canto, pequena e apagada: é uma
+   diferença pequena, e quem está escolhendo rádio está escolhendo som. */
+.lofi-sem-spec {
+  flex: none;
+  padding-right: 9px;
+  color: var(--comment);
+  font-size: 10px;
+  opacity: 0.75;
+  white-space: nowrap;
 }
 
 .lofi-linha {
@@ -1109,32 +1241,6 @@ body {
   cursor: pointer;
 }
 
-.lofi-vazio {
-  padding: 10px 8px;
-  color: var(--comment);
-}
-
-.lofi-campo {
-  padding: 7px 9px;
-  border: 1px solid var(--selection);
-  border-radius: 5px;
-  background: var(--bg-dark);
-  color: var(--fg);
-  font: inherit;
-}
-
-.lofi-campo:focus {
-  outline: none;
-  border-color: var(--purple);
-}
-
-/* Altura reservada: o recado aparece e some a cada link colado, e sem ela a
-   caixa inteira subiria e desceria junto. */
-.lofi-recado {
-  min-height: 16px;
-  color: var(--comment);
-}
-
 
 /* A barra de rolagem do terminal. Escopada no xterm: sem o escopo ela pegaria
    a página inteira, e a aba do diff já tem a dela. */
@@ -1155,4 +1261,66 @@ body {
 
 .xterm .xterm-viewport::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* ---------- a lista de atalhos (Ajuda ▸ Atalhos do Teclado) ---------- */
+
+/* A casca é a do seletor de estações (.lofi-editor, .lofi-caixa); aqui só o
+   que é da lista. Duas colunas de grupos quando a janela deixa: são seis
+   grupos curtos, e uma coluna só rolaria à toa. */
+.ajuda-caixa {
+  width: 640px;
+}
+
+.ajuda-lista {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* A barra de rolagem do macOS flutua por cima do conteúdo em vez de tomar
+     espaço dele: sem esta folga ela cobria as teclas da coluna da direita. */
+  padding-right: 14px;
+  columns: 2 260px;
+  column-gap: 24px;
+}
+
+.ajuda-grupo {
+  break-inside: avoid;
+  margin-bottom: 14px;
+}
+
+.ajuda-grupo-nome {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--purple);
+}
+
+.ajuda-linha {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 0;
+}
+
+.ajuda-oque {
+  min-width: 0;
+}
+
+.ajuda-teclas {
+  flex: none;
+  display: flex;
+  gap: 4px;
+}
+
+.ajuda-tecla {
+  padding: 1px 6px;
+  border: 1px solid var(--selection);
+  border-radius: 4px;
+  background: var(--bg);
+  font: 11px/16px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  color: var(--fg);
+  white-space: nowrap;
 }
