@@ -14,8 +14,8 @@ SETTINGS="$CLAUDE_DIR/settings.json"
 DESTINO="$CLAUDE_DIR/hooks/termiau-evento.sh"
 ORIGEM="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/termiau-evento.sh"
 
-command -v jq >/dev/null || { echo "falta o jq"; exit 1; }
-command -v nc >/dev/null || { echo "falta o nc"; exit 1; }
+command -v jq >/dev/null || { echo "jq is missing"; exit 1; }
+command -v nc >/dev/null || { echo "nc is missing"; exit 1; }
 
 # O app faz esta mesma instalação sozinho (TermIAu ▸ Ligar ao Claude Code…, ver
 # `hooks_instalar` no lib.rs). Este script fica para quem está no repositório.
@@ -67,7 +67,7 @@ jq --arg cmd "bash $DESTINO" --argjson eventos "$EVENTOS" '
     then . else .statusLine = {type: "command", command: ($cmd + " status"), padding: 0} end
 ' "$BACKUP" > "$SETTINGS"
 
-echo "hook instalado em $DESTINO"
-echo "settings atualizado (backup em $BACKUP)"
+echo "hook installed at $DESTINO"
+echo "settings updated (backup at $BACKUP)"
 echo
 jq '.hooks | to_entries | map({(.key): [.value[].hooks[].command]}) | add' "$SETTINGS"

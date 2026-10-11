@@ -13,7 +13,7 @@
 set -uo pipefail
 
 uso() {
-  echo "uso: termiau ver <arquivo>[:linha[-linha]] [--ref <branch|commit>]" >&2
+  echo "usage: termiau ver <file>[:line[-line]] [--ref <branch|commit>]" >&2
   exit 2
 }
 
@@ -32,7 +32,7 @@ done
 [ -n "$alvo" ] || uso
 
 if [ -z "${TERMIAU_SOCK:-}" ] || [ ! -S "$TERMIAU_SOCK" ]; then
-  echo "termiau: só funciona num painel do TermIAu" >&2
+  echo "termiau: only works inside a TermIAu panel" >&2
   exit 1
 fi
 
@@ -55,11 +55,11 @@ case "$alvo" in
 esac
 
 if [ -z "$ref" ] && [ ! -f "$alvo" ]; then
-  echo "termiau: não existe: $alvo" >&2
+  echo "termiau: no such file: $alvo" >&2
   exit 1
 fi
 if [ -n "$ref" ] && [ ! -d "$(dirname "$alvo")" ]; then
-  echo "termiau: pasta não existe: $(dirname "$alvo")" >&2
+  echo "termiau: no such folder: $(dirname "$alvo")" >&2
   exit 1
 fi
 
@@ -74,8 +74,8 @@ txt() { [ -n "$1" ] && json "$1" || printf null; }
 printf '{"painel":%s,"ver":{"caminho":%s,"linha":%s,"ate":%s,"ref":%s}}\n' \
   "$PAINEL" "$(json "$alvo")" "$(num "$linha")" "$(num "$ate")" "$(txt "$ref")" |
   nc -U "$TERMIAU_SOCK" -w 1 >/dev/null 2>&1 || {
-  echo "termiau: o app não respondeu" >&2
+  echo "termiau: the app did not respond" >&2
   exit 1
 }
 
-echo "aberto no visor do TermIAu: $alvo${linha:+:$linha}${ate:+-$ate}${ref:+ (em $ref)}"
+echo "opened in the TermIAu viewer: $alvo${linha:+:$linha}${ate:+-$ate}${ref:+ (at $ref)}"

@@ -39,7 +39,7 @@ notify = "8"
 # arquivo. Estas duas já vêm com o wry, então não custam build.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSPasteboardItem"] }
-objc2-foundation = { version = "0.3", features = ["NSURL"] }
+objc2-foundation = { version = "0.3", features = ["NSURL", "NSLocale", "NSArray", "NSString"] }
 
 # Os testes do differ montam repositórios git de verdade numa pasta temporária.
 [dev-dependencies]

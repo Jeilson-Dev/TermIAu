@@ -1,6 +1,7 @@
 mod area;
 mod differ;
 mod escuta;
+mod idioma;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -10,6 +11,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use base64::Engine;
+use idioma::tr;
 use portable_pty::{Child, ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use tauri::menu::{AboutMetadata, CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -1351,57 +1353,57 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
         "TermIAu",
         true,
         &[
-            &PredefinedMenuItem::about(app, None, Some(AboutMetadata::default()))?,
+            &PredefinedMenuItem::about(app, Some(tr("Sobre o TermIAu", "About TermIAu")), Some(AboutMetadata::default()))?,
             &PredefinedMenuItem::separator(app)?,
             // ⌘, é onde todo app do macOS guarda isto — e, sendo item de menu,
             // a tecla nem chega na webview: o menu fica com ela antes.
-            &MenuItem::with_id(app, "preferencias", "Preferências…", true, Some("CmdOrCtrl+,"))?,
+            &MenuItem::with_id(app, "preferencias", tr("Preferências…", "Preferences…"), true, Some("CmdOrCtrl+,"))?,
             // Ligar instala também os hooks do Claude Code, que é de onde vem a
             // sessão a retomar em cada painel.
             &CheckMenuItem::with_id(
                 app,
                 "restaurar",
-                "Restaurar Abas ao Abrir",
+                tr("Restaurar Abas ao Abrir", "Restore Tabs on Launch"),
                 true,
                 restaurar_ligado(app.clone()),
                 None::<&str>,
             )?,
             // Os hooks sozinhos, para quem quer só o aviso de "esperando" nas abas.
-            &MenuItem::with_id(app, "hooks", "Ligar ao Claude Code…", true, None::<&str>)?,
+            &MenuItem::with_id(app, "hooks", tr("Ligar ao Claude Code…", "Connect to Claude Code…"), true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::services(app, None)?,
+            &PredefinedMenuItem::services(app, Some(tr("Serviços", "Services")))?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::hide(app, None)?,
-            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::hide(app, Some(tr("Ocultar TermIAu", "Hide TermIAu")))?,
+            &PredefinedMenuItem::hide_others(app, Some(tr("Ocultar Outros", "Hide Others")))?,
             &PredefinedMenuItem::separator(app)?,
             // Item nosso, e não o `quit` pronto: aquele encerra o app na hora, e
             // um ⌘Q esbarrado leva embora todos os shells. Este só avisa a
             // webview, que pergunta antes (ver `pedirSair` no main.ts).
-            &MenuItem::with_id(app, "sair", "Sair do TermIAu", true, Some("CmdOrCtrl+Q"))?,
+            &MenuItem::with_id(app, "sair", tr("Sair do TermIAu", "Quit TermIAu"), true, Some("CmdOrCtrl+Q"))?,
         ],
     )?;
 
     let arquivo = Submenu::with_items(
         app,
-        "Arquivo",
+        tr("Arquivo", "File"),
         true,
         &[
-            &MenuItem::with_id(app, "nova-aba", "Nova Aba", true, Some("CmdOrCtrl+T"))?,
+            &MenuItem::with_id(app, "nova-aba", tr("Nova Aba", "New Tab"), true, Some("CmdOrCtrl+T"))?,
             // Como no navegador: traz de volta a última aba fechada, com o layout
             // dela e as sessões do Claude retomadas.
             &MenuItem::with_id(
                 app,
                 "reabrir-aba",
-                "Reabrir Aba Fechada",
+                tr("Reabrir Aba Fechada", "Reopen Closed Tab"),
                 true,
                 Some("CmdOrCtrl+Shift+T"),
             )?,
             &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(app, "dividir-lado", "Dividir ao Lado", true, Some("CmdOrCtrl+D"))?,
+            &MenuItem::with_id(app, "dividir-lado", tr("Dividir ao Lado", "Split Right"), true, Some("CmdOrCtrl+D"))?,
             &MenuItem::with_id(
                 app,
                 "dividir-abaixo",
-                "Dividir Abaixo",
+                tr("Dividir Abaixo", "Split Down"),
                 true,
                 Some("CmdOrCtrl+Shift+D"),
             )?,
@@ -1409,46 +1411,46 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
             &MenuItem::with_id(
                 app,
                 "maximizar",
-                "Maximizar ou Recolher Painel",
+                tr("Maximizar ou Recolher Painel", "Maximize or Restore Pane"),
                 true,
                 Some("CmdOrCtrl+Shift+Enter"),
             )?,
             &PredefinedMenuItem::separator(app)?,
             // Fecha o painel em foco; com um só painel, é a aba inteira que vai.
-            &MenuItem::with_id(app, "fechar", "Fechar", true, Some("CmdOrCtrl+W"))?,
-            &PredefinedMenuItem::close_window(app, Some("Fechar Janela"))?,
+            &MenuItem::with_id(app, "fechar", tr("Fechar", "Close"), true, Some("CmdOrCtrl+W"))?,
+            &PredefinedMenuItem::close_window(app, Some(tr("Fechar Janela", "Close Window")))?,
         ],
     )?;
 
     let editar = Submenu::with_items(
         app,
-        "Editar",
+        tr("Editar", "Edit"),
         true,
         &[
-            &PredefinedMenuItem::copy(app, None)?,
-            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::copy(app, Some(tr("Copiar", "Copy")))?,
+            &PredefinedMenuItem::paste(app, Some(tr("Colar", "Paste")))?,
             // O ⌘V cola o nome do arquivo (ou nada, se o Finder não deixou
             // texto); este cola o caminho, que é o que serve de argumento.
             &MenuItem::with_id(
                 app,
                 "colar-caminho",
-                "Colar Caminho",
+                tr("Colar Caminho", "Paste Path"),
                 true,
                 Some("CmdOrCtrl+Shift+V"),
             )?,
-            &PredefinedMenuItem::select_all(app, None)?,
+            &PredefinedMenuItem::select_all(app, Some(tr("Selecionar Tudo", "Select All")))?,
         ],
     )?;
 
     let escuta = Submenu::with_items(
         app,
-        "Escuta",
+        tr("Escuta", "Dictation"),
         true,
         &[
             // ⌘E, e não Ctrl+Espaço: no macOS ele troca de fonte de entrada
             // quando há mais de uma instalada. ⌘E fica livre — o menu o consome
             // antes da webview.
-            &MenuItem::with_id(app, "escutar", "Escutar", true, Some("CmdOrCtrl+E"))?,
+            &MenuItem::with_id(app, "escutar", tr("Escutar", "Listen"), true, Some("CmdOrCtrl+E"))?,
         ],
     )?;
 
@@ -1457,11 +1459,11 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
     // que se aperta sem tirar a mão do teclado.
     let radio = Submenu::with_items(
         app,
-        "Rádio",
+        tr("Rádio", "Radio"),
         true,
         &[
-            &MenuItem::with_id(app, "radio", "Tocar / Pausar", true, Some("CmdOrCtrl+Shift+P"))?,
-            &MenuItem::with_id(app, "estacoes", "Estações…", true, None::<&str>)?,
+            &MenuItem::with_id(app, "radio", tr("Tocar / Pausar", "Play / Pause"), true, Some("CmdOrCtrl+Shift+P"))?,
+            &MenuItem::with_id(app, "estacoes", tr("Estações…", "Stations…"), true, None::<&str>)?,
         ],
     )?;
 
@@ -1470,27 +1472,27 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
     // dois modos — ⌘⇧↑ e ⌘⇧↓ são os das marcas do iTerm2.
     let exibir = Submenu::with_items(
         app,
-        "Exibir",
+        tr("Exibir", "View"),
         true,
         &[
             &MenuItem::with_id(
                 app,
                 "chat",
-                "Alternar entre Chat e Terminal",
+                tr("Alternar entre Chat e Terminal", "Toggle Chat and Terminal"),
                 true,
                 Some("CmdOrCtrl+Shift+C"),
             )?,
             &MenuItem::with_id(
                 app,
                 "visor",
-                "Mostrar ou Esconder o Arquivo",
+                tr("Mostrar ou Esconder o Arquivo", "Show or Hide File"),
                 true,
                 Some("CmdOrCtrl+Shift+O"),
             )?,
             &MenuItem::with_id(
                 app,
                 "compactar",
-                "Compactar a Conversa do Claude",
+                tr("Compactar a Conversa do Claude", "Compact Claude Conversation"),
                 true,
                 Some("CmdOrCtrl+Shift+K"),
             )?,
@@ -1498,14 +1500,14 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
             &MenuItem::with_id(
                 app,
                 "mensagem-anterior",
-                "Sua Mensagem Anterior",
+                tr("Sua Mensagem Anterior", "Your Previous Message"),
                 true,
                 Some("CmdOrCtrl+Shift+Up"),
             )?,
             &MenuItem::with_id(
                 app,
                 "mensagem-seguinte",
-                "Sua Próxima Mensagem",
+                tr("Sua Próxima Mensagem", "Your Next Message"),
                 true,
                 Some("CmdOrCtrl+Shift+Down"),
             )?,
@@ -1514,11 +1516,11 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
 
     let janela = Submenu::with_items(
         app,
-        "Janela",
+        tr("Janela", "Window"),
         true,
         &[
-            &PredefinedMenuItem::minimize(app, None)?,
-            &PredefinedMenuItem::fullscreen(app, None)?,
+            &PredefinedMenuItem::minimize(app, Some(tr("Minimizar", "Minimize")))?,
+            &PredefinedMenuItem::fullscreen(app, Some(tr("Tela Cheia", "Enter Full Screen")))?,
         ],
     )?;
 
@@ -1526,9 +1528,9 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
     // menu, a tecla fica com o menu e não chega ao shell.
     let ajuda = Submenu::with_items(
         app,
-        "Ajuda",
+        tr("Ajuda", "Help"),
         true,
-        &[&MenuItem::with_id(app, "atalhos", "Atalhos do Teclado", true, Some("CmdOrCtrl+/"))?],
+        &[&MenuItem::with_id(app, "atalhos", tr("Atalhos do Teclado", "Keyboard Shortcuts"), true, Some("CmdOrCtrl+/"))?],
     )?;
 
     app.set_menu(Menu::with_items(

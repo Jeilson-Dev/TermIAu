@@ -151,7 +151,7 @@ esac
 case "$PAYLOAD" in
   *'"hook_event_name":"SessionStart"'*)
     if [ -x "$HOME/.termiau/bin/termiau" ]; then
-      printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"Este terminal é o TermIAu, que tem um visor de arquivos dentro do próprio painel. Quando o usuário pedir para ver, abrir ou mostrar um arquivo ou trecho, ou quando você apontar uma linha específica para ele conferir, rode `~/.termiau/bin/termiau ver <arquivo>[:linha[-linha]]` (caminho relativo à pasta atual ou absoluto). Com `--ref <branch|commit>` ele mostra o arquivo como está naquele ponto do git, por exemplo `--ref main`. Arquivos .md abrem renderizados. Prefira isso a abrir editores externos (code, open -a, vim, nano). Depois de abrir, cite a linha na resposta normalmente."}}'
+      printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"This terminal is TermIAu, which has a file viewer inside the panel itself. When the user asks to see, open or show a file or snippet, or when you point them to a specific line to check, run `~/.termiau/bin/termiau ver <file>[:line[-line]]` (path relative to the current folder or absolute). With `--ref <branch|commit>` it shows the file as it is at that point in git, for example `--ref main`. .md files open rendered. Prefer this over opening external editors (code, open -a, vim, nano). After opening it, cite the line in your answer as usual."}}'
     fi
     ;;
 esac
