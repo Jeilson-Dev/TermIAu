@@ -5,6 +5,7 @@
 
 import { resolver, type ConfigLaunch, type Contexto } from "./launch";
 import { palavra } from "./shell";
+import { T } from "../i18n/terminal";
 
 /** Um botão da barra enquanto o app roda: uma tecla mandada ao programa. */
 export interface Acao {
@@ -44,7 +45,7 @@ const lista = (v: unknown): string[] =>
 /** O que toda configuração tem igual: cwd, env e só `request: "launch"`. */
 function base(cfg: ConfigLaunch, ctx: Contexto) {
   if ((cfg.request ?? "launch") !== "launch") {
-    throw new Error(`"request": "${cfg.request}" ainda não é suportado — só "launch"`);
+    throw new Error(T.requestNaoSuportado(String(cfg.request)));
   }
   const r = (v: string) => resolver(v, ctx);
   const dir = r(texto(cfg.cwd) ?? ctx.pasta);
@@ -104,7 +105,7 @@ const node: Runner = {
     const { r, cwd, env } = base(cfg, ctx);
     const exe = texto(cfg.runtimeExecutable);
     const program = texto(cfg.program);
-    if (!exe && !program) throw new Error("falta `program` ou `runtimeExecutable`");
+    if (!exe && !program) throw new Error(T.faltaProgramOuExecutable);
     const argv = [
       exe ? r(exe) : "node",
       ...lista(cfg.runtimeArgs).map(r),
@@ -125,7 +126,7 @@ const python: Runner = {
     const program = texto(cfg.program);
     if (modulo) return { rotulo: "Python", cwd, env, argv: [exe, "-m", r(modulo), ...args] };
     if (program) return { rotulo: "Python", cwd, env, argv: [exe, r(program), ...args] };
-    throw new Error("falta `program` ou `module`");
+    throw new Error(T.faltaProgramOuModule);
   },
 };
 

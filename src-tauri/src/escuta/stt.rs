@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use crate::idioma::tr;
 
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
@@ -49,7 +50,7 @@ pub struct Engine {
 impl Engine {
     pub fn load(model_path: &str, lang: &str) -> anyhow::Result<Self> {
         let ctx = WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
-            .map_err(|e| anyhow::anyhow!("não consegui carregar o modelo: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("{}: {e}", tr("não consegui carregar o modelo", "couldn't load the model")))?;
         let threads = std::thread::available_parallelism()
             .map(|n| (n.get() as i32 - 2).max(2))
             .unwrap_or(4);
@@ -92,10 +93,10 @@ impl Engine {
         let mut state = self
             .ctx
             .create_state()
-            .map_err(|e| anyhow::anyhow!("estado do whisper: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("{}: {e}", tr("estado do whisper", "whisper state")))?;
         state
             .full(self.params(), audio)
-            .map_err(|e| anyhow::anyhow!("falha na inferência: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("{}: {e}", tr("falha na inferência", "inference failed")))?;
 
         let mut out = String::new();
         for seg in state.as_iter() {

@@ -7,6 +7,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { nossoAtalho, type Atalho } from "./atalhos";
 import { iniciar } from "./inicio";
+import { T } from "./i18n/terminal";
+import { idioma } from "./i18n";
 import { configsDe, listaDoPlay, tarefaAntes, tarefasDe, type ConfigLaunch, type Tarefa } from "./run/launch";
 import { linhaDeComando, runnerPara, type Plano } from "./run/runners";
 import { citar, palavra } from "./run/shell";
@@ -48,6 +50,9 @@ import "@xterm/xterm/css/xterm.css";
 import "./style.css";
 
 // Console da webview -> stderr do processo, senão erro de JS some.
+// O `lang` do HTML vem fixo; o certo é o do sistema (ver src/i18n).
+document.documentElement.lang = idioma();
+
 const jlog = (m: string) => invoke("js_log", { msg: m });
 window.addEventListener("error", (e) => jlog(`ERRO ${e.message} @ ${e.filename}:${e.lineno}`));
 window.addEventListener("unhandledrejection", (e) => jlog(`REJECT ${e.reason}`));
@@ -747,7 +752,7 @@ function criarPresa() {
 
   const chip = document.createElement("div");
   chip.className = "tab presa";
-  chip.title = "Diff da branch";
+  chip.title = T.diffDaBranch;
   chip.innerHTML = ICONE_DIFF;
   barra.appendChild(chip);
   chip.addEventListener("mousedown", (e) => {
@@ -772,8 +777,8 @@ function habilitarPresa(raiz: string | null) {
   presa.chip.classList.toggle("ligado", !!raiz);
   const nome = raiz?.split("/").filter(Boolean).pop();
   presa.chip.title = raiz
-    ? `Diff de ${nome ?? "repositório"}`
-    : "Nenhum repositório aberto — use o botão de diff de um painel";
+    ? T.diffDe(nome ?? T.repositorio)
+    : T.nenhumRepositorio;
   // O botão de diff de cada painel diz se é aquele projeto que está lá dentro,
   // e quem está lá dentro acabou de mudar.
   for (const a of abas) for (const f of folhas(a.raiz)) desenharBarra(f);
@@ -828,7 +833,7 @@ function abrirPresa(forcar = false) {
   presa.chip.classList.add("ativa");
   presa.quadro.focus();
   presa.quadro.contentWindow?.focus();
-  janela.setTitle("Diff — TermIAu").catch(() => {});
+  janela.setTitle(T.tituloDiff).catch(() => {});
 }
 
 /// Tira a aba presa da tela. Quem chama é quem vai pôr um terminal no lugar.
@@ -1286,7 +1291,7 @@ function autoCompactar(folha: Folha) {
   }
   if (c.compactou || c.estado !== "ocioso") return;
   c.compactou = true;
-  avisar(folha, `Contexto em ${Math.round(c.contexto)}%: compactando sozinho.`);
+  avisar(folha, T.compactandoSozinho(Math.round(c.contexto)));
   compactar(folha);
 }
 
@@ -1393,12 +1398,12 @@ function receber(
       if (perguntaId && questoes) {
         folha.claude.pergunta = { id: perguntaId, questoes };
         folha.claude.pede = "terminal";
-        folha.claude.aviso = "O Claude tem uma pergunta para você.";
+        folha.claude.aviso = T.temUmaPergunta;
         break;
       }
-      const tool = ev.tool_name ?? "uma ferramenta";
+      const tool = ev.tool_name ?? T.umaFerramenta;
       const oque = resumoDe(ev.tool_input);
-      folha.claude.aviso = `O Claude pede permissão para usar ${tool}${oque ? `: ${oque}` : "."}`;
+      folha.claude.aviso = T.pedePermissao(tool, oque);
       folha.claude.pede = ev.tool_name && PEDEM_TERMINAL.has(ev.tool_name) ? "terminal" : "permissao";
       break;
     }
@@ -1633,7 +1638,7 @@ function desenharAviso(folha: Folha) {
   const esperando = folha.claude?.estado === "esperando" && !pergunta;
   chat.aviso.hidden = !esperando && !chat.recado;
   chat.avisoTexto.textContent = esperando
-    ? (folha.claude?.aviso ?? "O Claude está esperando por você.")
+    ? (folha.claude?.aviso ?? T.estaEsperando)
     : (chat.recado ?? "");
   chat.avisoTexto.title = chat.avisoTexto.textContent;
   const permissao = esperando && folha.claude?.pede === "permissao";
@@ -1656,7 +1661,7 @@ function desenharPensando(folha: Folha) {
   chat.pensandoDesde ??= Date.now();
   const s = Math.floor((Date.now() - chat.pensandoDesde) / 1000);
   const tempo = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-  chat.pensando.textContent = `Trabalhando… ${tempo} · esc interrompe`;
+  chat.pensando.textContent = T.trabalhando(tempo);
 }
 
 /// O cartão de uma pergunta do Claude, em passos: uma pergunta por vez, com as
@@ -1679,7 +1684,7 @@ function desenharPergunta(folha: Folha, chat: Chat, pergunta: { id: string; ques
     folha.claude.estado = "trabalhando";
     invoke("pergunta_responder", { id: pergunta.id, resposta }).catch((e) => {
       // O terminal respondeu antes, ou o Claude desistiu da pergunta.
-      chat.recado = "A pergunta já tinha sido respondida no terminal.";
+      chat.recado = T.jaRespondidaNoTerminal;
       jlog(`pergunta_responder: ${e}`);
       pintar();
     });
@@ -1706,7 +1711,7 @@ function desenharPergunta(folha: Folha, chat: Chat, pergunta: { id: string; ques
       const abas = elemento("div", "chat-pergunta-abas");
       for (const [i, outra] of questoes.entries()) {
         const aba = elemento("button", "chat-pergunta-aba");
-        aba.textContent = `${respondida(i) ? "✓" : "○"} ${outra.header || `Pergunta ${i + 1}`}`;
+        aba.textContent = `${respondida(i) ? "✓" : "○"} ${outra.header || T.perguntaN(i + 1)}`;
         aba.setAttribute("aria-current", String(i === passo));
         aba.addEventListener("click", () => {
           passo = i;
@@ -1725,7 +1730,7 @@ function desenharPergunta(folha: Folha, chat: Chat, pergunta: { id: string; ques
     texto.textContent = q.question;
     if (q.multiSelect) {
       const dica = elemento("span", "chat-pergunta-dica");
-      dica.textContent = " · marque quantas quiser";
+      dica.textContent = T.marqueQuantasQuiser;
       texto.append(dica);
     }
     const temPrevia = q.options.some((o) => o.preview);
@@ -1736,7 +1741,7 @@ function desenharPergunta(folha: Folha, chat: Chat, pergunta: { id: string; ques
     previa.hidden = !escolhida;
     previa.textContent = escolhida?.preview ?? "";
     const outra = elemento("input", "chat-pergunta-outra");
-    outra.placeholder = "Escreva a sua resposta e tecle ↩";
+    outra.placeholder = T.escrevaSuaResposta;
     outra.value = e.outra ?? "";
     outra.hidden = e.outra === undefined;
 
@@ -1764,7 +1769,7 @@ function desenharPergunta(folha: Folha, chat: Chat, pergunta: { id: string; ques
       opcoes.append(b);
     }
     const outraBotao = elemento("button", "chat-opcao");
-    outraBotao.textContent = "Outra…";
+    outraBotao.textContent = T.outra;
     outraBotao.setAttribute("aria-pressed", String(e.outra !== undefined));
     outraBotao.addEventListener("click", () => {
       // Numa escolha só, escrever a sua tira a marcada.
@@ -1786,10 +1791,10 @@ function desenharPergunta(folha: Folha, chat: Chat, pergunta: { id: string; ques
 
     const acoes = elemento("div", "chat-pergunta-acoes");
     const terminal = elemento("button", "chat-pergunta-terminal");
-    terminal.textContent = "Ver no terminal";
+    terminal.textContent = T.verNoTerminal;
     terminal.addEventListener("click", () => alternarChat(folha));
     const voltar = elemento("button", "chat-pergunta-terminal");
-    voltar.textContent = "Voltar";
+    voltar.textContent = T.voltar;
     voltar.addEventListener("click", () => {
       passo--;
       desenhar();
@@ -1797,7 +1802,7 @@ function desenharPergunta(folha: Folha, chat: Chat, pergunta: { id: string; ques
     // Na última sem resposta o botão já manda; antes dela, segue.
     const ultima = questoes.every((_, i) => i === passo || respondida(i));
     const seguir = elemento("button", "chat-pergunta-responder");
-    seguir.textContent = ultima ? "Responder" : "Próxima";
+    seguir.textContent = ultima ? T.responder : T.proxima;
     seguir.disabled = !respondida(passo);
     seguir.addEventListener("click", avancar);
     acoes.append(terminal);
@@ -1889,21 +1894,21 @@ function criarChat(folha: Folha): Chat {
   const aviso = elemento("div", "chat-aviso");
   const avisoTexto = elemento("span", "chat-aviso-texto");
   const permitir = elemento("button", "chat-aviso-sim");
-  permitir.textContent = "Permitir";
+  permitir.textContent = T.permitir;
   permitir.addEventListener("click", () => responderPermissao(folha, true));
   const negar = elemento("button", "chat-aviso-nao");
-  negar.textContent = "Negar";
+  negar.textContent = T.negar;
   negar.addEventListener("click", () => responderPermissao(folha, false));
   const ver = elemento("button", "chat-aviso-ver");
-  ver.textContent = "Ver no terminal";
+  ver.textContent = T.verNoTerminal;
   ver.addEventListener("click", () => alternarChat(folha));
   aviso.append(avisoTexto, permitir, negar, ver);
   const mais = elemento("button", "chat-mais");
-  mais.textContent = "Mostrar mensagens anteriores";
+  mais.textContent = T.mostrarAnteriores;
   mais.hidden = true;
   const campo = elemento("textarea", "chat-campo");
   campo.rows = 1;
-  campo.placeholder = "Mensagem para o Claude — ↩ envia, ⇧↩ quebra a linha, / comandos, esc interrompe";
+  campo.placeholder = T.mensagemParaOClaude;
   const menu = elemento("div", "chat-comandos");
   menu.hidden = true;
   const anexos = elemento("div", "chat-anexos");
@@ -1957,7 +1962,7 @@ function criarChat(folha: Folha): Chat {
     const nome = comando?.[1];
     // Com argumento o comando já diz o que quer, e não abre tela nenhuma.
     const abreTela = texto === `/${nome}` && COMANDOS_DO_CLAUDE.some((c) => c.interativo && c.nome === nome);
-    chat.recado = abreTela ? `O /${nome} abriu uma tela no terminal.` : undefined;
+    chat.recado = abreTela ? T.abriuTelaNoTerminal(nome ?? "") : undefined;
     pintar();
   };
   const completar = (c: Comando) => {
@@ -2102,7 +2107,7 @@ function criarChat(folha: Folha): Chat {
     invoke("pty_write", { id: folha.id, data: "\x16" }).catch((err) => jlog(`chat imagem: ${err}`));
     const img = elemento("img", "chat-anexo");
     img.src = URL.createObjectURL(arquivo);
-    img.alt = "imagem anexada";
+    img.alt = T.imagemAnexada;
     img.addEventListener("click", () => ampliarImagem(img.src));
     anexos.append(img);
     anexos.hidden = false;
@@ -2210,10 +2215,10 @@ type SessaoSalva = { id: string; title: string; modified: number };
 /// "há 5 min", "há 3 h", "há 2 d": o bastante para achar a conversa de ontem.
 function haQuanto(ms: number): string {
   const min = Math.max(0, Math.round((Date.now() - ms) / 60_000));
-  if (min < 1) return "agora";
-  if (min < 60) return `há ${min} min`;
-  if (min < 60 * 24) return `há ${Math.round(min / 60)} h`;
-  return `há ${Math.round(min / (60 * 24))} d`;
+  if (min < 1) return T.agora;
+  if (min < 60) return T.haMin(min);
+  if (min < 60 * 24) return T.haHoras(Math.round(min / 60));
+  return T.haDias(Math.round(min / (60 * 24)));
 }
 
 /// A lista do `/resume`, dentro do chat: as sessões guardadas da pasta em que
@@ -2228,7 +2233,7 @@ async function abrirSessoes(folha: Folha) {
   // A sessão em que já se está não é uma a retomar.
   const outras = todas.filter((s) => s.id !== folha.claude?.sessao);
   if (!outras.length) {
-    chat.recado = "Não há outra sessão guardada nesta pasta.";
+    chat.recado = T.semOutraSessao;
     return desenharAviso(folha);
   }
   chat.recado = undefined;
@@ -2247,8 +2252,8 @@ function desenharSessoes(chat: Chat) {
   chat.escolhido = Math.max(0, Math.min(chat.escolhido, chat.sessoesAchadas.length - 1));
   const cabeca = elemento("div", "chat-comandos-cabeca");
   cabeca.textContent = chat.sessoesAchadas.length
-    ? "Retomar uma sessão — ↑↓ escolhe, ↩ retoma, esc cancela, digite para filtrar"
-    : "Nenhuma sessão com esse texto — esc cancela";
+    ? T.retomarSessao
+    : T.nenhumaSessaoComTexto;
   chat.menu.hidden = false;
   chat.menu.replaceChildren(
     cabeca,
@@ -2367,7 +2372,7 @@ function desenharDiff(arquivo: ArquivoDiff): HTMLElement {
   // O ícone é o do modo para onde o clique leva.
   const modo = elemento("button", "chat-diff-modo");
   modo.innerHTML = lado ? ICONE_UNIFICADO : ICONE_LADO_A_LADO;
-  modo.title = lado ? "Ver unificado (vale para todos os diffs)" : "Ver lado a lado (vale para todos os diffs)";
+  modo.title = lado ? T.verUnificado : T.verLadoALado;
   modo.addEventListener("mousedown", (e) => e.preventDefault());
   modo.addEventListener("click", () => {
     const novo: ViewMode = lado ? "unified" : "split";
@@ -2409,7 +2414,7 @@ function desenharDiff(arquivo: ArquivoDiff): HTMLElement {
   el.append(resumo, emPrevia(pre, mostradas, mostradas > LONGA_LINHAS));
   if (total > DIFF_MAXIMO) {
     const nota = elemento("div", "chat-diff-resumo");
-    nota.textContent = `… mais ${total - DIFF_MAXIMO} linhas`;
+    nota.textContent = T.maisLinhas(total - DIFF_MAXIMO);
     el.append(nota);
   }
   return el;
@@ -2435,7 +2440,7 @@ function desenharSeu(el: HTMLElement, texto: string, imagens: string[]) {
       const caixa = elemento("div", "chat-colado");
       const linhas = p.texto.split("\n").length;
       const titulo = elemento("div", "chat-colado-titulo");
-      titulo.textContent = `Texto colado · ${linhas} ${linhas === 1 ? "linha" : "linhas"}`;
+      titulo.textContent = T.textoColado(linhas);
       caixa.append(titulo, recolhivel(p.texto));
       el.append(caixa);
     } else el.append(recolhivel(p.texto));
@@ -2460,7 +2465,7 @@ function emPrevia(corpo: HTMLElement, linhas: number, longo: boolean): HTMLEleme
   if (!longo) return el;
   const botao = elemento("button", "chat-recolhivel-botao");
   const rotulo = () => {
-    botao.textContent = el.classList.contains("recolhida") ? `Mostrar tudo · ${linhas} linhas` : "Recolher";
+    botao.textContent = el.classList.contains("recolhida") ? T.mostrarTudo(linhas) : T.recolher;
   };
   botao.addEventListener("click", () => {
     el.classList.toggle("recolhida");
@@ -2516,7 +2521,7 @@ async function lerChat(folha: Folha) {
       chat.pendentes = [];
       if (t.cortado) {
         const nota = elemento("div", "chat-nota");
-        nota.textContent = "O começo desta conversa ficou no terminal: aqui está só a parte mais recente.";
+        nota.textContent = T.comecoNoTerminal;
         chat.lista.prepend(nota);
       }
       chat.falas = [];
@@ -2635,7 +2640,7 @@ async function abrirClaudeNoChat(folha: Folha) {
   // Com outro programa na frente do shell, o `claude` seria digitado dentro
   // dele — num vim, num servidor rodando.
   if (await invoke<boolean>("pty_ocupado", { id: folha.id }).catch(() => false)) {
-    return avisar(folha, "Há um programa rodando neste painel: o Claude não foi aberto");
+    return avisar(folha, T.programaRodando);
   }
   // O clique repetido enquanto a pergunta acima ia e voltava.
   if (folha.morta || folha.claude || folha.chat?.aberto) return;
@@ -2707,9 +2712,9 @@ const VISOR_MS = 1000;
 type Arranjo = "lado" | "abaixo" | "sobre";
 const ARRANJOS: Arranjo[] = ["lado", "abaixo", "sobre"];
 const ROTULO_ARRANJO: Record<Arranjo, string> = {
-  lado: "Lado a lado",
-  abaixo: "Arquivo em cima, terminal embaixo",
-  sobre: "Por cima do terminal",
+  lado: T.arranjoLado,
+  abaixo: T.arranjoAbaixo,
+  sobre: T.arranjoSobre,
 };
 const CHAVE_VISOR = "termiau:visor";
 
@@ -2808,7 +2813,7 @@ function arrumarVisor(folha: Folha) {
   host.classList.toggle("visor-abaixo", dividido && arranjoVisor === "abaixo");
   host.style.setProperty("--visor-fatia", `${(fatiaVisor * 100).toFixed(2)}%`);
   v.arranjo.innerHTML = ICONE_ARRANJO[arranjoVisor];
-  v.arranjo.title = `${ROTULO_ARRANJO[arranjoVisor]} — clique para trocar`;
+  v.arranjo.title = T.cliqueParaTrocar(ROTULO_ARRANJO[arranjoVisor]);
   if (host.className === antes) return;
   const aba = abaDe(folha);
   if (aba && aba === ativa && !noDiff) {
@@ -2862,20 +2867,20 @@ function criarVisor(folha: Folha): Visor {
   const cabeca = elemento("div", "visor-cabeca");
   const voltar = elemento("button", "visor-btn");
   voltar.textContent = "‹";
-  voltar.title = "Arquivo anterior";
+  voltar.title = T.arquivoAnterior;
   const avancar = elemento("button", "visor-btn");
   avancar.textContent = "›";
-  avancar.title = "Próximo arquivo";
+  avancar.title = T.proximoArquivo;
   const caminho = elemento("span", "visor-caminho");
   const ref = elemento("span", "visor-ref");
   const modo = elemento("button", "visor-btn visor-btn-texto");
   const arranjo = elemento("button", "visor-btn visor-btn-icone");
   const editor = elemento("button", "visor-btn visor-btn-texto");
-  editor.textContent = "Abrir no editor";
-  editor.title = "O editor se escolhe nas Preferências (⌘,)";
+  editor.textContent = T.abrirNoEditor;
+  editor.title = T.editorNasPreferencias;
   const fechar = elemento("button", "visor-btn");
   fechar.textContent = "✕";
-  fechar.title = "Voltar ao terminal (esc)";
+  fechar.title = T.voltarAoTerminal;
   cabeca.append(voltar, avancar, caminho, ref, modo, arranjo, editor, fechar);
   const corpo = elemento("div", "visor-corpo");
   corpo.tabIndex = 0;
@@ -2937,7 +2942,7 @@ function criarVisor(folha: Folha): Visor {
     void (async () => {
       const comando = (await loadSettings().catch(() => undefined))?.editor.trim() || null;
       await invoke("abrir_no_editor", { caminho: p.caminho, linha: p.linha ?? null, comando });
-    })().catch((e) => avisar(folha, `Editor: ${e}`));
+    })().catch((e) => avisar(folha, T.editorErro(String(e))));
   });
   fechar.addEventListener("click", () => alternarVisor(folha));
   corpo.addEventListener("keydown", (e) => {
@@ -2986,7 +2991,7 @@ async function carregarVisor(folha: Folha, rolar: boolean) {
     v.linhas = undefined;
     v.carimbo = undefined;
     const erro = elemento("div", "visor-erro");
-    erro.textContent = `Não deu para abrir: ${e}`;
+    erro.textContent = T.naoDeuParaAbrir(String(e));
     v.corpo.replaceChildren(erro);
     v.modo.hidden = true;
     return;
@@ -3011,7 +3016,7 @@ function desenharVisor(folha: Folha, rolar: boolean) {
   const p = v.historico[v.pos];
   const md = ehMarkdown(p.caminho);
   v.modo.hidden = !md;
-  v.modo.textContent = v.renderizado ? "Ver fonte" : "Ver renderizado";
+  v.modo.textContent = v.renderizado ? T.verFonte : T.verRenderizado;
   // A rolagem que o redesenho mexe (o conteúdo some e volta) não é sua: só a
   // que você fizer depois de dois quadros conta.
   const segurando = ++v.segurando;
@@ -3167,7 +3172,7 @@ function cliqueEmReferencia(folha: Folha, e: MouseEvent, base?: string): boolean
   void (async () => {
     const [caminho] = await resolver(base ?? (await pastaDoPainel(folha)), [ref]);
     if (caminho) abrirArquivo(folha, { caminho, linha: ref.linha, ate: ref.ate });
-    else avisar(folha.dono ?? folha, `Não achei ${ref.arquivo}`);
+    else avisar(folha.dono ?? folha, T.naoAchei(ref.arquivo));
   })();
   return true;
 }
@@ -3204,7 +3209,7 @@ function parcialMandaNaFaixa() {
 /// Fecha a faixa, ou volta ao parcial, conforme o microfone esteja aberto.
 function encerrarContagem() {
   pararPulso();
-  if (escutando) mostrarVoz("escutando…");
+  if (escutando) mostrarVoz(T.escutando);
   else fecharVoz();
 }
 
@@ -3239,7 +3244,7 @@ function baterEnvio() {
   const falta = envio.em - Date.now();
   if (falta > 0) {
     if (!parcialMandaNaFaixa()) {
-      mostrarVoz(`↵ em ${Math.ceil(falta / 1000)}s — digite para cancelar`);
+      mostrarVoz(T.enviaEm(Math.ceil(falta / 1000)));
     }
     return;
   }
@@ -3331,7 +3336,7 @@ async function baterInatividade() {
   if (Date.now() - ultimaFala < INATIVIDADE_MS) return;
   await pararEscuta();
   // A faixa avisa por que emudeceu: silêncio sem explicação é igual a travado.
-  mostrarVoz("escuta desligada — um minuto sem falar (⌘E para voltar)");
+  mostrarVoz(T.escutaDesligada);
   setTimeout(fecharVoz, 5000);
 }
 
@@ -3346,10 +3351,10 @@ async function alternarEscuta() {
   try {
     preparando = true;
     if (!(await invoke<boolean>("escuta_modelo_pronto"))) {
-      mostrarVoz("baixando o modelo de transcrição (466 MB), uma vez só…");
+      mostrarVoz(T.baixandoModelo);
       await invoke("escuta_baixar_modelo");
     }
-    mostrarVoz("escutando…");
+    mostrarVoz(T.escutando);
     await invoke("escuta_comecar");
     escutando = true;
     voz.classList.add("escutando");
@@ -3357,7 +3362,7 @@ async function alternarEscuta() {
     ultimaFala = Date.now();
     if (!vigia) vigia = setInterval(baterInatividade, 1000);
   } catch (e) {
-    mostrarVoz(`não consegui escutar: ${e}`);
+    mostrarVoz(T.naoConseguiEscutar(String(e)));
     setTimeout(fecharVoz, 4000);
   } finally {
     preparando = false;
@@ -3394,7 +3399,7 @@ async function ligarEscuta() {
   });
 
   await listen<number>("escuta://progresso", (e) => {
-    mostrarVoz(`baixando o modelo de transcrição… ${Math.round(e.payload * 100)}%`);
+    mostrarVoz(T.baixandoModeloPct(Math.round(e.payload * 100)));
   });
 
   await listen<string>("escuta://erro", (e) => {
@@ -3402,7 +3407,7 @@ async function ligarEscuta() {
     pararVigia();
     voz.classList.remove("escutando");
     limparOnda();
-    mostrarVoz(`erro na escuta: ${e.payload}`);
+    mostrarVoz(T.erroNaEscuta(String(e.payload)));
     setTimeout(fecharVoz, 4000);
   });
 
@@ -3615,7 +3620,7 @@ function criarBarra(): Barra {
   const grupoPlay = elemento("div", "tarefa-play-grupo");
   grupoPlay.append(play, escolher);
   const diff = botaoTarefa("tarefa-diff", ICONE_DIFF);
-  diff.title = "Diff da branch deste painel";
+  diff.title = T.diffDestePainel;
   const chat = botaoTarefa("tarefa-chat", ICONE_CHAT);
   // Só aparece depois do primeiro arquivo aberto: antes não há o que mostrar.
   const visor = botaoTarefa("tarefa-visor", ICONE_ARQUIVO);
@@ -3702,7 +3707,7 @@ function desenharMaximizar(folha: Folha) {
   b.maximizar.hidden = aba.raiz.tipo === "folha";
   b.maximizar.classList.toggle("ligado", cheio);
   b.maximizar.innerHTML = cheio ? ICONE_RECOLHER : ICONE_MAXIMIZAR;
-  b.maximizar.title = cheio ? "Recolher — ver os outros painéis (⌘⇧↩)" : "Ocupar a aba toda (⌘⇧↩)";
+  b.maximizar.title = cheio ? T.recolherPainel : T.ocuparAba;
 }
 
 function desenharBarra(folha: Folha) {
@@ -3720,14 +3725,14 @@ function desenharBarra(folha: Folha) {
   let nivel: Nivel = "";
   if (usado === undefined) {
     b.contextoCheio.style.width = "0%";
-    b.contextoNum.textContent = "Contexto —";
-    b.contexto.title = "Contexto da sessão: chega quando o Claude responder — clique para compactar (⌘⇧K)";
+    b.contextoNum.textContent = T.contextoVazio;
+    b.contexto.title = T.contextoVazioDica;
   } else {
     const pct = Math.round(Math.min(100, Math.max(0, usado)));
     nivel = nivelDoContexto(pct, limitesDoContexto);
     b.contextoCheio.style.width = `${pct}%`;
-    b.contextoNum.textContent = `Contexto ${pct}%`;
-    b.contexto.title = `Contexto da sessão: ${pct}% usado, ${100 - pct}% livre — clique para compactar (⌘⇧K)`;
+    b.contextoNum.textContent = T.contexto(pct);
+    b.contexto.title = T.contextoDica(pct);
   }
   b.contexto.dataset.nivel = nivel;
   // No vermelho, o painel inteiro avisa: a pílula sozinha some no canto do olho.
@@ -3737,28 +3742,28 @@ function desenharBarra(folha: Folha) {
   // que o têm.
   const c = folha.claude;
   b.modelo.hidden = !c;
-  b.modelo.textContent = c?.modelo ?? "Modelo —";
-  b.modelo.title = c?.modelo ? `Modelo da sessão: ${c.modelo} — clique para trocar` : "Modelo da sessão: chega quando o Claude responder";
+  b.modelo.textContent = c?.modelo ?? T.modeloVazio;
+  b.modelo.title = c?.modelo ? T.modeloDica(c.modelo) : T.modeloVazioDica;
   b.esforco.hidden = !c?.esforco;
   const esf = ESFORCOS.find((e) => e.nivel === c?.esforco);
-  b.esforco.textContent = `Esforço ${esf?.rotulo ?? c?.esforco ?? ""}`;
-  b.esforco.title = "Nível de esforço do Claude — clique para trocar";
+  b.esforco.textContent = T.esforco(esf?.rotulo ?? c?.esforco ?? "");
+  b.esforco.title = T.esforcoDica;
 
   const g = folha.gaveta;
   b.gaveta.hidden = !g;
   b.gaveta.classList.toggle("ligado", g?.aberta === true);
-  b.gaveta.title = g?.aberta ? "Esconder o terminal do app" : "Mostrar o terminal do app";
+  b.gaveta.title = g?.aberta ? T.esconderGaveta : T.mostrarGaveta;
 
   const ex = folha.execucao;
   const rodando = ex?.rodando === true;
   b.parar.hidden = !rodando;
-  b.parar.title = ex ? `Parar ${ex.nome}` : "";
+  b.parar.title = ex ? T.parar(ex.nome) : "";
   b.acoes.replaceChildren();
   if (ex && rodando) {
     for (const acao of ex.plano.acoes ?? []) {
       const botao = botaoTarefa("tarefa-acao", "");
       botao.textContent = `${acao.icone} ${acao.rotulo}`;
-      botao.title = `${acao.rotulo} — o mesmo que apertar ${acao.tecla} no terminal do app`;
+      botao.title = T.acaoDica(acao.rotulo, acao.tecla);
       botao.addEventListener("click", () => {
         invoke("pty_write", { id: ex.folha.id, data: acao.tecla }).catch((e) => jlog(`ação: ${e}`));
       });
@@ -3774,8 +3779,8 @@ function desenharBarra(folha: Folha) {
   b.diff.hidden = !b.repo;
   b.diff.classList.toggle("ligado", noDiffAgora);
   b.diff.title = noDiffAgora
-    ? "Este projeto está aberto na aba do diff"
-    : "Diff da branch deste painel";
+    ? T.abertoNoDiff
+    : T.diffDestePainel;
 
   // Sempre à mão: com sessão do Claude ele troca de modo; sem ela, abre uma
   // nesta pasta, já no chat.
@@ -3783,15 +3788,15 @@ function desenharBarra(folha: Folha) {
   b.chat.hidden = false;
   b.chat.classList.toggle("ligado", noChat);
   b.chat.title = noChat
-    ? "Voltar ao terminal (⌘⇧C)"
+    ? T.voltarAoTerminalChat
     : folha.claude
-      ? "Ver a conversa em modo chat (⌘⇧C)"
-      : "Abrir o Claude nesta pasta, em modo chat (⌘⇧C)";
+      ? T.verEmModoChat
+      : T.abrirClaudeNoChat;
 
   const visor = folha.visor;
   b.visor.hidden = !visor?.historico.length;
   b.visor.classList.toggle("ligado", visor?.aberto === true);
-  b.visor.title = visor?.aberto ? "Esconder o arquivo (⌘⇧O)" : "Mostrar o arquivo (⌘⇧O)";
+  b.visor.title = visor?.aberto ? T.esconderArquivo : T.mostrarArquivo;
 
   // Sem launch.json não há play: um botão apagado em todo shell seria ruído.
   const proj = b.projeto;
@@ -3801,7 +3806,7 @@ function desenharBarra(folha: Folha) {
   b.playIcone.innerHTML = reiniciar ? ICONE_REINICIAR : ICONE_PLAY;
   b.play.disabled = !cfg;
   b.play.title =
-    proj?.erro ?? (cfg ? `${reiniciar ? "Reiniciar" : "Rodar"} ${cfg.name}` : "O launch.json não tem configurações");
+    proj?.erro ?? (cfg ? (reiniciar ? T.reiniciar(cfg.name) : T.rodar(cfg.name)) : T.semConfiguracoes);
 
   // Com uma configuração só não há o que escolher, mas o nome continua sendo a
   // única pista do que o ▶ vai rodar. Então o botão fica, sem a seta e sem o
@@ -3811,7 +3816,7 @@ function desenharBarra(folha: Folha) {
   b.escolher.hidden = !cfg;
   b.escolher.disabled = !varias;
   b.escolher.classList.toggle("rotulo", !varias);
-  b.escolher.title = varias ? "Escolher a configuração do launch.json" : (cfg?.name ?? "");
+  b.escolher.title = varias ? T.escolherConfiguracao : (cfg?.name ?? "");
 }
 
 /// Refeito na criação do painel e a cada título novo — um `cd` muda o título, e
@@ -3851,7 +3856,7 @@ async function carregarProjeto(folha: Folha) {
     try {
       novo = { pasta, home, ...listaDoPlay(configsDe(achado.launch)), tarefas: tarefasDoProjeto };
     } catch (e) {
-      novo = { pasta, home, configs: [], menu: [], tarefas: [], erro: `launch.json ilegível: ${e}` };
+      novo = { pasta, home, configs: [], menu: [], tarefas: [], erro: T.launchIlegivel(String(e)) };
     }
   }
   if (pedido !== b.pedido || folha.morta) return;
@@ -3989,18 +3994,18 @@ const MODELOS = [
   { apelido: "opus", rotulo: "Opus" },
   { apelido: "sonnet", rotulo: "Sonnet" },
   { apelido: "haiku", rotulo: "Haiku" },
-  { apelido: "default", rotulo: "Padrão da conta" },
+  { apelido: "default", rotulo: T.padraoDaConta },
 ];
 
 /// Os níveis do `/effort`. Nem todo modelo tem todos: o Claude recusa o que
 /// não houver, e o recado aparece no terminal.
 const ESFORCOS = [
-  { nivel: "low", rotulo: "baixo" },
-  { nivel: "medium", rotulo: "médio" },
-  { nivel: "high", rotulo: "alto" },
-  { nivel: "xhigh", rotulo: "extra alto" },
-  { nivel: "max", rotulo: "máximo" },
-  { nivel: "auto", rotulo: "automático" },
+  { nivel: "low", rotulo: T.esforcoBaixo },
+  { nivel: "medium", rotulo: T.esforcoMedio },
+  { nivel: "high", rotulo: T.esforcoAlto },
+  { nivel: "xhigh", rotulo: T.esforcoExtraAlto },
+  { nivel: "max", rotulo: T.esforcoMaximo },
+  { nivel: "auto", rotulo: T.esforcoAuto },
 ];
 
 function alternarOpcoesDoClaude(folha: Folha, qual: "modelo" | "esforco") {
@@ -4028,7 +4033,7 @@ function alternarOpcoesDoClaude(folha: Folha, qual: "modelo" | "esforco") {
       item.addEventListener("mousedown", (e) => e.preventDefault());
       item.addEventListener("click", () => {
         fecharMenu();
-        mandarAoClaude(folha, o.comando, "troque");
+        mandarAoClaude(folha, o.comando, T.claudeTrabalhandoTroque);
       });
       return item;
     }),
@@ -4041,16 +4046,16 @@ function alternarOpcoesDoClaude(folha: Folha, qual: "modelo" | "esforco") {
 /// mesmo caminho do campo do chat. Com ele trabalhando o comando entraria na
 /// fila, ou no meio do que você estiver digitando: só compacta parado.
 function compactar(folha: Folha) {
-  mandarAoClaude(folha, "/compact", "compacte");
+  mandarAoClaude(folha, "/compact", T.claudeTrabalhandoCompacte);
 }
 
-/// Digita um comando no Claude do painel e dá Enter. O verbo vai no aviso de
+/// Digita um comando no Claude do painel e dá Enter. `ocupado` é o aviso de
 /// quando ele está trabalhando.
-function mandarAoClaude(folha: Folha, comando: string, verbo: string) {
+function mandarAoClaude(folha: Folha, comando: string, ocupado: string) {
   const dono = folha.dono ?? folha;
   if (!dono.claude) return;
   if (dono.claude.estado === "trabalhando") {
-    avisar(dono, `O Claude está trabalhando: ${verbo} quando ele parar.`);
+    avisar(dono, ocupado);
     return;
   }
   invoke("pty_write", { id: dono.id, data: comando }).catch((e) => jlog(`${comando}: ${e}`));
@@ -4077,7 +4082,7 @@ async function executar(dono: Folha, cfg: ConfigLaunch) {
   if (!proj || dono.morta) return;
   lembrarConfig(proj.pasta, cfg.name);
   const runner = runnerPara(cfg.type);
-  if (!runner) return avisar(dono, `${cfg.name}: "type": "${cfg.type}" ainda não é suportado`);
+  if (!runner) return avisar(dono, T.tipoNaoSuportado(cfg.name, cfg.type));
 
   let plano: Plano;
   let linha: string;
@@ -4102,13 +4107,13 @@ async function executar(dono: Folha, cfg: ConfigLaunch) {
     folha = gaveta.folha;
     if (dono.execucao?.rodando) await parar(dono.execucao);
     else if (await invoke<boolean>("pty_ocupado", { id: folha.id }).catch(() => false)) {
-      return avisar(dono, "o terminal do app está rodando outro comando");
+      return avisar(dono, T.gavetaOcupada);
     }
     // O shell pode ter andado de pasta desde a última vez.
     linha = `cd ${palavra(plano.cwd)} && ${linha}`;
   } else {
     folha = await criarGaveta(dono, plano.cwd);
-    if (folha && !dono.gaveta?.aberta) avisar(dono, `${cfg.name} rodando no terminal do app, escondido — ▤ mostra`);
+    if (folha && !dono.gaveta?.aberta) avisar(dono, T.rodandoEscondido(cfg.name));
   }
   if (!folha || folha.morta || dono.morta) return;
 
@@ -4333,15 +4338,15 @@ function colunaDeUso(nome: string) {
   const titulo = elemento("span", "uso-titulo");
   titulo.textContent = nome;
   const linhas = elemento("span", "uso-linhas");
-  const tempo = barraDeUso("Tempo restante", "uso-tempo");
-  const uso = barraDeUso("Tokens disponíveis", "uso-uso");
+  const tempo = barraDeUso(T.tempoRestante, "uso-tempo");
+  const uso = barraDeUso(T.tokensDisponiveis, "uso-uso");
   linhas.append(tempo.linha, uso.linha);
   coluna.append(titulo, linhas);
   return { coluna, tempo, uso };
 }
 
-const usoSessao = colunaDeUso("Sessão");
-const usoSemana = colunaDeUso("Semana");
+const usoSessao = colunaDeUso(T.sessao);
+const usoSemana = colunaDeUso(T.semana);
 /// `vertical`: a barra dos tokens ao lado do relógio, que esvazia de cima
 /// para baixo; as do hover esvaziam da direita para a esquerda.
 const usoBarras: { cheio: HTMLSpanElement; ponteiro: HTMLSpanElement; vertical?: boolean }[] = [
@@ -4389,8 +4394,8 @@ function pintarBarra(b: BarraDeUso, resta: number | null, texto: string, nivel: 
 
 /// A dica de uma janela: o nome e, uma por linha, o que resta dela.
 function dicaDeUso(nome: string, j: Janela | null): string {
-  if (!j) return `${nome}:\nsem janela aberta`;
-  return `${nome}:\n${limitar(100 - j.uso)}% de tokens disponíveis\n${faltaPara(j.renova)} de tempo restante`;
+  if (!j) return T.semJanela(nome);
+  return T.dicaDeUso(nome, limitar(100 - j.uso), faltaPara(j.renova));
 }
 
 /// Uma coluna: as duas barras contam o que resta, o tempo e o uso.
@@ -4473,7 +4478,7 @@ function desenharUso() {
   usoMini.cheio.style.height = `${s ? limitar(100 - s.uso) : 0}%`;
   usoCirculo.style.strokeDashoffset = String(USO_CIRCULO * (1 - restante));
   usoHora.style.transform = `rotate(${restante * 360}deg)`;
-  usoEl.title = `${dicaDeUso("Sessão", s)}\n\n${dicaDeUso("Semana", u.semana)}`;
+  usoEl.title = `${dicaDeUso(T.sessao, s)}\n\n${dicaDeUso(T.semana, u.semana)}`;
   usoArco = USO_CIRCULO * restante;
 }
 
@@ -4609,9 +4614,9 @@ function botaoLofi(classe: string, icone: string, titulo: string): HTMLButtonEle
 
 /// No lugar onde morava a seta de voltar. Com quarenta e seis estações, andar
 /// para trás de uma em uma não leva a lugar nenhum — a lista leva.
-const lofiEstacoes = botaoLofi("lofi-estacoes", ICONE_ESTACOES, "Estações (lista)");
-const lofiTocar = botaoLofi("lofi-tocar", ICONE_PLAY, "Tocar");
-const lofiProxima = botaoLofi("lofi-proxima", ICONE_PROXIMA, "Próxima estação");
+const lofiEstacoes = botaoLofi("lofi-estacoes", ICONE_ESTACOES, T.estacoesLista);
+const lofiTocar = botaoLofi("lofi-tocar", ICONE_PLAY, T.tocar);
+const lofiProxima = botaoLofi("lofi-proxima", ICONE_PROXIMA, T.proximaEstacao);
 
 /// O anel tem raio 5,5 no viewBox de 16 — o perímetro é o comprimento do traço
 /// inteiro, e é dele que sai a fração acesa.
@@ -4619,7 +4624,7 @@ const VOLUME_ANEL = 2 * Math.PI * 5.5;
 
 const ICONE_VOLUME = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.6" opacity=".26"/><circle class="anel" cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" transform="rotate(-90 8 8)" stroke-dasharray="${VOLUME_ANEL}" stroke-dashoffset="${VOLUME_ANEL}"/><path class="corte" d="M5.1 5.1l5.8 5.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
 
-const lofiVolume = botaoLofi("lofi-volume", ICONE_VOLUME, "Volume");
+const lofiVolume = botaoLofi("lofi-volume", ICONE_VOLUME, T.volume);
 const volumeAnel = lofiVolume.querySelector(".anel") as SVGCircleElement;
 const volumeCorte = lofiVolume.querySelector(".corte") as SVGPathElement;
 
@@ -4631,9 +4636,7 @@ function desenharVolume() {
   // `hidden` não apaga nada sem uma regra de CSS para ele.
   volumeCorte.style.display = volumeLofi > 0 ? "none" : "";
   const proximo = VOLUMES[(VOLUMES.indexOf(volumeLofi) + 1) % VOLUMES.length];
-  lofiVolume.title = `${volumeLofi === 0 ? "Mudo" : `Volume ${volumeLofi}%`} — clique para ${
-    proximo === 0 ? "mudo" : `${proximo}%`
-  }`;
+  lofiVolume.title = T.volumeDica(volumeLofi, proximo);
 }
 
 const lofiTitulo = elemento("span", "lofi-titulo");
@@ -4675,7 +4678,7 @@ function exibirRamo(r: Ramo, nome: string | null) {
   if (r.texto.textContent === novo && r.el.hidden === !nome) return;
   r.texto.textContent = novo;
   r.el.hidden = !nome;
-  r.el.title = nome ? `Branch ${nome}` : "";
+  r.el.title = nome ? T.branch(nome) : "";
   passear(r.caixa, r.texto);
 }
 
@@ -5027,13 +5030,13 @@ const usaGrafo = (e: Estacao): boolean => e.espectro && !semEspectro.has(e.url);
 function desenharLofi() {
   const e = atual();
   lofiTocar.innerHTML = tocandoLofi ? ICONE_PAUSA : ICONE_PLAY;
-  lofiTocar.title = tocandoLofi ? "Pausar" : "Tocar";
+  lofiTocar.title = tocandoLofi ? T.pausar : T.tocar;
   lofiTocar.disabled = !e;
   lofiProxima.disabled = estacoes.length < 2;
   lofiEl.classList.toggle("tocando", tocandoLofi);
   lofiEl.classList.toggle("carregando", carregandoLofi && !tocandoLofi);
 
-  const texto = avisoLofi ?? e?.nome ?? "sem estações";
+  const texto = avisoLofi ?? e?.nome ?? T.semEstacoes;
   if (texto !== tituloNoAr) {
     tituloNoAr = texto;
     lofiTituloTexto.textContent = texto;
@@ -5102,7 +5105,7 @@ function caiu(el: HTMLAudioElement) {
   noAr = false;
   tocandoLofi = false;
   carregandoLofi = false;
-  avisoLofi = "estação fora do ar — tente a próxima";
+  avisoLofi = T.estacaoForaDoAr;
   localStorage.removeItem(CHAVE_TOCANDO);
   desenharLofi();
 }
@@ -5191,7 +5194,7 @@ function tocarLofi(automatico = false) {
       return;
     }
     localStorage.removeItem(CHAVE_TOCANDO);
-    avisoLofi = `a rádio não abriu: ${erro}`;
+    avisoLofi = T.radioNaoAbriu(String(erro));
     desenharLofi();
     jlog(`radio: ${erro}`);
   });
@@ -5294,8 +5297,8 @@ lofiEditor.hidden = true;
 const lofiCaixa = elemento("div", "lofi-caixa");
 const lofiCabeca = elemento("div", "lofi-cabeca");
 const lofiCabecaTitulo = elemento("span", "lofi-cabeca-titulo");
-lofiCabecaTitulo.textContent = "Estações";
-const lofiFechar = botaoLofi("lofi-fechar", ICONE_TIRAR, "Fechar (esc)");
+lofiCabecaTitulo.textContent = T.estacoes;
+const lofiFechar = botaoLofi("lofi-fechar", ICONE_TIRAR, T.fecharEsc);
 lofiCabeca.append(lofiCabecaTitulo, lofiFechar);
 const lofiLista = elemento("div", "lofi-lista");
 lofiCaixa.append(lofiCabeca, lofiLista);
@@ -5309,17 +5312,17 @@ function desenharLista() {
     linha.classList.toggle("atual", i === estacao);
     const nome = elemento("button", "lofi-nome");
     nome.textContent = e.nome;
-    nome.title = `Tocar ${e.nome}`;
+    nome.title = T.tocarEstacao(e.nome);
     if (e.genero) {
       const genero = elemento("span", "lofi-genero");
-      genero.textContent = e.genero;
+      genero.textContent = T.genero(e.genero);
       nome.appendChild(genero);
     }
     // As que tocam sem mostrador levam uma marca, e não um aviso: é uma
     // diferença pequena, e quem está escolhendo rádio está escolhendo som.
     if (!usaGrafo(e)) {
       const marca = elemento("span", "lofi-sem-spec");
-      marca.textContent = "sem espectro";
+      marca.textContent = T.semEspectro;
       linha.appendChild(marca);
     }
     // Escolher uma estação parada é pedido para tocar: você veio aqui para
@@ -5375,64 +5378,64 @@ desenharLofi();
 /// Mais de uma tecla para a mesma coisa vira mais de uma tecla na linha.
 const ATALHOS: { grupo: string; itens: [string | string[], string][] }[] = [
   {
-    grupo: "Abas",
+    grupo: T.atAbas,
     itens: [
-      ["⌘T", "Nova aba"],
-      ["⌘⇧T", "Reabrir a aba fechada"],
-      ["⌘⇧]", "Próxima aba"],
-      ["⌘⇧[", "Aba anterior"],
-      ["⌘`", "Diff da branch (a aba presa)"],
-      ["⌘1 … ⌘8", "Ir para a aba de número"],
-      ["⌘9", "Última aba"],
+      ["⌘T", T.atNovaAba],
+      ["⌘⇧T", T.atReabrirAAbaFechada],
+      ["⌘⇧]", T.atProximaAba],
+      ["⌘⇧[", T.atAbaAnterior],
+      ["⌘`", T.atDiffDaBranchAAbaPresa],
+      ["⌘1 … ⌘8", T.atIrParaAAbaDeNumero],
+      ["⌘9", T.atUltimaAba],
     ],
   },
   {
-    grupo: "Painéis",
+    grupo: T.atPaineis,
     itens: [
-      ["⌘D", "Dividir ao lado"],
-      ["⌘⇧D", "Dividir abaixo"],
-      ["⌘⌥ ← ↑ → ↓", "Ir para o painel naquela direção"],
-      ["⌘⇧A", "Ir para o painel que espera por você"],
-      ["⌘⇧↩", "Maximizar o painel ou recolher de volta"],
-      ["⌘⇧C", "Alternar entre o chat e o terminal do Claude"],
-      ["⌘⇧K", "Compactar a conversa do Claude (/compact)"],
-      [["⌘⇧↑", "⌘⇧↓"], "Ir para a sua mensagem anterior ou seguinte"],
+      ["⌘D", T.atDividirAoLado],
+      ["⌘⇧D", T.atDividirAbaixo],
+      ["⌘⌥ ← ↑ → ↓", T.atIrParaOPainelNaquelaDirecao],
+      ["⌘⇧A", T.atIrParaOPainelQueEsperaPorVoce],
+      ["⌘⇧↩", T.atMaximizarOPainelOuRecolherDeVolta],
+      ["⌘⇧C", T.atAlternarEntreOChatEOTerminalDoClaude],
+      ["⌘⇧K", T.atCompactarAConversaDoClaudeCompact],
+      [["⌘⇧↑", "⌘⇧↓"], T.atIrParaASuaMensagemAnteriorOuSeguinte],
       // ⌃D é o fim de entrada: o shell sai, e o painel vai junto com ele.
-      [["⌘W", "⌃D"], "Fechar o painel (o último fecha a aba)"],
+      [["⌘W", "⌃D"], T.atFecharOPainelOUltimoFechaAAba],
     ],
   },
   {
-    grupo: "Terminal",
+    grupo: T.atTerminal,
     itens: [
-      ["⌘K", "Limpar a tela"],
-      ["⌘C", "Copiar"],
-      ["⌘V", "Colar"],
-      ["⌘⇧V", "Colar caminho do arquivo copiado"],
-      ["⌘A", "Selecionar tudo"],
+      ["⌘K", T.atLimparATela],
+      ["⌘C", T.atCopiar],
+      ["⌘V", T.atColar],
+      ["⌘⇧V", T.atColarCaminhoDoArquivoCopiado],
+      ["⌘A", T.atSelecionarTudo],
     ],
   },
   {
-    grupo: "Diff da branch",
+    grupo: T.atDiffDaBranch,
     itens: [
-      ["V", "Marcar o arquivo como visto"],
-      ["S", "Pôr ou tirar o arquivo do índice"],
-      ["⇧S", "Pôr ou tirar a pasta do arquivo do índice"],
-      ["A", "Pôr ou tirar tudo do índice"],
-      ["⌘↩", "Commitar"],
-      ["⌘R", "Recarregar o diff"],
+      ["V", T.atMarcarOArquivoComoVisto],
+      ["S", T.atPorOuTirarOArquivoDoIndice],
+      ["⇧S", T.atPorOuTirarAPastaDoArquivoDoIndice],
+      ["A", T.atPorOuTirarTudoDoIndice],
+      ["⌘↩", T.atCommitar],
+      ["⌘R", T.atRecarregarODiff],
     ],
   },
   {
-    grupo: "App",
+    grupo: T.atApp,
     itens: [
-      ["⌘,", "Preferências"],
-      ["⌘E", "Escutar (ditado)"],
-      ["⌘⇧P", "Tocar ou pausar a rádio"],
-      ["⌘/", "Esta lista"],
-      ["⌘M", "Minimizar"],
-      ["⌃⌘F", "Tela cheia"],
-      ["⌘H", "Ocultar o TermIAu"],
-      ["⌘Q", "Sair (pergunta antes)"],
+      ["⌘,", T.atPreferencias],
+      ["⌘E", T.atEscutarDitado],
+      ["⌘⇧P", T.atTocarOuPausarARadio],
+      ["⌘/", T.atEstaLista],
+      ["⌘M", T.atMinimizar],
+      ["⌃⌘F", T.atTelaCheia],
+      ["⌘H", T.atOcultarOTermiau],
+      ["⌘Q", T.atSairPerguntaAntes],
     ],
   },
 ];
@@ -5444,8 +5447,8 @@ ajudaEl.hidden = true;
 const ajudaCaixa = elemento("div", "lofi-caixa ajuda-caixa");
 const ajudaCabeca = elemento("div", "lofi-cabeca");
 const ajudaTitulo = elemento("span", "lofi-cabeca-titulo");
-ajudaTitulo.textContent = "Atalhos do Teclado";
-const ajudaFechar = botaoLofi("lofi-fechar", ICONE_TIRAR, "Fechar (esc)");
+ajudaTitulo.textContent = T.atalhosDoTeclado;
+const ajudaFechar = botaoLofi("lofi-fechar", ICONE_TIRAR, T.fecharEsc);
 ajudaCabeca.append(ajudaTitulo, ajudaFechar);
 const ajudaLista = elemento("div", "ajuda-lista");
 for (const { grupo, itens } of ATALHOS) {
@@ -5788,20 +5791,18 @@ async function pedirSair() {
   if (saindo) return;
   const paineis = abas.flatMap((a) => [...folhas(a.raiz)]);
   const claudes = paineis.filter((f) => f.claude?.sessao).length;
-  const quantas = abas.length === 1 ? "A aba aberta fecha" : `As ${abas.length} abas abertas fecham`;
+  const quantas = T.abaFecha(abas.length);
   const restaura = await invoke<boolean>("restaurar_ligado").catch(() => false);
   const volta = !restaura
-    ? "Elas não voltam na próxima abertura — TermIAu ▸ Restaurar Abas ao Abrir liga isso."
+    ? T.naoVoltam
     : claudes === 0
-      ? "Na próxima abertura elas voltam, nas mesmas pastas."
-      : claudes === 1
-        ? "Na próxima abertura elas voltam, e a sessão do Claude é retomada."
-        : `Na próxima abertura elas voltam, e as ${claudes} sessões do Claude são retomadas.`;
+      ? T.voltamNasPastas
+      : T.voltamComSessoes(claudes);
   const sim = await perguntar("sair", {
-    titulo: "Sair do TermIAu?",
-    texto: `${quantas} e o que estiver rodando nelas para. ${volta}`,
-    confirmar: "Sair",
-    cancelar: "Cancelar",
+    titulo: T.sairDoTermiau,
+    texto: T.sairTexto(quantas, volta),
+    confirmar: T.sair,
+    cancelar: T.cancelar,
   });
   if (sim) await sair();
 }
@@ -5814,9 +5815,9 @@ async function instalarHooks(): Promise<boolean> {
     return true;
   } catch (e) {
     await perguntar("hooks", {
-      titulo: "Não consegui ligar ao Claude Code",
+      titulo: T.naoConseguiLigar,
       texto: String(e),
-      confirmar: "Ok",
+      confirmar: T.ok,
     });
     return false;
   }
@@ -5831,9 +5832,9 @@ async function conferirHooks(pedido: boolean) {
   if (estado === "sem-claude") {
     if (pedido) {
       await perguntar("hooks", {
-        titulo: "Não achei o Claude Code",
-        texto: "A pasta ~/.claude não existe. Abra o Claude Code uma vez e tente de novo.",
-        confirmar: "Ok",
+        titulo: T.naoAcheiClaude,
+        texto: T.naoAcheiClaudeTexto,
+        confirmar: T.ok,
       });
     }
     return;
@@ -5841,9 +5842,9 @@ async function conferirHooks(pedido: boolean) {
   if (estado === "instalado") {
     if (pedido) {
       await perguntar("hooks", {
-        titulo: "Já está ligado",
-        texto: "Os hooks do TermIAu estão instalados no Claude Code e em dia.",
-        confirmar: "Ok",
+        titulo: T.jaLigado,
+        texto: T.jaLigadoTexto,
+        confirmar: T.ok,
       });
     }
     return;
@@ -5858,9 +5859,9 @@ async function conferirHooks(pedido: boolean) {
 
   if (await instalarHooks()) {
     await perguntar("hooks", {
-      titulo: "Ligado ao Claude Code",
-      texto: "Vale para as sessões do Claude abertas a partir de agora; as que já estão rodando precisam ser reiniciadas.",
-      confirmar: "Ok",
+      titulo: T.ligado,
+      texto: T.ligadoTexto,
+      confirmar: T.ok,
     });
   }
 }
@@ -5875,13 +5876,13 @@ async function restaurarMudou(ligado: boolean) {
   const estado = await invoke<string>("hooks_estado").catch(() => "sem-claude");
   const instalou = estado === "ausente" || estado === "desatualizado" ? await instalarHooks() : false;
   await perguntar("restaurar", {
-    titulo: "As abas voltam na próxima abertura",
+    titulo: T.abasVoltam,
     texto: instalou
-      ? "Liguei também o TermIAu ao Claude Code (um hook em ~/.claude/hooks, registrado no settings.json, com backup): é por ele que as sessões são retomadas. Vale para os Claudes abertos a partir de agora."
+      ? T.abasVoltamInstalou
       : estado === "sem-claude"
-        ? "Cada painel volta na pasta em que estava. Não achei o Claude Code (~/.claude), então não há sessões para retomar."
-        : "Cada painel volta na pasta em que estava, e as sessões do Claude são retomadas.",
-    confirmar: "Ok",
+        ? T.abasVoltamSemClaude
+        : T.abasVoltamComSessoes,
+    confirmar: T.ok,
   });
 }
 
@@ -5994,7 +5995,10 @@ async function ligarEventos() {
 
   // O "+" da barra faz o que o ⌘T faz — é o mesmo caminho, só que no alcance do
   // mouse. `void` porque o clique não espera a aba abrir.
-  document.getElementById("nova-aba")?.addEventListener("click", () => void novaAba());
+  const mais = document.getElementById("nova-aba");
+  mais?.addEventListener("click", () => void novaAba());
+  mais?.setAttribute("title", T.novaAbaDica);
+  mais?.setAttribute("aria-label", T.novaAba);
 
   // ⌘T, ⌘D, ⌘⇧D, ⌘⇧↩ e ⌘W chegam por aqui: quem recebe a tecla é o menu nativo.
   await listen("menu://nova-aba", () => novaAba());

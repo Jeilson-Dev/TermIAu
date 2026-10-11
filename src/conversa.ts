@@ -2,6 +2,8 @@
 /// `~/.claude/projects`), e o que o terminal precisa para achar na tela o que
 /// você escreveu. Nada de DOM nem de xterm aqui: é o que deixa isto testável.
 
+import { T } from "./i18n/terminal";
+
 /// Uma fala da conversa, na ordem em que aconteceu.
 export type Fala =
   | { quem: "claude"; texto: string }
@@ -431,35 +433,35 @@ export type Comando = {
 /// lugar nenhum que dê para ler de fora. Os seus (comandos, skills, plugins)
 /// vêm do disco, pelo `comandos_listar` do Rust.
 export const COMANDOS_DO_CLAUDE: Comando[] = [
-  { nome: "clear", descricao: "Começa uma conversa nova" },
-  { nome: "compact", descricao: "Resume a conversa para liberar contexto" },
-  { nome: "init", descricao: "Cria o CLAUDE.md do projeto" },
-  { nome: "review", descricao: "Revisa um pull request" },
-  { nome: "code-review", descricao: "Revisa o diff atual" },
-  { nome: "security-review", descricao: "Revisão de segurança das mudanças pendentes" },
-  { nome: "add-dir", descricao: "Acrescenta uma pasta de trabalho" },
-  { nome: "fast", descricao: "Liga ou desliga o modo rápido" },
-  { nome: "model", descricao: "Escolhe o modelo", interativo: true },
-  { nome: "resume", descricao: "Retoma uma conversa anterior", interativo: true },
-  { nome: "rewind", descricao: "Volta a conversa ou o código a um ponto anterior", interativo: true },
-  { nome: "context", descricao: "Mostra o uso do contexto", interativo: true },
-  { nome: "usage", descricao: "Mostra o uso e os limites do plano", interativo: true },
-  { nome: "cost", descricao: "Mostra o custo da sessão", interativo: true },
-  { nome: "status", descricao: "Versão, modelo, conta e conexões", interativo: true },
-  { nome: "config", descricao: "Abre as configurações", interativo: true },
-  { nome: "permissions", descricao: "Regras de permissão das ferramentas", interativo: true },
-  { nome: "memory", descricao: "Edita os arquivos de memória", interativo: true },
-  { nome: "mcp", descricao: "Servidores MCP", interativo: true },
-  { nome: "agents", descricao: "Gerencia os subagentes", interativo: true },
-  { nome: "hooks", descricao: "Gerencia os hooks", interativo: true },
-  { nome: "plugin", descricao: "Gerencia os plugins", interativo: true },
-  { nome: "skills", descricao: "Lista as skills disponíveis", interativo: true },
-  { nome: "export", descricao: "Exporta a conversa", interativo: true },
-  { nome: "theme", descricao: "Troca o tema", interativo: true },
-  { nome: "doctor", descricao: "Confere a instalação do Claude Code", interativo: true },
-  { nome: "help", descricao: "Ajuda e comandos disponíveis", interativo: true },
-  { nome: "login", descricao: "Troca de conta", interativo: true },
-  { nome: "exit", descricao: "Encerra o Claude Code" },
+  { nome: "clear", descricao: T.cmdClear },
+  { nome: "compact", descricao: T.cmdCompact },
+  { nome: "init", descricao: T.cmdInit },
+  { nome: "review", descricao: T.cmdReview },
+  { nome: "code-review", descricao: T.cmdCodeReview },
+  { nome: "security-review", descricao: T.cmdSecurityReview },
+  { nome: "add-dir", descricao: T.cmdAddDir },
+  { nome: "fast", descricao: T.cmdFast },
+  { nome: "model", descricao: T.cmdModel, interativo: true },
+  { nome: "resume", descricao: T.cmdResume, interativo: true },
+  { nome: "rewind", descricao: T.cmdRewind, interativo: true },
+  { nome: "context", descricao: T.cmdContext, interativo: true },
+  { nome: "usage", descricao: T.cmdUsage, interativo: true },
+  { nome: "cost", descricao: T.cmdCost, interativo: true },
+  { nome: "status", descricao: T.cmdStatus, interativo: true },
+  { nome: "config", descricao: T.cmdConfig, interativo: true },
+  { nome: "permissions", descricao: T.cmdPermissions, interativo: true },
+  { nome: "memory", descricao: T.cmdMemory, interativo: true },
+  { nome: "mcp", descricao: T.cmdMcp, interativo: true },
+  { nome: "agents", descricao: T.cmdAgents, interativo: true },
+  { nome: "hooks", descricao: T.cmdHooks, interativo: true },
+  { nome: "plugin", descricao: T.cmdPlugin, interativo: true },
+  { nome: "skills", descricao: T.cmdSkills, interativo: true },
+  { nome: "export", descricao: T.cmdExport, interativo: true },
+  { nome: "theme", descricao: T.cmdTheme, interativo: true },
+  { nome: "doctor", descricao: T.cmdDoctor, interativo: true },
+  { nome: "help", descricao: T.cmdHelp, interativo: true },
+  { nome: "login", descricao: T.cmdLogin, interativo: true },
+  { nome: "exit", descricao: T.cmdExit },
 ];
 
 /// Os comandos que casam com o que foi digitado depois da barra: primeiro os

@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { definirIdioma, idioma } from "./i18n";
 import { faltaPara, fracaoRestante, janelaAgora, limiteDoAutoCompact, nivelDoRitmo, nivelDoContexto, nivelDoUso, usoDaStatusLine } from "./uso";
+
+// Os textos esperados aqui são os em português.
+const inicial = idioma();
+beforeEach(() => definirIdioma("pt"));
+afterEach(() => definirIdioma(inicial));
 
 const agora = Date.parse("2026-10-09T12:00:00Z");
 const daqui = (min: number) => new Date(agora + min * 60_000).toISOString();

@@ -2,6 +2,7 @@
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use crate::idioma::tr;
 
 const BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
@@ -54,7 +55,7 @@ pub fn download(
     on_progress: impl Fn(f64, u64, u64),
 ) -> anyhow::Result<PathBuf> {
     if !CATALOG.iter().any(|&(c, ..)| c == id) {
-        anyhow::bail!("modelo desconhecido: {id}");
+        anyhow::bail!("{}: {id}", tr("modelo desconhecido", "unknown model"));
     }
     let dest = path_for(app_data, id);
     if dest.exists() {
@@ -70,7 +71,7 @@ pub fn download(
     if have > 0 {
         req = req.header("Range", &format!("bytes={have}-"));
     }
-    let resp = req.call().map_err(|e| anyhow::anyhow!("download falhou: {e}"))?;
+    let resp = req.call().map_err(|e| anyhow::anyhow!("{}: {e}", tr("download falhou", "download failed")))?;
 
     // 206 = servidor aceitou retomar; qualquer outra coisa recomeça do zero
     let resumed = resp.status().as_u16() == 206;
@@ -121,7 +122,7 @@ pub fn download(
     drop(file);
 
     if total > 0 && done < total {
-        anyhow::bail!("download incompleto: {done} de {total} bytes");
+        anyhow::bail!("{}", if crate::idioma::portugues() { format!("download incompleto: {done} de {total} bytes") } else { format!("incomplete download: {done} of {total} bytes") });
     }
     std::fs::rename(&tmp, &dest)?;
     on_progress(1.0, done, total.max(done));

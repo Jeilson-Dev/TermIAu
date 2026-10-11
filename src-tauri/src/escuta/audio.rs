@@ -10,6 +10,7 @@ use cpal::SampleFormat;
 
 use super::resample::Resampler;
 use super::stt::SAMPLE_RATE;
+use crate::idioma::tr;
 
 #[derive(serde::Serialize)]
 pub struct DeviceInfo {
@@ -20,7 +21,7 @@ pub struct DeviceInfo {
 fn device_name(d: &cpal::Device) -> String {
     d.description()
         .map(|desc| desc.name().to_string())
-        .unwrap_or_else(|_| "desconhecido".into())
+        .unwrap_or_else(|_| tr("desconhecido", "unknown").into())
 }
 
 pub fn list_devices() -> Vec<DeviceInfo> {
@@ -47,7 +48,7 @@ fn pick(name: Option<&str>) -> anyhow::Result<cpal::Device> {
         }
     }
     host.default_input_device()
-        .ok_or_else(|| anyhow::anyhow!("nenhum microfone disponível"))
+        .ok_or_else(|| anyhow::anyhow!(tr("nenhum microfone disponível", "no microphone available")))
 }
 
 /// Abre o microfone e alimenta `audio_tx` com blocos mono a 16 kHz.
@@ -64,7 +65,7 @@ pub fn capture(
     let device = pick(device_name.as_deref())?;
     let supported = device
         .default_input_config()
-        .map_err(|e| anyhow::anyhow!("configuração do microfone: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("{}: {e}", tr("configuração do microfone", "microphone configuration")))?;
 
     let in_rate = supported.sample_rate();
     let channels = supported.channels() as usize;
@@ -125,13 +126,13 @@ pub fn capture(
             err_fn,
             None,
         ),
-        other => return Err(anyhow::anyhow!("formato de áudio não suportado: {other:?}")),
+        other => return Err(anyhow::anyhow!("{}: {other:?}", tr("formato de áudio não suportado", "unsupported audio format"))),
     }
-    .map_err(|e| anyhow::anyhow!("não consegui abrir o microfone: {e}"))?;
+    .map_err(|e| anyhow::anyhow!("{}: {e}", tr("não consegui abrir o microfone", "couldn't open the microphone")))?;
 
     stream
         .play()
-        .map_err(|e| anyhow::anyhow!("não consegui iniciar a captura: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("{}: {e}", tr("não consegui iniciar a captura", "couldn't start capturing")))?;
 
     while !stop.load(Ordering::Relaxed) {
         std::thread::sleep(Duration::from_millis(100));

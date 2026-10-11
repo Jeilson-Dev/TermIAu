@@ -1,6 +1,7 @@
 // O .vscode/launch.json, e o tasks.json que ele cita, lidos sem o VS Code.
 
 import { palavra } from "./shell";
+import { T } from "../i18n/terminal";
 
 /** Uma entrada de `configurations`. Além destes campos, cada `type` tem os seus. */
 export interface ConfigLaunch {
@@ -159,7 +160,7 @@ export function resolver(valor: string, ctx: Contexto): string {
         return "/";
     }
     if (nome.startsWith("env:")) return todo;
-    throw new Error(`a variável ${todo} ainda não é suportada`);
+    throw new Error(T.variavelNaoSuportada(todo));
   });
 }
 
@@ -175,10 +176,10 @@ export function tarefaAntes(cfg: ConfigLaunch, tarefas: Tarefa[], ctx: Contexto)
     tarefas.find((t) => t.label === nome) ??
     // Tarefas do npm detectadas pelo VS Code se chamam "npm: <script>".
     tarefas.find((t) => t.type === "npm" && `npm: ${t.script}` === nome);
-  if (!tarefa) throw new Error(`a tarefa "${nome}" não está no tasks.json`);
-  if (tarefa.dependsOn) throw new Error(`a tarefa "${nome}" usa dependsOn, que ainda não é suportado`);
+  if (!tarefa) throw new Error(T.tarefaAusente(nome));
+  if (tarefa.dependsOn) throw new Error(T.tarefaDependsOn(nome));
   if (tarefa.isBackground) {
-    throw new Error(`a tarefa "${nome}" roda em segundo plano, o que ainda não é suportado`);
+    throw new Error(T.tarefaSegundoPlano(nome));
   }
 
   const r = (v: string) => resolver(v, ctx);
@@ -192,7 +193,7 @@ export function tarefaAntes(cfg: ConfigLaunch, tarefas: Tarefa[], ctx: Contexto)
   } else if (tarefa.type === "process" && tarefa.command) {
     comando = [palavra(r(tarefa.command)), ...args].join(" ");
   } else {
-    throw new Error(`a tarefa "${nome}" é do tipo "${tarefa.type}", que ainda não é suportado`);
+    throw new Error(T.tarefaTipo(nome, String(tarefa.type)));
   }
   const cwd = tarefa.options?.cwd;
   return cwd ? `(cd ${palavra(r(cwd))} && ${comando})` : comando;

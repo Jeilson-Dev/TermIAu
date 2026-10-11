@@ -2,6 +2,8 @@
 /// `visor.ts`. Os números vêm da status line do Claude Code, que o hook manda
 /// para o app (ver o começo de hooks/termiau-evento.sh).
 
+import { T } from "./i18n/terminal";
+
 export type Janela = { uso: number; renova: string | null };
 export type Uso = { sessao: Janela | null; semana: Janela | null };
 
@@ -43,7 +45,7 @@ export function faltaPara(renova: string | null, agora = Date.now()): string {
   if (!renova) return "";
   const ms = new Date(renova).getTime() - agora;
   if (Number.isNaN(ms)) return "";
-  if (ms <= 0) return "agora";
+  if (ms <= 0) return T.agora;
   const min = Math.floor(ms / 60_000);
   const h = Math.floor(min / 60);
   if (h >= 24) return `${Math.floor(h / 24)}d${h % 24}h`;

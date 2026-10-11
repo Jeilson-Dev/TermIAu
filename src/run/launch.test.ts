@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { definirIdioma, idioma } from "../i18n";
 import { configsDe, lerJsonc, listaDoPlay, resolver, tarefaAntes, type Tarefa } from "./launch";
+
+// Os textos esperados aqui são os em português.
+const inicial = idioma();
+beforeEach(() => definirIdioma("pt"));
+afterEach(() => definirIdioma(inicial));
 
 const ctx = { pasta: "/w/app", home: "/Users/eu" };
 

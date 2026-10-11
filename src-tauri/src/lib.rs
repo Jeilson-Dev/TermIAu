@@ -217,7 +217,7 @@ fn pty_attach(app: AppHandle, state: State<'_, Ptys>, id: u64) -> Result<(), Str
 #[tauri::command]
 fn abrir_link(url: String) -> Result<(), String> {
     if !["http://", "https://", "mailto:"].iter().any(|p| url.starts_with(p)) {
-        return Err(format!("link não suportado: {url}"));
+        return Err(format!("{}: {url}", tr("link não suportado", "unsupported link")));
     }
     std::process::Command::new("/usr/bin/open").arg(&url).spawn().map_err(|e| e.to_string())?;
     Ok(())
@@ -385,7 +385,7 @@ fn transcricao_ler(caminho: String, desde: u64) -> Result<Trecho, String> {
     let base = base.canonicalize().map_err(|e| e.to_string())?;
     let arquivo = PathBuf::from(&caminho).canonicalize().map_err(|e| e.to_string())?;
     if !arquivo.starts_with(&base) || arquivo.extension().is_none_or(|e| e != "jsonl") {
-        return Err("não é um transcript do Claude Code".into());
+        return Err(tr("não é um transcript do Claude Code", "not a Claude Code transcript").into());
     }
 
     let mut f = std::fs::File::open(&arquivo).map_err(|e| e.to_string())?;
@@ -661,7 +661,7 @@ struct Pendentes(Mutex<HashMap<String, std::os::unix::net::UnixStream>>);
 #[tauri::command]
 fn pergunta_responder(pendentes: State<'_, Pendentes>, id: String, resposta: String) -> Result<(), String> {
     let Some(mut fluxo) = pendentes.0.lock().unwrap().remove(&id) else {
-        return Err("a pergunta já foi respondida".into());
+        return Err(tr("a pergunta já foi respondida", "the question was already answered").into());
     };
     fluxo.write_all(resposta.as_bytes()).map_err(|e| e.to_string())
 }
@@ -780,11 +780,11 @@ fn carimbo(caminho: &std::path::Path) -> Option<String> {
 
 fn texto_do_visor(bytes: Vec<u8>) -> Result<Vec<String>, String> {
     if bytes.len() as u64 > VISOR_MAX {
-        return Err("arquivo grande demais para o visor (mais de 5 MB)".into());
+        return Err(tr("arquivo grande demais para o visor (mais de 5 MB)", "file too large for the viewer (over 5 MB)").into());
     }
     // O mesmo palpite do git: um NUL no começo é arquivo binário.
     if bytes.iter().take(8000).any(|&b| b == 0) {
-        return Err("é um arquivo binário".into());
+        return Err(tr("é um arquivo binário", "it's a binary file").into());
     }
     let texto = String::from_utf8_lossy(&bytes);
     let texto = texto.strip_suffix('\n').unwrap_or(&texto);
@@ -797,18 +797,18 @@ fn texto_do_visor(bytes: Vec<u8>) -> Result<Vec<String>, String> {
 fn arquivo_ler(caminho: String, rf: Option<String>) -> Result<Arquivo, String> {
     let p = std::path::Path::new(&caminho);
     if !p.is_absolute() {
-        return Err(format!("caminho relativo: {caminho}"));
+        return Err(format!("{}: {caminho}", tr("caminho relativo", "relative path")));
     }
     let Some(rf) = rf.filter(|r| !r.is_empty()) else {
         if !p.is_file() {
-            return Err(format!("não existe: {caminho}"));
+            return Err(format!("{}: {caminho}", tr("não existe", "doesn't exist")));
         }
         let bytes = std::fs::read(p).map_err(|e| e.to_string())?;
         return Ok(Arquivo { linhas: texto_do_visor(bytes)?, carimbo: carimbo(p).unwrap_or_default() });
     };
     // Uma ref que começa com `-` viraria opção do git.
     if rf.starts_with('-') || rf.contains(char::is_whitespace) {
-        return Err(format!("ref inválida: {rf}"));
+        return Err(format!("{}: {rf}", tr("ref inválida", "invalid ref")));
     }
     let pasta = p.parent().ok_or("caminho sem pasta")?;
     let nome = p.file_name().ok_or("caminho sem nome")?.to_string_lossy();
@@ -821,7 +821,7 @@ fn arquivo_ler(caminho: String, rf: Option<String>) -> Result<Arquivo, String> {
         .map_err(|e| e.to_string())?;
     if !out.status.success() {
         let erro = String::from_utf8_lossy(&out.stderr);
-        return Err(erro.lines().next().unwrap_or("git show falhou").to_string());
+        return Err(erro.lines().next().unwrap_or(tr("git show falhou", "git show failed")).to_string());
     }
     Ok(Arquivo { linhas: texto_do_visor(out.stdout)?, carimbo: String::new() })
 }
@@ -860,7 +860,7 @@ fn arquivos_existem(base: String, candidatos: Vec<String>) -> Vec<Option<String>
 #[tauri::command(async)]
 fn abrir_no_editor(caminho: String, linha: Option<u32>, comando: Option<String>) -> Result<(), String> {
     if !std::path::Path::new(&caminho).is_absolute() {
-        return Err(format!("caminho relativo: {caminho}"));
+        return Err(format!("{}: {caminho}", tr("caminho relativo", "relative path")));
     }
     let linha = linha.unwrap_or(1);
     let Some(comando) = comando.map(|c| c.trim().to_string()).filter(|c| !c.is_empty()) else {
@@ -910,7 +910,7 @@ fn abrir_no_editor(caminho: String, linha: Option<u32>, comando: Option<String>)
                 // A última linha: as primeiras são do .zshrc (o prompt, avisos de
                 // plugin), e o erro do comando vem depois delas.
                 let ultima = erro.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").to_string();
-                return Err(if ultima.is_empty() { format!("o comando saiu com {st}") } else { ultima });
+                return Err(if ultima.is_empty() { format!("{} {st}", tr("o comando saiu com", "the command exited with")) } else { ultima });
             }
             None => std::thread::sleep(std::time::Duration::from_millis(100)),
         }
@@ -1040,7 +1040,7 @@ fn hooks_estado() -> &'static str {
 fn hooks_instalar() -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
 
-    let dir = dir_claude().ok_or("não achei a pasta do usuário")?;
+    let dir = dir_claude().ok_or(tr("não achei a pasta do usuário", "couldn't find the user folder"))?;
     let destino = dir.join("hooks/termiau-evento.sh");
     std::fs::create_dir_all(dir.join("hooks")).map_err(|e| e.to_string())?;
     std::fs::write(&destino, HOOK).map_err(|e| e.to_string())?;
@@ -1058,14 +1058,14 @@ fn hooks_instalar() -> Result<(), String> {
     let mut settings: serde_json::Value = match texto.as_deref().map(str::trim) {
         None | Some("") => serde_json::json!({}),
         Some(t) => serde_json::from_str(t)
-            .map_err(|e| format!("o settings.json do Claude Code está ilegível: {e}"))?,
+            .map_err(|e| format!("{}: {e}", tr("o settings.json do Claude Code está ilegível", "Claude Code's settings.json is unreadable")))?,
     };
     if hooks_registrados(&settings) {
         return Ok(());
     }
     settings
         .as_object_mut()
-        .ok_or("o settings.json do Claude Code não é um objeto")?
+        .ok_or(tr("o settings.json do Claude Code não é um objeto", "Claude Code's settings.json is not an object"))?
         .entry("hooks")
         .or_insert_with(|| serde_json::json!({}));
 
@@ -1073,7 +1073,7 @@ fn hooks_instalar() -> Result<(), String> {
     if !status_line_em_dia(&settings) {
         settings["statusLine"] = status_line(&comando);
     }
-    let hooks = settings["hooks"].as_object_mut().ok_or("o \"hooks\" do settings.json do Claude Code não é um objeto")?;
+    let hooks = settings["hooks"].as_object_mut().ok_or(tr("o \"hooks\" do settings.json do Claude Code não é um objeto", "the \"hooks\" in Claude Code's settings.json is not an object"))?;
     for evento in HOOK_EVENTOS {
         // Sai qualquer registro anterior do nosso hook, entra um novo no fim.
         let mut grupos =
@@ -1142,7 +1142,7 @@ struct Escuta {
 }
 
 fn dir_dados(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path().app_data_dir().map_err(|e| format!("sem diretório de dados: {e}"))
+    app.path().app_data_dir().map_err(|e| format!("{}: {e}", tr("sem diretório de dados", "no data directory")))
 }
 
 /// Onde está o modelo. Procura primeiro o nosso e depois o do app Escuta, que
@@ -1195,12 +1195,12 @@ fn escuta_comecar(app: AppHandle, state: State<'_, Escuta>) -> Result<(), String
         *guarda = None;
     }
     if guarda.is_some() {
-        return Err("já estou escutando".into());
+        return Err(tr("já estou escutando", "already listening").into());
     }
 
     let modelo = caminho_modelo(&app)?;
     if !modelo.exists() {
-        return Err("o modelo ainda não foi baixado".into());
+        return Err(tr("o modelo ainda não foi baixado", "the model hasn't been downloaded yet").into());
     }
 
     let parar = Arc::new(AtomicBool::new(false));
