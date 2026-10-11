@@ -308,7 +308,8 @@ Events in the other direction: `pty://data` (output in base64) and `pty://exit`.
 **Terminal**
 - Your real login shell (`$SHELL -l`) on a PTY, drawn by xterm.js, with a cat-paw cursor
 - Tabs and split panels (side / below), focus moved with `⌘⌥` + arrows, a panel
-  maximized and restored with `⌘⇧↩`
+  maximized and restored with `⌘⇧↩`, and a ✕ on the bar to close it when split
+- Preferences (`⌘,`) float over any tab
 - Reopen the closed tab (`⌘⇧T`), and optionally restore the tabs on launch, in the
   same folders, resuming their Claude sessions
 - Files dropped from Finder become escaped paths on the line; `⌘⇧V` pastes the path
@@ -333,7 +334,17 @@ Events in the other direction: `pty://data` (output in base64) and `pty://exit`.
 
 **File viewer**
 - Opens a file beside, below or over the terminal (`⌘⇧O`), with Markdown rendered or
-  as source, previous / next file, and **Open in editor** with a configurable command
+  as source, and **Open in editor** with a configurable command
+- Several files open as tabs, each with its own close button; switching tabs keeps
+  unsaved edits
+- Simple edit mode (eye / pencil): line numbers, syntax colors, save with `⌘S`, and a
+  save / discard / cancel prompt when leaving with unsaved changes; the scroll stays
+  put between reading and editing
+- Markdown checkboxes toggle with a click and are saved to the file; Mermaid diagrams
+  render with zoom and pan; code blocks get a copy button
+- Images (PNG, JPG, GIF, WebP, SVG…) open in the viewer, fitted or at real size
+- File explorer drawer that slides over the terminal and closes on an outside click,
+  or pinned open to share the space with the viewer
 - `termiau ver <file>[:line]` opens it from the shell; `--ref` shows the file as it is
   in a branch or commit
 
@@ -678,7 +689,8 @@ Eventos na direção contrária: `pty://data` (saída em base64) e `pty://exit`.
 - O seu login shell de verdade (`$SHELL -l`) num PTY, desenhado pelo xterm.js, com o
   cursor patinha
 - Abas e painéis divididos (ao lado / abaixo), foco movido com `⌘⌥` + setas, painel
-  maximizado e recolhido com `⌘⇧↩`
+  maximizado e recolhido com `⌘⇧↩`, e um ✕ na barra para fechá-lo quando dividido
+- Preferências (`⌘,`) flutuam por cima de qualquer aba
 - Reabrir a aba fechada (`⌘⇧T`) e, se quiser, restaurar as abas ao abrir, nas mesmas
   pastas, retomando as sessões do Claude
 - Arquivos soltos do Finder viram caminhos escapados na linha; `⌘⇧V` cola o caminho
@@ -703,8 +715,18 @@ Eventos na direção contrária: `pty://data` (saída em base64) e `pty://exit`.
 
 **Visor de arquivos**
 - Abre um arquivo ao lado, abaixo ou por cima do terminal (`⌘⇧O`), com Markdown
-  renderizado ou em fonte, arquivo anterior / próximo e **Abrir no editor** com um
-  comando configurável
+  renderizado ou em fonte, e **Abrir no editor** com um comando configurável
+- Vários arquivos abertos como abas, cada uma com o seu botão de fechar; trocar de aba
+  mantém as edições não salvas
+- Modo de edição simples (olho / lápis): números de linha, cores de sintaxe, salvar
+  com `⌘S` e um aviso de salvar / descartar / cancelar ao sair com alterações; a
+  rolagem fica onde estava entre ler e editar
+- Checkboxes do Markdown marcam e desmarcam num clique e são salvas no arquivo;
+  diagramas Mermaid renderizados com zoom e arrastar; blocos de código com botão de
+  copiar
+- Imagens (PNG, JPG, GIF, WebP, SVG…) abrem no visor, ajustadas ou no tamanho real
+- Explorador de arquivos em gaveta, que abre por cima do terminal e fecha ao clicar
+  fora, ou fixado com o alfinete para dividir o espaço com o visor
 - `termiau ver <arquivo>[:linha]` abre pelo shell; `--ref` mostra o arquivo como está
   numa branch ou num commit
 
