@@ -1,10 +1,11 @@
+import { T } from "../../i18n/differ";
 import type { Bookmark, FileDiff } from "../types";
 import { getBlob } from "./blobs";
 import type { ReviewState } from "./persist";
 
 export function rangeLabel(b: Pick<Bookmark, "side" | "startLine" | "endLine">): string {
-  const lines = b.startLine === b.endLine ? `Linha ${b.startLine}` : `Linhas ${b.startLine}–${b.endLine}`;
-  return b.side === "old" ? `${lines} (versão anterior)` : lines;
+  const lines = b.startLine === b.endLine ? T.linha(b.startLine) : T.linhas(b.startLine, b.endLine);
+  return b.side === "old" ? `${lines} (${T.versaoAnterior})` : lines;
 }
 
 /**
@@ -17,7 +18,7 @@ export function bookmarkReference(
 ): string {
   const lines = b.startLine === b.endLine ? `${b.startLine}` : `${b.startLine}-${b.endLine}`;
   const head =
-    b.side === "old" ? `${oldPath ?? b.path}:${lines} (versão anterior)` : `${b.path}:${lines}`;
+    b.side === "old" ? `${oldPath ?? b.path}:${lines} (${T.versaoAnterior})` : `${b.path}:${lines}`;
   const parts = [head];
   if (b.quote) parts.push("selection:", b.quote);
   parts.push("comment:", b.note);
@@ -35,9 +36,8 @@ export function bookmarksReference(
   referenceOf: (b: Bookmark) => string,
 ): string {
   if (bookmarks.length === 0) return "";
-  const titulo =
-    bookmarks.length === 1 ? "1 comentário de revisão" : `${bookmarks.length} comentários de revisão`;
-  const corpo = bookmarks.map((b) => (b.resolved ? `${referenceOf(b)}\n(resolvido)` : referenceOf(b)));
+  const titulo = T.comentariosDeRevisao(bookmarks.length);
+  const corpo = bookmarks.map((b) => (b.resolved ? `${referenceOf(b)}\n(${T.resolvido})` : referenceOf(b)));
   return [titulo, ...corpo].join("\n\n");
 }
 

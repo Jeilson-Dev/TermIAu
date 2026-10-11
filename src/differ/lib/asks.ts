@@ -3,6 +3,7 @@
 // muda o disco. Se a conversa morasse no componente, ela sumiria (e o processo
 // morreria) no meio da própria alteração que se queria ver.
 
+import { T } from "../../i18n/differ";
 import { useSyncExternalStore } from "react";
 import { askClaude, cancelAsk, undoAsk, type AskChange } from "../api";
 import type { FileDiff, Side } from "../types";
@@ -154,8 +155,8 @@ function diffText(file: FileDiff): string | null {
 /** O que vai pelo stdin: onde o trecho está, o que ele diz, o diff em volta e a conversa até aqui. */
 async function buildContext(root: string, file: FileDiff, ask: AskState, turns: Turn[]): Promise<string> {
   const parts: string[] = [];
-  const version = ask.side === "old" ? "versão anterior (antes da mudança)" : "versão nova";
-  parts.push(`Arquivo: ${ask.side === "old" && file.oldPath ? file.oldPath : file.path} — ${version}`);
+  const version = ask.side === "old" ? T.versaoAnteriorAntes : T.versaoNova;
+  parts.push(T.arquivoVersao(ask.side === "old" && file.oldPath ? file.oldPath : file.path, version));
   parts.push(`${rangeLabel({ side: ask.side, startLine: ask.start, endLine: ask.end })}:`);
 
   const oid = ask.side === "new" ? file.newOid : file.oldOid;
@@ -167,23 +168,23 @@ async function buildContext(root: string, file: FileDiff, ask: AskState, turns: 
   } catch {
     // Sem o conteúdo, o Claude ainda tem o caminho e as linhas para ler sozinho.
   }
-  if (ask.quote) parts.push(`Trecho selecionado:\n${ask.quote}`);
-  if (ask.note) parts.push(`Comentário de revisão já feito neste trecho:\n${ask.note}`);
+  if (ask.quote) parts.push(`${T.trechoSelecionado}\n${ask.quote}`);
+  if (ask.note) parts.push(`${T.comentarioJaFeito}\n${ask.note}`);
 
   const diff = diffText(file);
-  parts.push(diff ? `Diff do arquivo:\n${diff}` : "(O diff do arquivo é grande demais para vir junto; leia o arquivo se precisar.)");
+  parts.push(diff ? `${T.diffDoArquivo}\n${diff}` : T.diffGrandeDemais);
 
   const done = turns.filter((t) => t.answer);
   if (done.length) {
     const turnText = (t: Turn) => {
-      const lines = [`Pergunta: ${t.question}`, `Resposta: ${t.answer}`];
+      const lines = [`${T.pergunta} ${t.question}`, `${T.resposta} ${t.answer}`];
       if (t.changes?.length) {
         const files = t.changes.map((c) => c.path).join(", ");
-        lines.push(t.undone ? `(Alterações em ${files} — desfeitas pelo revisor.)` : `(Alterou: ${files}.)`);
+        lines.push(t.undone ? T.alteracoesDesfeitas(files) : T.alterou(files));
       }
       return lines.join("\n");
     };
-    parts.push("Conversa até aqui sobre este trecho:\n" + done.map(turnText).join("\n\n"));
+    parts.push(`${T.conversaAteAqui}\n` + done.map(turnText).join("\n\n"));
   }
   return parts.join("\n\n");
 }
@@ -193,14 +194,7 @@ async function buildContext(root: string, file: FileDiff, ask: AskState, turns: 
  * ao texto — é o que impede o agente final de receber de volta uma discussão já encerrada.
  */
 function decisionPrompt(decision: string): string {
-  return `O revisor terminou de tirar a dúvida sobre este trecho (a conversa está no stdin) e decidiu:
-
-${decision}
-
-Escreva o comentário de revisão que vai para o agente que vai implementar a mudança. Siga exatamente o \
-que o revisor decidiu — a conversa serve só para dar precisão (o que mudar, onde e por quê). Não reabra \
-a discussão, não traga alternativas que o revisor não escolheu e não cite a conversa. Texto curto, no \
-imperativo, em português, sem título. Responda só com o comentário.`;
+  return T.pedidoDoMarcador(decision);
 }
 
 /**
@@ -254,7 +248,7 @@ export async function draftNote(id: string, root: string, file: FileDiff) {
     error = String(err);
   }
   if (get(id)?.running !== run) return;
-  update(id, text ? { running: null, draft: text } : { running: null, noteError: error ?? "O modelo não devolveu texto nenhum." });
+  update(id, text ? { running: null, draft: text } : { running: null, noteError: error ?? T.modeloSemTexto });
 }
 
 export async function undo(id: string, root: string, turnIndex: number) {

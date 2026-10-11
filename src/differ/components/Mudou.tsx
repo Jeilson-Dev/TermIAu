@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { T } from "../../i18n/differ";
 import { Icon } from "./Icons";
 
 /// O repositório mexeu enquanto a aba estava aberta — commit, rebase, checkout,
@@ -22,15 +23,15 @@ export function Mudou({ onReload, onDismiss, visivel }: { onReload(): void; onDi
       <div className="mudou" onMouseDown={(e) => e.stopPropagation()}>
         <Icon name="refresh" />
         <div className="mudou-texto">
-          <strong>O diff mudou</strong>
-          <span>O repositório recebeu commits desde que esta revisão foi carregada.</span>
+          <strong>{T.diffMudou}</strong>
+          <span>{T.diffMudouTexto}</span>
         </div>
         <div className="mudou-botoes">
           <button className="btn" onClick={onDismiss}>
-            Não
+            {T.nao}
           </button>
           <button className="btn primary" onClick={onReload} autoFocus={visivel}>
-            Sim, recarregar
+            {T.simRecarregar}
           </button>
         </div>
       </div>

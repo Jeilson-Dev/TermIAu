@@ -1,3 +1,4 @@
+import { T } from "../../i18n/differ";
 import { readBlobBytes, readWorktreeBytes } from "../api";
 import { worktreePath } from "./blobs";
 
@@ -54,7 +55,7 @@ async function decode(root: string, oid: string, type: string): Promise<LoadedIm
     await element.decode();
   } catch {
     URL.revokeObjectURL(url);
-    throw new Error("Não foi possível exibir esta imagem.");
+    throw new Error(T.imagemIlegivel);
   }
   return { url, width: element.naturalWidth, height: element.naturalHeight, size: bytes.byteLength, element };
 }

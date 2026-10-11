@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react";
+import { T } from "../../i18n/differ";
+import { Trechos } from "./Trechos";
 import { Icon } from "./Icons";
 
 type Limites = { atencao: number; perigo: number; autoCompact: boolean; autoCompactEm: number };
@@ -52,14 +54,14 @@ export function Prefs({
       {/* O clique de fora fecha; o de dentro não pode vazar para ele. */}
       <div className="prefs" onMouseDown={(e) => e.stopPropagation()}>
         <header className="prefs-topo">
-          <h2>Preferências</h2>
-          <button className="icon-btn" title="Fechar (Esc)" onClick={onClose}>
+          <h2>{T.preferencias}</h2>
+          <button className="icon-btn" title={T.fecharEsc} onClick={onClose}>
             <Icon name="x" />
           </button>
         </header>
 
         <label className="prefs-campo">
-          <span className="prefs-nome">Branch padrão</span>
+          <span className="prefs-nome">{T.branchPadrao}</span>
           <input
             ref={campo}
             type="text"
@@ -70,14 +72,11 @@ export function Prefs({
             onChange={(e) => onDefaultTarget(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && onClose()}
           />
-          <span className="prefs-ajuda">
-            Com o que comparar um repositório aberto pela primeira vez. Depois disso vale a última
-            branch que você escolheu nele — esta aqui não desfaz escolha feita à mão.
-          </span>
+          <span className="prefs-ajuda">{T.branchPadraoAjuda}</span>
         </label>
 
         <label className="prefs-campo">
-          <span className="prefs-nome">Editor</span>
+          <span className="prefs-nome">{T.editor}</span>
           <input
             type="text"
             value={editor}
@@ -87,23 +86,15 @@ export function Prefs({
             onChange={(e) => onEditor(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && onClose()}
           />
-          <span className="prefs-ajuda">
-            O comando do “Abrir no editor” do visor de arquivos, rodado no seu shell (aliases
-            valem) e na raiz do repositório do arquivo.{" "}
-            <code>{"{arquivo}"}</code> e <code>{"{linha}"}</code> viram o arquivo aberto e a linha.
-            Por exemplo: <code>{"cursor -g {arquivo}:{linha}"}</code>,{" "}
-            <code>{"zed {arquivo}:{linha}"}</code>, <code>{"subl {arquivo}:{linha}"}</code>,{" "}
-            <code>{"idea --line {linha} {arquivo}"}</code>. Sem <code>{"{arquivo}"}</code>, o
-            caminho vai no fim. Vazio abre no VS Code.
-          </span>
+          <span className="prefs-ajuda"><Trechos de={T.editorAjuda} /></span>
         </label>
 
         <div className="prefs-campo">
-          <span className="prefs-nome">Contexto da sessão</span>
+          <span className="prefs-nome">{T.contextoDaSessao}</span>
           <div className="prefs-limites">
             <label className="prefs-limite">
               <span className="prefs-bolinha atencao" />
-              Amarelo a partir de
+              {T.amareloAPartirDe}
               <input
                 type="number"
                 min={1}
@@ -119,7 +110,7 @@ export function Prefs({
             </label>
             <label className="prefs-limite">
               <span className="prefs-bolinha perigo" />
-              Vermelho a partir de
+              {T.vermelhoAPartirDe}
               <input
                 type="number"
                 min={1}
@@ -139,7 +130,7 @@ export function Prefs({
                 checked={contexto.autoCompact}
                 onChange={(e) => onContexto({ ...contexto, autoCompact: e.target.checked })}
               />
-              Auto-compact a partir de
+              {T.autoCompactAPartirDe}
               <input
                 type="number"
                 min={contexto.perigo + 1}
@@ -155,15 +146,10 @@ export function Prefs({
               %
             </label>
           </div>
-          <span className="prefs-ajuda">
-            Quanto do contexto a conversa do Claude já usou, na pílula da barra de cada painel. No
-            vermelho o painel inteiro ganha uma borda vermelha pulsando: é hora de compactar. Com o
-            auto-compact ligado, o <code>/compact</code> vai sozinho quando o contexto chega no
-            limite e o Claude está parado. O limite tem de passar do vermelho; abaixo dele, vale o
-            vermelho mais um.
-          </span>
+          <span className="prefs-ajuda"><Trechos de={T.contextoAjuda} /></span>
         </div>
       </div>
     </div>
   );
 }
+

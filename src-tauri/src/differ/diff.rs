@@ -7,6 +7,7 @@
 use serde::Serialize;
 
 use crate::differ::error::{Error, Result};
+use crate::idioma::tr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -119,18 +120,18 @@ pub fn parse_raw(out: &[u8]) -> Result<Vec<RawEntry>> {
         }
         let meta = meta
             .strip_prefix(':')
-            .ok_or_else(|| Error::Parse(format!("entrada raw inesperada: {meta}")))?;
+            .ok_or_else(|| Error::Parse(format!("{}: {meta}", tr("entrada raw inesperada", "unexpected raw entry"))))?;
         let parts: Vec<&str> = meta.split(' ').collect();
         let [old_mode, new_mode, old_oid, new_oid, status_field] = parts[..] else {
-            return Err(Error::Parse(format!("entrada raw inesperada: {meta}")));
+            return Err(Error::Parse(format!("{}: {meta}", tr("entrada raw inesperada", "unexpected raw entry"))));
         };
         let status = status_field
             .chars()
             .next()
-            .ok_or_else(|| Error::Parse("status vazio".into()))?;
+            .ok_or_else(|| Error::Parse(tr("status vazio", "empty status").into()))?;
         let score = status_field[1..].parse().ok();
 
-        let missing_path = || Error::Parse(format!("caminho ausente para a entrada {meta}"));
+        let missing_path = || Error::Parse(format!("{} {meta}", tr("caminho ausente para a entrada", "missing path for entry")));
         let first = fields.next().ok_or_else(missing_path)?;
         let (old_path, path) = if matches!(status, 'R' | 'C') {
             let second = fields.next().ok_or_else(missing_path)?;
@@ -242,7 +243,7 @@ pub fn parse_patch(out: &[u8]) -> Result<Vec<PatchSection>> {
 }
 
 fn parse_hunk_header(line: &str) -> Result<Hunk> {
-    let invalid = || Error::Parse(format!("cabeçalho de hunk inválido: {line}"));
+    let invalid = || Error::Parse(format!("{}: {line}", tr("cabeçalho de hunk inválido", "invalid hunk header")));
     let rest = line.strip_prefix("@@ ").ok_or_else(invalid)?;
     let end = rest.find(" @@").ok_or_else(invalid)?;
     let section = rest[end + 3..].trim_start().to_string();
@@ -276,11 +277,12 @@ fn parse_range(range: &str) -> Option<(u32, u32)> {
 
 pub fn build(raw: Vec<RawEntry>, patch: Vec<PatchSection>) -> Result<Vec<FileDiff>> {
     if raw.len() != patch.len() {
-        return Err(Error::Parse(format!(
-            "{} arquivos na lista, mas {} no patch",
-            raw.len(),
-            patch.len()
-        )));
+        let (lista, patch_n) = (raw.len(), patch.len());
+        return Err(Error::Parse(if crate::idioma::portugues() {
+            format!("{lista} arquivos na lista, mas {patch_n} no patch")
+        } else {
+            format!("{lista} files in the list, but {patch_n} in the patch")
+        }));
     }
 
     let oid = |id: String| (!id.bytes().all(|b| b == b'0')).then_some(id);

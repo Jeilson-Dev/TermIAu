@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use super::error::{Error, Result};
 use super::git::Repo;
+use crate::idioma::tr;
 
 /// O pid de cada pergunta em andamento, pelo id que a webview deu a ela. É o
 /// que deixa o botão de cancelar matar o processo certo.
@@ -27,16 +28,28 @@ const SESSOES_MAX: usize = 20;
 /// O título vive no fim do arquivo, que chega a vários MB. Basta ler o rabo.
 const RABO_BYTES: u64 = 512 * 1024;
 
-const INSTRUCOES: &str = "Você está sendo consultado de dentro de uma ferramenta de revisão de código \
+const INSTRUCOES_PT: &str = "Você está sendo consultado de dentro de uma ferramenta de revisão de código \
 (a aba de diff do TermIAu). O stdin traz o trecho em revisão, o diff do arquivo e, se houver, a conversa \
 até aqui. Responda em português, direto ao ponto e curto — a resposta aparece embaixo do trecho, no meio \
 do diff.";
 
-const SO_CONVERSA: &str = " Isto é só uma conversa: pode ler o repositório para entender o contexto, mas \
+const INSTRUCOES_EN: &str = "You are being consulted from inside a code review tool (TermIAu's diff \
+tab). Stdin holds the passage under review, the file's diff and, if any, the conversation so far. \
+Answer in English, straight to the point and short — the answer shows up below the passage, in the \
+middle of the diff.";
+
+const SO_CONVERSA_PT: &str = " Isto é só uma conversa: pode ler o repositório para entender o contexto, mas \
 não altere nada — nem que peçam. Se pedirem uma alteração, explique o que faria.";
 
-const COM_ALTERACOES: &str = " O revisor liberou alterações: pode editar os arquivos do repositório quando \
+const SO_CONVERSA_EN: &str = " This is only a conversation: you may read the repository to understand \
+the context, but do not change anything — not even if asked. If asked for a change, explain what you \
+would do.";
+
+const COM_ALTERACOES_PT: &str = " O revisor liberou alterações: pode editar os arquivos do repositório quando \
 ele pedir. Diga no fim o que alterou.";
+
+const COM_ALTERACOES_EN: &str = " The reviewer allowed edits: you may edit the repository's files when \
+they ask. Say at the end what you changed.";
 
 /// O que cada modo pode fazer. `--tools` diz quais ferramentas existem, não
 /// quais estão liberadas — então as configurações do usuário (um modo auto, um
@@ -88,7 +101,7 @@ fn binario() -> Result<&'static Path> {
             .map(PathBuf::from)
     })
     .as_deref()
-    .ok_or_else(|| Error::Claude("não encontrei o `claude` instalado nesta máquina.".into()))
+    .ok_or_else(|| Error::Claude(tr("não encontrei o `claude` instalado nesta máquina.", "couldn't find `claude` installed on this machine.").into()))
 }
 
 /// Onde o Claude Code guarda as sessões iniciadas nesta pasta: o caminho vira
@@ -319,10 +332,10 @@ pub fn perguntar(
     alterar: bool,
 ) -> Result<Resposta> {
     let (ferramentas, modo, regra) = if alterar {
-        (FERRAMENTAS_ESCRITA, "acceptEdits", COM_ALTERACOES)
+        (FERRAMENTAS_ESCRITA, "acceptEdits", tr(COM_ALTERACOES_PT, COM_ALTERACOES_EN))
     } else {
         // `dontAsk` nega o que não foi liberado, em vez de ficar esperando alguém responder.
-        (FERRAMENTAS_LEITURA, "dontAsk", SO_CONVERSA)
+        (FERRAMENTAS_LEITURA, "dontAsk", tr(SO_CONVERSA_PT, SO_CONVERSA_EN))
     };
     let repo = Repo::open(root)?;
     let foto = alterar.then(|| fotografar(&repo));
@@ -332,7 +345,7 @@ pub fn perguntar(
         // `stream-json` em vez de `json`: é nele que aparecem as ferramentas usadas,
         // e é por elas que se sabe quais arquivos foram mexidos.
         .args(["-p", pergunta, "--output-format", "stream-json", "--verbose", "--no-session-persistence"])
-        .args(["--append-system-prompt", &format!("{INSTRUCOES}{regra}")])
+        .args(["--append-system-prompt", &format!("{}{regra}", tr(INSTRUCOES_PT, INSTRUCOES_EN))])
         .args(["--tools", ferramentas, "--permission-mode", modo])
         // Os servidores MCP do usuário trazem ferramentas de escrita próprias (criar ticket, mandar mensagem).
         .arg("--strict-mcp-config")
@@ -346,7 +359,7 @@ pub fn perguntar(
         cmd.args(["--resume", s, "--fork-session"]);
     }
 
-    let mut filho = cmd.spawn().map_err(|err| Error::Claude(format!("não deu para rodar o `claude`: {err}")))?;
+    let mut filho = cmd.spawn().map_err(|err| Error::Claude(format!("{}: {err}", tr("não deu para rodar o `claude`", "couldn't run `claude`"))))?;
     pids.0.lock().unwrap().insert(id.to_owned(), filho.id());
 
     // Numa thread à parte: um contexto grande enche o pipe antes de o claude
@@ -383,12 +396,12 @@ pub fn perguntar(
 
     if cancelada || fim.is_none() || falhou {
         let motivo = if cancelada {
-            "pergunta cancelada.".to_owned()
+            tr("pergunta cancelada.", "question cancelled.").to_owned()
         } else if fim.is_some() {
             texto
         } else {
             let erro = String::from_utf8_lossy(&saida.stderr).trim().to_owned();
-            if erro.is_empty() { format!("o `claude` saiu com {}", saida.status) } else { erro }
+            if erro.is_empty() { format!("{} {}", tr("o `claude` saiu com", "`claude` exited with"), saida.status) } else { erro }
         };
         if changes.is_empty() {
             return Err(Error::Claude(motivo));

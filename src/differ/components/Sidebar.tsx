@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { T } from "../../i18n/differ";
 import { bookmarksReference, rangeLabel } from "../lib/bookmarks";
 import type { FixPlacement } from "../lib/fixes";
 import { dirStaged, filterTree, flattenTree, type TreeNode } from "../lib/tree";
@@ -47,10 +48,10 @@ export function Sidebar(props: Props) {
       {props.staging && <CommitBox noIndice={props.noIndice} onCommit={props.onCommit} />}
       <div className="tabs" role="tablist">
         <button role="tab" className={tab === "files" ? "active" : ""} onClick={() => setTab("files")}>
-          Arquivos <span className="count">{props.files.length}</span>
+          {T.abaArquivos} <span className="count">{props.files.length}</span>
         </button>
         <button role="tab" className={tab === "bookmarks" ? "active" : ""} onClick={() => setTab("bookmarks")}>
-          Marcadores <span className="count">{props.bookmarks.length}</span>
+          {T.abaMarcadores} <span className="count">{props.bookmarks.length}</span>
         </button>
       </div>
       {tab === "files" ? (
@@ -113,16 +114,16 @@ function CommitBox({ noIndice, onCommit }: { noIndice: number; onCommit(m: strin
         autoCorrect="off"
         autoCapitalize="off"
         autoComplete="off"
-        placeholder={noIndice > 0 ? "Mensagem do commit" : "Nada no índice — ponha arquivos com o +"}
+        placeholder={noIndice > 0 ? T.mensagemDoCommit : T.nadaNoIndice}
         value={mensagem}
         onChange={(e) => setMensagem(e.target.value)}
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void commitar();
         }}
       />
-      <button className="commit-btn" disabled={!pode} title="Commitar o índice (⌘↵)" onClick={() => void commitar()}>
+      <button className="commit-btn" disabled={!pode} title={T.commitarDica} onClick={() => void commitar()}>
         <Icon name="check" size={14} />
-        {enviando ? "Commitando…" : noIndice > 0 ? `Commit (${noIndice})` : "Commit"}
+        {enviando ? T.commitando : noIndice > 0 ? T.commitN(noIndice) : T.commit}
       </button>
       {erro && <p className="commit-erro">{erro}</p>}
     </div>
@@ -144,7 +145,6 @@ function StageButtons({
   // Pela metade no índice, os dois cabem: um leva o resto, o outro tira tudo.
   const por = staged !== "staged";
   const tirar = staged !== "unstaged";
-  const oQue = pasta ? "a pasta inteira" : "o arquivo";
   return (
     <span className={`stage-acoes ${staged}`}>
       {por && (
@@ -152,8 +152,12 @@ function StageButtons({
           className="stage-btn"
           title={
             staged === "partial"
-              ? `Pôr no índice também o que ficou de fora (git add ${pasta ? "da pasta" : ""})`.trim()
-              : `Pôr ${oQue} no índice (git add)`
+              ? pasta
+                ? T.porRestoDaPasta
+                : T.porRestoDoArquivo
+              : pasta
+                ? T.porPasta
+                : T.porArquivo
           }
           onClick={() => onStage(path, true)}
         >
@@ -163,7 +167,7 @@ function StageButtons({
       {tirar && (
         <button
           className="stage-btn tirar"
-          title={`Tirar ${oQue} do índice, deixando o disco como está (git restore --staged)`}
+          title={pasta ? T.tirarPasta : T.tirarArquivo}
           onClick={() => onStage(path, false)}
         >
           <Icon name="minus" size={13} />
@@ -308,14 +312,14 @@ function FileTree({
       <div className="tree-filter">
         <input
           type="search"
-          placeholder="Filtrar arquivos…"
+          placeholder={T.filtrarArquivos}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
         {todasPastas.length > 0 && (
           <button
             className="icon-btn"
-            title={tudoRecolhido ? "Abrir todas as pastas" : "Recolher todas as pastas"}
+            title={tudoRecolhido ? T.abrirPastas : T.recolherPastas}
             onClick={alternarTudo}
           >
             <Icon name={tudoRecolhido ? "chevron-down" : "chevron-right"} size={14} />
@@ -345,8 +349,8 @@ function FileTree({
                         className={`stage-btn${g.poeTudo ? "" : " tirar"}`}
                         title={
                           g.poeTudo
-                            ? "Pôr no índice tudo o que há no repositório (git add -A)"
-                            : "Tirar do índice tudo (git restore --staged)"
+                            ? T.porTudo
+                            : T.tirarTudo
                         }
                         onClick={() => onStage(".", g.poeTudo)}
                       >
@@ -365,7 +369,7 @@ function FileTree({
             })
           : visible.map((node) => renderNode(node, 0))}
         {!gruposVisiveis && visible.length === 0 && (
-          <p className="muted tree-empty">Nenhum arquivo encontrado.</p>
+          <p className="muted tree-empty">{T.nenhumArquivo}</p>
         )}
       </div>
     </div>
@@ -413,13 +417,15 @@ function BookmarkList({
     return (
       <div className="empty-list">
         <Icon name="bookmark" size={24} />
-        <p>Nenhum marcador ainda.</p>
+        <p>{T.nenhumMarcador}</p>
         <p className="muted">
-          Passe o mouse sobre uma linha do diff e clique no <strong>+</strong>. Arraste para marcar várias
-          linhas.
+          {T.comoMarcarAntes}
+          <strong>+</strong>
+          {T.comoMarcarDepois}
         </p>
         <p className="muted">
-          Ou selecione um trecho do código e clique em <strong>Comentar</strong>.
+          {T.comoComentarAntes}
+          <strong>{T.comentar}</strong>.
         </p>
       </div>
     );
@@ -453,14 +459,14 @@ function BookmarkList({
                   {status ? (
                     <FixBadge status={status} />
                   ) : (
-                    isOutdated && <span className="badge warn">desatualizado</span>
+                    isOutdated && <span className="badge warn">{T.desatualizado}</span>
                   )}
                   <span className="spacer" />
                   <ResolveButton resolved={!!b.resolved} size={14} onToggle={() => onToggleResolved(b.id)} />
                   <CopyReferenceButton reference={referenceOf(b)} size={14} />
                   <button
                     className="icon-btn danger"
-                    title="Remover marcador"
+                    title={T.removerMarcador}
                     onClick={(e) => {
                       e.stopPropagation();
                       onRemove(b.id);

@@ -1,18 +1,15 @@
 import { useEffect, useState } from "react";
+import { T } from "../../i18n/differ";
 import { rangeLabel } from "../lib/bookmarks";
 import type { FixStatus } from "../lib/fixes";
 import type { Bookmark } from "../types";
 import { Icon } from "./Icons";
 
 const FIX_BADGES: Record<FixStatus, { tone: string; label: string; title: string } | null> = {
-  changed: { tone: "ok", label: "trecho alterado", title: "Estas linhas mudaram desde a última revisão completa" },
-  unchanged: { tone: "warn", label: "trecho intocado", title: "O arquivo mudou, mas não nestas linhas" },
-  fileUnchanged: {
-    tone: "warn",
-    label: "arquivo intocado",
-    title: "Este arquivo não mudou desde a última revisão completa",
-  },
-  lost: { tone: "warn", label: "não localizado", title: "Estas linhas não estão na versão revisada" },
+  changed: { tone: "ok", label: T.trechoAlterado, title: T.trechoAlteradoDica },
+  unchanged: { tone: "warn", label: T.trechoIntocado, title: T.trechoIntocadoDica },
+  fileUnchanged: { tone: "warn", label: T.arquivoIntocado, title: T.arquivoIntocadoDica },
+  lost: { tone: "warn", label: T.naoLocalizado, title: T.naoLocalizadoDica },
   new: null,
 };
 
@@ -31,7 +28,7 @@ export function ResolveButton({ resolved, size, onToggle }: { resolved: boolean;
   return (
     <button
       className={resolved ? "icon-btn resolve on" : "icon-btn resolve"}
-      title={resolved ? "Resolvido — clique para reabrir" : "Marcar como resolvido"}
+      title={resolved ? T.resolvidoDica : T.marcarResolvido}
       aria-pressed={resolved}
       onClick={(e) => {
         e.stopPropagation();
@@ -67,7 +64,7 @@ export function CopyReferenceButton({ reference, size }: { reference: string; si
   return (
     <button
       className={copied ? "icon-btn copied" : "icon-btn"}
-      title="Copiar referência (caminho:linhas + comentário) para colar num prompt"
+      title={T.copiarReferencia}
       onClick={copiar}
     >
       <Icon name={copied ? "check" : "copy"} size={size} />
@@ -82,14 +79,14 @@ export function CopyPathButton({ path }: { path: string }) {
   return (
     <button
       className={copied ? "icon-btn subtle copied" : "icon-btn subtle"}
-      title={copied ? "Copiado!" : "Copiar caminho"}
-      aria-label={copied ? "Copiado!" : "Copiar caminho"}
+      title={copied ? T.copiado : T.copiarCaminho}
+      aria-label={copied ? T.copiado : T.copiarCaminho}
       onClick={copiar}
     >
       <Icon key={copied ? "check" : "copy"} name={copied ? "check" : "copy"} size={14} />
       {copied && (
         <span className="copiado-balao" role="status">
-          Copiado!
+          {T.copiado}
         </span>
       )}
     </button>
@@ -103,11 +100,11 @@ export function CopyAllButton({ reference, count }: { reference: string; count: 
   return (
     <button
       className={copied ? "copiar-tudo copied" : "copiar-tudo"}
-      title="Copiar todos os comentários da revisão, na ordem da lista, para colar num prompt"
+      title={T.copiarTodosDica}
       onClick={copiar}
     >
       <Icon name={copied ? "check" : "copy"} size={14} />
-      {copied ? "Copiados" : `Copiar todos (${count})`}
+      {copied ? T.copiados : T.copiarTodos(count)}
     </button>
   );
 }
@@ -140,14 +137,14 @@ export function BookmarkBox({
         <ResolveButton resolved={!!bookmark.resolved} onToggle={onToggleResolved} />
         <CopyReferenceButton reference={reference} />
         {onAsk && (
-          <button className="icon-btn" title="Perguntar ao Claude sobre este trecho" onClick={onAsk}>
+          <button className="icon-btn" title={T.perguntarSobreTrecho} onClick={onAsk}>
             <Icon name="sparkle" />
           </button>
         )}
-        <button className="icon-btn" title="Editar marcador" onClick={onEdit}>
+        <button className="icon-btn" title={T.editarMarcador} onClick={onEdit}>
           <Icon name="edit" />
         </button>
-        <button className="icon-btn danger" title="Remover marcador" onClick={onRemove}>
+        <button className="icon-btn danger" title={T.removerMarcador} onClick={onRemove}>
           <Icon name="trash" />
         </button>
       </div>
@@ -199,7 +196,7 @@ export function BookmarkEditor({
         autoFocus
         rows={3}
         value={note}
-        placeholder={quote ? "O que merece melhoria neste trecho?" : "O que merece melhoria aqui?"}
+        placeholder={quote ? T.melhoriaNoTrecho : T.melhoriaAqui}
         onChange={(e) => setNote(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && e.shiftKey && (e.metaKey || e.ctrlKey) && onAsk) {
@@ -215,18 +212,18 @@ export function BookmarkEditor({
         }}
       />
       <div className="bookmark-actions">
-        <span className="hint">⌘↩ salva · Esc cancela</span>
+        <span className="hint">{T.salvaCancela}</span>
         <button className="btn" onClick={onCancel}>
-          Cancelar
+          {T.cancelar}
         </button>
         {onAsk && (
-          <button className="btn" title="Tirar a dúvida antes de anotar (⌘⇧↩)" onClick={() => onAsk(note.trim())}>
+          <button className="btn" title={T.perguntarAntesDica} onClick={() => onAsk(note.trim())}>
             <Icon name="sparkle" size={13} />
-            Perguntar ao Claude
+            {T.perguntarAoClaude}
           </button>
         )}
         <button className="btn primary" disabled={!note.trim() || saving} onClick={submit}>
-          {initial ? "Salvar" : "Adicionar marcador"}
+          {initial ? T.salvar : T.adicionarMarcador}
         </button>
       </div>
     </div>

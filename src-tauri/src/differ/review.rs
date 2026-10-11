@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use crate::differ::diff::{self, FileDiff, FileStatus, Staged};
 use crate::differ::error::{Error, Result};
+use crate::idioma::tr;
 use crate::differ::git::Repo;
 
 /// Diff options shared by the raw and patch runs, so both list the same files in the same order.
@@ -334,7 +335,7 @@ pub fn unstage(path: &Path, alvo: &str) -> Result<()> {
 pub fn commit(path: &Path, message: &str) -> Result<String> {
     let repo = Repo::open(path)?;
     if message.trim().is_empty() {
-        return Err(Error::Internal("O commit precisa de uma mensagem.".to_string()));
+        return Err(Error::Internal(tr("O commit precisa de uma mensagem.", "The commit needs a message.").to_string()));
     }
     repo.run_write(&["commit", "-m", message])?;
     repo.resolve_commit("HEAD").ok_or(Error::NoCommits)
@@ -354,7 +355,7 @@ fn no_repositorio(raiz: &Path, arquivo: &str) -> Result<PathBuf> {
         raiz.canonicalize().map_err(Error::Io)?,
     );
     if !alvo.starts_with(&raiz) {
-        return Err(Error::Internal(format!("caminho fora do repositório: {arquivo}")));
+        return Err(Error::Internal(format!("{}: {arquivo}", tr("caminho fora do repositório", "path outside the repository"))));
     }
     Ok(alvo)
 }
@@ -375,7 +376,7 @@ pub fn read_worktree_bytes(path: &Path, arquivo: &str) -> Result<Vec<u8>> {
 
 fn validate_oid(oid: &str) -> Result<()> {
     if !(oid.len() == 40 || oid.len() == 64) || !oid.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(Error::Internal(format!("id de blob inválido: {oid}")));
+        return Err(Error::Internal(format!("{}: {oid}", tr("id de blob inválido", "invalid blob id"))));
     }
     Ok(())
 }

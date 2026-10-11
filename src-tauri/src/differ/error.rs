@@ -19,6 +19,25 @@ pub enum Error {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if !crate::idioma::portugues() {
+            return match self {
+                Error::NotARepo(path) => write!(f, "The folder is not a git repository: {path}"),
+                Error::NoCommits => write!(f, "The repository has no commits yet."),
+                Error::RefNotFound(name) => write!(f, "Branch not found: {name}"),
+                Error::NoMergeBase { target } => {
+                    write!(f, "The current branch has no common ancestor with {target}.")
+                }
+                Error::Git { args, stderr } => write!(f, "Failed to run `git {args}`: {stderr}"),
+                Error::Parse(msg) => write!(f, "Could not parse git's output: {msg}"),
+                Error::Io(err) => write!(f, "Could not run git: {err}"),
+                Error::LfsMissing => write!(
+                    f,
+                    "File stored in Git LFS and not downloaded yet. Run `git lfs pull` in the repository."
+                ),
+                Error::Claude(msg) => write!(f, "Claude: {msg}"),
+                Error::Internal(msg) => write!(f, "Internal error: {msg}"),
+            };
+        }
         match self {
             Error::NotARepo(path) => write!(f, "A pasta não é um repositório git: {path}"),
             Error::NoCommits => write!(f, "O repositório ainda não tem commits."),

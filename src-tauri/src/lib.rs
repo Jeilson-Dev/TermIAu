@@ -926,7 +926,9 @@ fn abrir_no_editor(caminho: String, linha: Option<u32>, comando: Option<String>)
 /// `{arquivo}` no comando, ele vai no fim.
 fn comando_do_editor(comando: &str, caminho: &str, linha: u32) -> String {
     let citado = format!("'{}'", caminho.replace('\'', "'\\''"));
-    let com_linha = comando.replace("{linha}", &linha.to_string());
+    // `{file}` e `{line}` são os nomes da interface em inglês; os dois valem.
+    let comando = comando.replace("{file}", "{arquivo}");
+    let com_linha = comando.replace("{line}", "{linha}").replace("{linha}", &linha.to_string());
     if com_linha.contains("{arquivo}") {
         com_linha.replace("{arquivo}", &citado)
     } else {
@@ -1718,6 +1720,7 @@ mod testes_visor {
             "cursor -g '/a b/it'\\''s.ts':7"
         );
         assert_eq!(comando_do_editor("zed", "/x.md", 1), "zed '/x.md'");
+        assert_eq!(comando_do_editor("zed {file}:{line}", "/x.md", 3), "zed '/x.md':3");
     }
 
     #[test]

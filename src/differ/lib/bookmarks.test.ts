@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { definirIdioma, idioma } from "../../i18n";
 import type { Bookmark } from "../types";
 import { bookmarkReference, bookmarksReference } from "./bookmarks";
 
@@ -9,6 +10,10 @@ const base = {
   endLine: 35,
   note: "poderia trocar esses if/else por um switch/case?",
 };
+
+const inicial = idioma();
+beforeEach(() => definirIdioma("pt"));
+afterEach(() => definirIdioma(inicial));
 
 describe("bookmarkReference", () => {
   it("formats a line range with the comment", () => {
@@ -31,6 +36,10 @@ describe("bookmarkReference", () => {
     expect(bookmarkReference({ ...base, side: "old" }, "lib/old.dart")).toMatch(
       /^lib\/old\.dart:12-35 \(versão anterior\)\n/,
     );
+    definirIdioma("en");
+    expect(bookmarkReference({ ...base, side: "old" }, "lib/old.dart")).toMatch(
+      /^lib\/old\.dart:12-35 \(previous version\)\n/,
+    );
   });
 });
 
@@ -50,6 +59,10 @@ describe("bookmarksReference", () => {
   it("marks the ones already checked off", () => {
     expect(bookmarksReference([marcador(3, true)], (b) => bookmarkReference(b))).toBe(
       `1 comentário de revisão\n\n${base.path}:3\ncomment:\nnota 3\n(resolvido)`,
+    );
+    definirIdioma("en");
+    expect(bookmarksReference([marcador(3, true)], (b) => bookmarkReference(b))).toBe(
+      `1 review comment\n\n${base.path}:3\ncomment:\nnota 3\n(resolved)`,
     );
   });
 

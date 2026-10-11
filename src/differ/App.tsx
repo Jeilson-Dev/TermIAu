@@ -16,6 +16,8 @@ import { Mudou } from "./components/Mudou";
 import { Prefs } from "./components/Prefs";
 import { Sidebar, type GrupoArquivos } from "./components/Sidebar";
 import { Toolbar } from "./components/Toolbar";
+import { Trechos } from "./components/Trechos";
+import { T } from "../i18n/differ";
 import { bookmarkReference, checkBookmarks } from "./lib/bookmarks";
 import { incrementalBase, placeBookmarks, type FixPlacement } from "./lib/fixes";
 import { isGenerated } from "./lib/generated";
@@ -142,7 +144,7 @@ function ResolvedCount({
   const resolved = checking.filter((b) => b.resolved).length;
   return (
     <span className={resolved === checking.length ? "badge ok" : "badge"}>
-      {resolved} de {checking.length} {checking.length === 1 ? "marcador resolvido" : "marcadores resolvidos"}
+      {T.marcadoresResolvidos(resolved, checking.length)}
     </span>
   );
 }
@@ -305,7 +307,7 @@ export default function App() {
         // O diff do que está para ser commitado não compara com branch nenhuma:
         // ele abre mesmo num repositório de uma branch só.
         if (initial || prefs.scope === "working") await refresh(info.root, initial, prefs.scope);
-        else setError("O repositório não tem branches para comparar.");
+        else setError(T.semBranchesParaComparar);
       } catch (err) {
         setError(String(err));
       }
@@ -525,17 +527,17 @@ export default function App() {
     return [
       {
         chave: "indice",
-        titulo: "No índice",
+        titulo: T.noIndice,
         tree: buildTree(dentro),
         poeTudo: false,
-        vazio: "Nada no índice ainda.",
+        vazio: T.nadaNoIndiceAinda,
       },
       {
         chave: "fora",
-        titulo: "Fora do índice",
+        titulo: T.foraDoIndice,
         tree: buildTree(fora),
         poeTudo: true,
-        vazio: "Tudo o que mudou já está no índice.",
+        vazio: T.tudoNoIndice,
       },
     ];
   }, [working, files]);
@@ -903,7 +905,7 @@ export default function App() {
         <div className="banner error" role="alert">
           <Icon name="warning" />
           <span>{error}</span>
-          <button className="icon-btn" title="Fechar" onClick={() => setError(null)}>
+          <button className="icon-btn" title={T.fechar} onClick={() => setError(null)}>
             <Icon name="x" />
           </button>
         </div>
@@ -936,25 +938,22 @@ export default function App() {
                 <div className="diff-summary">
                   {working ? (
                     <span>
-                      O que está para ser commitado em <code className="branch-name">{diff.branch ?? "HEAD"}</code>{" "}
-                      — com <code>git add</code> ou sem ele, e mais o que o git ainda não rastreia
+                      <Trechos de={T.resumoWorking(diff.branch ?? "HEAD")} />
                     </span>
                   ) : sinceBase ? (
                     <span>
-                      Mudanças em <code className="branch-name">{diff.branch ?? "HEAD"}</code> desde a última
-                      revisão completa, em <code className="branch-name">{sinceBase.slice(0, 7)}</code>
+                      <Trechos de={T.resumoIncremental(diff.branch ?? "HEAD", sinceBase.slice(0, 7))} />
                     </span>
                   ) : (
                     <span>
-                      Mudanças de <code className="branch-name">{diff.branch ?? "HEAD"}</code> desde que saiu de{" "}
-                      <code className="branch-name">{diff.target}</code>
-                      {incremental && " — nenhuma revisão completa ainda, então é a branch inteira"}
+                      <Trechos de={T.resumoBranch(diff.branch ?? "HEAD", diff.target)} />
+                      {incremental && T.semRevisaoCompleta}
                     </span>
                   )}
                   {sinceBase && <ResolvedCount bookmarks={bookmarks} placements={placements} />}
                   {working ? (
-                    <span className="sha" title={`head ${diff.headSha}\nO lado novo é o disco, como está agora`}>
-                      {diff.headSha.slice(0, 7)}…disco
+                    <span className="sha" title={`head ${diff.headSha}\n${T.ladoNovoEODisco}`}>
+                      {diff.headSha.slice(0, 7)}…{T.disco}
                     </span>
                   ) : (
                     <span className="sha" title={`base ${diff.mergeBase}\nhead ${diff.headSha}`}>
@@ -965,28 +964,25 @@ export default function App() {
               )}
               {diff && files.length === 0 && sinceBase && (
                 <div className="empty-diff">
-                  <h2>Nada novo</h2>
+                  <h2>{T.nadaNovo}</h2>
                   <p>
-                    Não há commits em <code>{diff.branch ?? "HEAD"}</code> que mudem algo desde a última revisão
-                    completa, em <code>{sinceBase.slice(0, 7)}</code>.
+                    <Trechos de={T.nadaNovoTexto(diff.branch ?? "HEAD", sinceBase.slice(0, 7))} />
                   </p>
                 </div>
               )}
               {diff && files.length === 0 && working && (
                 <div className="empty-diff">
-                  <h2>Nada para commitar</h2>
+                  <h2>{T.nadaParaCommitar}</h2>
                   <p>
-                    A pasta está igual ao último commit de <code>{diff.branch ?? "HEAD"}</code>: nada no índice,
-                    nada editado e nenhum arquivo novo.
+                    <Trechos de={T.nadaParaCommitarTexto(diff.branch ?? "HEAD")} />
                   </p>
                 </div>
               )}
               {diff && files.length === 0 && !sinceBase && !working && (
                 <div className="empty-diff">
-                  <h2>Nada para revisar</h2>
+                  <h2>{T.nadaParaRevisar}</h2>
                   <p>
-                    Não há commits em <code>{diff.branch ?? "HEAD"}</code> que não estejam em{" "}
-                    <code>{diff.target}</code>.
+                    <Trechos de={T.nadaParaRevisarTexto(diff.branch ?? "HEAD", diff.target)} />
                   </p>
                 </div>
               )}
@@ -1021,7 +1017,7 @@ export default function App() {
                     />
                   );
                 })}
-              {!diff && loading && <div className="loading-state">Carregando diff…</div>}
+              {!diff && loading && <div className="loading-state">{T.carregandoDiff}</div>}
             </div>
           </main>
         </div>

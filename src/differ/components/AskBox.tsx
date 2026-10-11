@@ -1,5 +1,6 @@
 import { structuredPatch } from "diff";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { T } from "../../i18n/differ";
 import { claudeSessions, type AskChange } from "../api";
 import * as asks from "../lib/asks";
 import type { AskState } from "../lib/asks";
@@ -8,10 +9,10 @@ import type { ClaudeSession, FileDiff } from "../types";
 import { Icon } from "./Icons";
 
 const MODELS = [
-  { id: "", label: "Modelo padrão" },
-  { id: "haiku", label: "Haiku — rápido" },
+  { id: "", label: T.modeloPadrao },
+  { id: "haiku", label: T.haikuRapido },
   { id: "sonnet", label: "Sonnet" },
-  { id: "opus", label: "Opus — mais cuidadoso" },
+  { id: "opus", label: T.opusCuidadoso },
 ];
 /** Linhas de diff mostradas por arquivo alterado; o resto se vê na aba pendente. */
 const PATCH_MAX_LINES = 300;
@@ -29,11 +30,11 @@ function sessionsOf(root: string): Promise<ClaudeSession[]> {
 
 function ago(ms: number): string {
   const min = Math.round((Date.now() - ms) / 60_000);
-  if (min < 1) return "agora";
-  if (min < 60) return `há ${min} min`;
+  if (min < 1) return T.agora;
+  if (min < 60) return T.haMin(min);
   const h = Math.round(min / 60);
-  if (h < 24) return `há ${h} h`;
-  return `há ${Math.round(h / 24)} d`;
+  if (h < 24) return T.haHoras(h);
+  return T.haDias(Math.round(h / 24));
 }
 
 /** Markdown só o bastante para a resposta ler bem: blocos de código, `código` e **negrito**. */
@@ -102,7 +103,7 @@ function ChangeView({ change }: { change: AskChange }) {
             <span className="add">+{patch.add}</span> <span className="del">−{patch.del}</span>
           </span>
         ) : (
-          <span className="badge warn">binário ou sem foto — não dá para mostrar</span>
+          <span className="badge warn">{T.binarioSemFoto}</span>
         )}
       </button>
       {open && patch && (
@@ -113,7 +114,7 @@ function ChangeView({ change }: { change: AskChange }) {
             </div>
           ))}
           {patch.lines.length > PATCH_MAX_LINES && (
-            <div className="ask-patch-hunk">… mais {patch.lines.length - PATCH_MAX_LINES} linhas — veja o arquivo na aba pendente</div>
+            <div className="ask-patch-hunk">{T.maisLinhas(patch.lines.length - PATCH_MAX_LINES)}</div>
           )}
         </pre>
       )}
@@ -131,16 +132,14 @@ function Changes({ ask, index, root }: { ask: AskState; index: number; root: str
       <div className="ask-changes-head">
         <Icon name="edit" size={13} />
         <span>
-          {turn.undone
-            ? "Alterações desfeitas"
-            : `Alterou ${turn.changes.length} ${turn.changes.length === 1 ? "arquivo" : "arquivos"}`}
+          {turn.undone ? T.alteracoesDesfeitasTitulo : T.alterouArquivos(turn.changes.length)}
         </span>
         <span className="spacer" />
         {!turn.undone && undoable && (
           <button
             className="btn"
             disabled={undoing || !!ask.running}
-            title="Volta os arquivos a como estavam antes deste pedido. Arquivo mexido de novo depois disso fica como está."
+            title={T.desfazerDica}
             onClick={async () => {
               setUndoing(true);
               await asks.undo(ask.id, root, index);
@@ -148,13 +147,13 @@ function Changes({ ask, index, root }: { ask: AskState; index: number; root: str
             }}
           >
             <Icon name="history" size={13} />
-            Desfazer
+            {T.desfazer}
           </button>
         )}
       </div>
       {turn.undoKept && (
         <div className="ask-error">
-          Não desfeitos, porque mudaram de novo depois deste pedido: {turn.undoKept.join(", ")}
+          {T.naoDesfeitos(turn.undoKept.join(", "))}
         </div>
       )}
       {!turn.undone && turn.changes.map((c) => <ChangeView key={c.path} change={c} />)}
@@ -200,14 +199,14 @@ export function AskBox({
         <Icon name="sparkle" />
         <span>{rangeLabel({ side: ask.side, startLine: ask.start, endLine: ask.end })}</span>
         {sessionTitle && (
-          <span className="badge" title="As perguntas rodam numa cópia desta sessão, que continua intacta">
+          <span className="badge" title={T.copiaDaSessaoDica}>
             {sessionTitle}
           </span>
         )}
         <span className="spacer" />
         <button
           className="icon-btn"
-          title={running ? "Fechar e cancelar a pergunta" : "Fechar pergunta"}
+          title={running ? T.fecharECancelar : T.fecharPergunta}
           onClick={() => asks.close(id)}
         >
           <Icon name="x" />
@@ -220,16 +219,16 @@ export function AskBox({
         <div className="ask-turn" key={i}>
           <div className="ask-question">
             {t.question}
-            {t.edits && <span className="badge warn">alterações liberadas</span>}
+            {t.edits && <span className="badge warn">{T.alteracoesLiberadas}</span>}
           </div>
           {t.answer !== undefined && <Answer text={t.answer} />}
           <Changes ask={ask} index={i} root={root} />
           {t.error && <div className="ask-error">{t.error}</div>}
           {t.answer === undefined && !t.error && (
             <div className="ask-waiting">
-              {t.edits ? "Alterando…" : session ? "Perguntando, com a sessão como contexto…" : "Perguntando…"}
+              {t.edits ? T.alterando : session ? T.perguntandoComSessao : T.perguntando}
               <button className="link-btn" onClick={() => asks.cancel(id)}>
-                Cancelar
+                {T.cancelar}
               </button>
             </div>
           )}
@@ -238,7 +237,7 @@ export function AskBox({
 
       {draft !== null ? (
         <>
-          <div className="ask-label">Marcador que vai para o agente — revise antes de salvar</div>
+          <div className="ask-label">{T.marcadorParaOAgente}</div>
           <textarea
             autoFocus
             rows={4}
@@ -255,24 +254,24 @@ export function AskBox({
             }}
           />
           <div className="bookmark-actions">
-            <span className="hint">⌘↩ salva · Esc volta à decisão</span>
+            <span className="hint">{T.salvaVoltaDecisao}</span>
             <button className="btn" onClick={() => set({ draft: null })}>
-              Refazer
+              {T.refazer}
             </button>
             <button className="btn primary" disabled={!draft.trim()} onClick={() => onDecide(draft.trim())}>
-              {ask.bookmarkId ? "Reescrever marcador" : "Criar marcador"}
+              {ask.bookmarkId ? T.reescreverMarcador : T.criarMarcador}
             </button>
           </div>
         </>
       ) : decision !== null ? (
         <>
-          <div className="ask-label">O que você decidiu? O modelo escreve o marcador a partir da conversa.</div>
+          <div className="ask-label">{T.oQueDecidiu}</div>
           <textarea
             autoFocus
             rows={2}
             value={decision}
             disabled={!!running}
-            placeholder="Ex.: vamos pela segunda opção, mas sem mexer na API pública"
+            placeholder={T.exemploDecisao}
             onChange={(e) => set({ decision: e.target.value })}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -287,19 +286,19 @@ export function AskBox({
           {noteError && <div className="ask-error">{noteError}</div>}
           {running ? (
             <div className="ask-waiting">
-              Escrevendo o marcador…
+              {T.escrevendoMarcador}
               <button className="link-btn" onClick={() => asks.cancel(id)}>
-                Cancelar
+                {T.cancelar}
               </button>
             </div>
           ) : (
             <div className="bookmark-actions">
-              <span className="hint">⌘↩ elabora · Esc volta</span>
+              <span className="hint">{T.elaboraVolta}</span>
               <button className="btn" onClick={() => set({ decision: null })}>
-                Voltar
+                {T.voltar}
               </button>
               <button className="btn primary" disabled={!decision.trim()} onClick={draftNote}>
-                Elaborar marcador
+                {T.elaborarMarcador}
               </button>
             </div>
           )}
@@ -313,10 +312,10 @@ export function AskBox({
             disabled={!!running}
             placeholder={
               allowEdits
-                ? "O que o Claude deve alterar? Dá para ver e desfazer depois."
+                ? T.oQueAlterar
                 : turns.length
-                  ? "Continuar a conversa… (ou ajustar o que ele alterou)"
-                  : "O que você quer saber sobre este trecho?"
+                  ? T.continuarConversa
+                  : T.oQueSaber
             }
             onChange={(e) => set({ input: e.target.value })}
             onKeyDown={(e) => {
@@ -334,7 +333,7 @@ export function AskBox({
               value={model}
               disabled={!!running}
               onChange={(e) => asks.setModel(id, e.target.value)}
-              title="Modelo que responde"
+              title={T.modeloQueResponde}
             >
               {MODELS.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -346,10 +345,10 @@ export function AskBox({
               value={session}
               disabled={!!running}
               onChange={(e) => set({ session: e.target.value })}
-              title="Mencionar uma sessão: a resposta sabe do que foi conversado nela. Mais lento e mais caro — carrega a conversa inteira."
+              title={T.mencionarSessaoDica}
             >
-              <option value="">Sem sessão — rápido</option>
-              {sessions === null && <option disabled>Carregando sessões…</option>}
+              <option value="">{T.semSessao}</option>
+              {sessions === null && <option disabled>{T.carregandoSessoes}</option>}
               {sessions?.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.title} · {ago(s.modified)}
@@ -358,7 +357,7 @@ export function AskBox({
             </select>
             <label
               className={allowEdits ? "ask-edits on" : "ask-edits"}
-              title="Desligado, o Claude só conversa: não tem nem as ferramentas de edição. Ligado, pode editar os arquivos do repositório — e o que ele mudar aparece aqui para ver e desfazer."
+              title={T.permitirAlteracoesDica}
             >
               <input
                 type="checkbox"
@@ -366,17 +365,17 @@ export function AskBox({
                 disabled={!!running}
                 onChange={(e) => set({ allowEdits: e.target.checked })}
               />
-              Permitir alterações
+              {T.permitirAlteracoes}
             </label>
-            <span className="hint">⌘↩ {allowEdits ? "envia" : "pergunta"}</span>
+            <span className="hint">{allowEdits ? T.enviaAtalho : T.perguntaAtalho}</span>
             {answered && (
               <button className="btn" disabled={!!running} onClick={() => set({ decision: "" })}>
                 <Icon name="bookmark" size={13} />
-                Registrar decisão
+                {T.registrarDecisao}
               </button>
             )}
             <button className="btn primary" disabled={!input.trim() || !!running} onClick={send}>
-              {allowEdits ? "Pedir alteração" : "Perguntar"}
+              {allowEdits ? T.pedirAlteracao : T.perguntar}
             </button>
           </div>
         </>

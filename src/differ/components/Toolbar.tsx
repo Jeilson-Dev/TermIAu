@@ -1,3 +1,4 @@
+import { T } from "../../i18n/differ";
 import type { RepoInfo, ReviewDiff, Scope, ViewMode } from "../types";
 import { Icon } from "./Icons";
 
@@ -28,44 +29,44 @@ export function Toolbar(props: Props) {
         {repo?.name ?? "Diff"}
       </span>
       {repo && (
-        <div className="segmented" role="group" aria-label="Escopo da revisão">
+        <div className="segmented" role="group" aria-label={T.escopoDaRevisao}>
           <button
             className={scope === "branch" ? "active" : ""}
-            title="Tudo o que a branch mudou desde que saiu da branch alvo"
+            title={T.escopoBranchDica}
             onClick={() => props.onScope("branch")}
           >
             <Icon name="git-branch" size={14} />
-            Branch inteira
+            {T.escopoBranch}
           </button>
           <button
             className={scope === "incremental" ? "active" : ""}
-            title="Só o que mudou desde o último commit com todos os arquivos revisados"
+            title={T.escopoIncrementalDica}
             onClick={() => props.onScope("incremental")}
           >
             <Icon name="history" size={14} />
-            Incremental
+            {T.escopoIncremental}
           </button>
           <button
             className={scope === "working" ? "active" : ""}
-            title="O que está para ser commitado: o que entrou no índice com git add, o que ficou de fora dele e os arquivos que o git ainda não rastreia"
+            title={T.escopoWorkingDica}
             onClick={() => props.onScope("working")}
           >
             <Icon name="pencil" size={14} />
-            Para commitar
+            {T.escopoWorking}
           </button>
         </div>
       )}
       {repo && (
         <div className="compare">
           {scope === "working" ? (
-            <span className="base-pill" title="O diff do que está por commitar é contra o último commit da branch">
+            <span className="base-pill" title={T.baseHeadDica}>
               <Icon name="git-commit" size={14} />
               HEAD
             </span>
           ) : sinceBase ? (
             <span
               className="base-pill"
-              title={`Última revisão completa: ${sinceBase}\nO diff mostra só o que mudou depois dela`}
+              title={T.baseRevisaoDica(sinceBase)}
             >
               <Icon name="check" size={14} />
               {sinceBase.slice(0, 7)}
@@ -73,19 +74,19 @@ export function Toolbar(props: Props) {
           ) : (
             <select
               className="branch-select"
-              aria-label="Branch alvo"
-              title="Branch alvo da comparação"
+              aria-label={T.branchAlvo}
+              title={T.branchAlvoDica}
               value={target}
               onChange={(e) => props.onTargetChange(e.target.value)}
             >
               {target && !knownTarget && <option>{target}</option>}
-              <optgroup label="Locais">
+              <optgroup label={T.branchesLocais}>
                 {repo.localBranches.map((b) => (
                   <option key={b}>{b}</option>
                 ))}
               </optgroup>
               {repo.remoteBranches.length > 0 && (
-                <optgroup label="Remotas">
+                <optgroup label={T.branchesRemotas}>
                   {repo.remoteBranches.map((b) => (
                     <option key={b}>{b}</option>
                   ))}
@@ -94,15 +95,15 @@ export function Toolbar(props: Props) {
             </select>
           )}
           <Icon name="arrow-left" className="compare-arrow" />
-          <span className="branch-pill" title="Branch em revisão (a que está ativa na pasta)">
+          <span className="branch-pill" title={T.branchEmRevisaoDica}>
             <Icon name="git-branch" size={14} />
-            {repo.currentBranch ?? "HEAD destacado"}
+            {repo.currentBranch ?? T.headDestacado}
           </span>
         </div>
       )}
       {diff && (
         <span className="toolbar-stats">
-          {fileCount} {fileCount === 1 ? "arquivo" : "arquivos"} <span className="add">+{diff.additions}</span>{" "}
+          {T.arquivos(fileCount)} <span className="add">+{diff.additions}</span>{" "}
           <span className="del">−{diff.deletions}</span>
         </span>
       )}
@@ -114,24 +115,24 @@ export function Toolbar(props: Props) {
       {props.loading && (
         <span className="recarregando">
           <Icon name="refresh" size={14} className="spin" />
-          Atualizando…
+          {T.atualizando}
         </span>
       )}
       {repo && (
-        <div className="segmented" role="group" aria-label="Modo de visualização">
+        <div className="segmented" role="group" aria-label={T.modoDeVisualizacao}>
           <button
             className={props.viewMode === "unified" ? "active" : ""}
             onClick={() => props.onViewMode("unified")}
           >
             <Icon name="unified" size={14} />
-            Unificado
+            {T.unificado}
           </button>
           <button
             className={props.viewMode === "split" ? "active" : ""}
             onClick={() => props.onViewMode("split")}
           >
             <Icon name="split" size={14} />
-            Lado a lado
+            {T.ladoALado}
           </button>
         </div>
       )}
@@ -143,11 +144,9 @@ function ReviewProgress({ viewed, total }: { viewed: number; total: number }) {
   return (
     <div
       className={viewed === total ? "progress done" : "progress"}
-      title="Com todos revisados, a revisão deste commit fica completa: o Incremental passa a partir dele no próximo commit"
+      title={T.progressoDica}
     >
-      <span>
-        {viewed} de {total} revisados
-      </span>
+      <span>{T.revisados(viewed, total)}</span>
       <div className="progress-bar">
         <div style={{ width: `${(viewed / total) * 100}%` }} />
       </div>

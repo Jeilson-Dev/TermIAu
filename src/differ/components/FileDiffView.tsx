@@ -17,6 +17,7 @@ import { EXPAND_STEP, buildRows, fileGaps, revealLine, splitRows, type Expansion
 import { readTextSelection, type TextSelection } from "../lib/textSelection";
 import { useFileSources } from "../lib/useFileSources";
 import type { Bookmark, FileDiff, FocusTarget, Side, ViewMode } from "../types";
+import { T } from "../../i18n/differ";
 import * as askStore from "../lib/asks";
 import type { Ask, AskState } from "../lib/asks";
 import { AskBox } from "./AskBox";
@@ -78,10 +79,10 @@ interface Props {
 }
 
 function emptyNote(file: FileDiff): string {
-  if (file.binary) return "Arquivo binário — conteúdo não exibido.";
-  if (file.status === "renamed") return "Arquivo renomeado, sem mudanças no conteúdo.";
-  if (file.oldMode !== file.newMode) return `Permissão alterada: ${file.oldMode} → ${file.newMode}`;
-  return "Sem mudanças de conteúdo.";
+  if (file.binary) return T.arquivoBinario;
+  if (file.status === "renamed") return T.arquivoRenomeado;
+  if (file.oldMode !== file.newMode) return T.permissaoAlterada(file.oldMode, file.newMode);
+  return T.semMudancas;
 }
 
 export const FileDiffView = memo(function FileDiffView(props: Props) {
@@ -441,9 +442,9 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
   } else if (large && !showLarge) {
     body = (
       <div className="file-note">
-        Diff grande ({totalLines} linhas), não carregado automaticamente.{" "}
+        {T.diffGrande(totalLines)}{" "}
         <button className="link-btn" onClick={() => setShowLarge(true)}>
-          Carregar diff
+          {T.carregarDiff}
         </button>
       </div>
     );
@@ -471,7 +472,7 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
         <button
           className="icon-btn"
           onClick={() => onCollapse(file, !collapsed)}
-          title={collapsed ? "Expandir arquivo" : "Recolher arquivo"}
+          title={collapsed ? T.expandirArquivo : T.recolherArquivo}
         >
           <Icon name="chevron-down" className={collapsed ? "file-chevron closed" : "file-chevron"} />
         </button>
@@ -493,24 +494,24 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
         )}
         {outdatedCount > 0 && (
           <span className="badge warn">
-            {outdatedCount} {outdatedCount === 1 ? "marcador desatualizado" : "marcadores desatualizados"}
+            {T.marcadoresDesatualizados(outdatedCount)}
           </span>
         )}
         <span className="spacer" />
         {image ? (
-          <span className="badge">imagem</span>
+          <span className="badge">{T.imagem}</span>
         ) : (
           <DiffStat additions={file.additions} deletions={file.deletions} />
         )}
         <label
           className={viewed ? "viewed-toggle on" : "viewed-toggle"}
           title={
-            (props.staging ? "Revisado põe no índice (git add); desmarcar tira (git restore --staged)" : "Marcar como revisado") +
+            (props.staging ? T.revisadoNoIndiceDica : T.marcarRevisado) +
             (active ? " (V)" : "")
           }
         >
           <input type="checkbox" checked={viewed} onChange={() => onSetViewed(file, !viewed)} />
-          Revisado
+          {T.revisado}
           {/* Always rendered so the button keeps its width; only shown on the active file. */}
           <kbd className={active ? undefined : "hidden-hint"} aria-hidden={!active}>
             V
@@ -535,16 +536,16 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
         // Keep the selection alive until the click lands.
         <div className="comment-selection" style={{ top: pick.top, left: pick.left }} onMouseDown={(e) => e.preventDefault()}>
           <button
-            title={`Comentar o trecho selecionado (${rangeLabel({ side: pick.side, startLine: pick.start, endLine: pick.end }).toLowerCase()})`}
+            title={T.comentarSelecao(rangeLabel({ side: pick.side, startLine: pick.start, endLine: pick.end }).toLowerCase())}
             onClick={commentPick}
           >
             <Icon name="bookmark" size={13} />
-            Comentar
+            {T.comentar}
           </button>
           <span className="sep" />
-          <button className="ask-pick" title="Perguntar ao Claude sobre o trecho selecionado" onClick={askPick}>
+          <button className="ask-pick" title={T.perguntarSelecao} onClick={askPick}>
             <Icon name="sparkle" size={13} />
-            Perguntar
+            {T.perguntar}
           </button>
         </div>
       )}

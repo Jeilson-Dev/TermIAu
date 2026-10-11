@@ -1,3 +1,5 @@
+import { localidade } from "../../i18n";
+import { T } from "../../i18n/differ";
 import { useEffect, useRef, useState, type CSSProperties, type HTMLAttributes, type PointerEvent } from "react";
 import { formatBytes, loadImage, type LoadedImage } from "../lib/images";
 import { pixelDiff, type PixelDiffResult } from "../lib/pixeldiff";
@@ -6,10 +8,10 @@ import type { FileDiff } from "../types";
 type Mode = "side" | "toggle" | "swipe" | "diff";
 
 const MODES: { id: Mode; label: string; title: string }[] = [
-  { id: "side", label: "Lado a lado", title: "Antes e depois, um ao lado do outro" },
-  { id: "toggle", label: "Alternar", title: "Troca as versões no mesmo lugar" },
-  { id: "swipe", label: "Deslizar", title: "Arraste para revelar uma versão sobre a outra" },
-  { id: "diff", label: "Diferença", title: "Pixels que mudaram, em destaque" },
+  { id: "side", label: T.imagemLadoALado, title: T.imagemLadoALadoDica },
+  { id: "toggle", label: T.imagemAlternar, title: T.imagemAlternarDica },
+  { id: "swipe", label: T.imagemDeslizar, title: T.imagemDeslizarDica },
+  { id: "diff", label: T.imagemDiferenca, title: T.imagemDiferencaDica },
 ];
 
 const MODE_KEY = "differ.imageMode";
@@ -60,7 +62,7 @@ export function ImageDiff({ root, file }: { root: string; file: FileDiff }) {
   };
 
   if (error) return <div className="file-note">{error}</div>;
-  if (!images) return <div className="file-note">Carregando imagem…</div>;
+  if (!images) return <div className="file-note">{T.carregandoImagem}</div>;
 
   const { before, after } = images;
   if (!before || !after) {
@@ -68,7 +70,7 @@ export function ImageDiff({ root, file }: { root: string; file: FileDiff }) {
     return (
       <div className="image-diff">
         <div className="image-side single">
-          <Frame image={only} kind={before ? "old" : "new"} label={before ? "Removida" : "Adicionada"} />
+          <Frame image={only} kind={before ? "old" : "new"} label={before ? T.imagemRemovida : T.imagemAdicionada} />
         </div>
       </div>
     );
@@ -81,7 +83,7 @@ export function ImageDiff({ root, file }: { root: string; file: FileDiff }) {
   return (
     <div className="image-diff">
       <div className="image-toolbar">
-        <div className="segmented" role="group" aria-label="Modo de comparação">
+        <div className="segmented" role="group" aria-label={T.modoDeComparacao}>
           {MODES.map((m) => (
             <button
               key={m.id}
@@ -101,8 +103,8 @@ export function ImageDiff({ root, file }: { root: string; file: FileDiff }) {
       </div>
       {mode === "side" && (
         <div className="image-side">
-          <Frame image={before} kind="old" label="Antes" />
-          <Frame image={after} kind="new" label="Depois" />
+          <Frame image={before} kind="old" label={T.antes} />
+          <Frame image={after} kind="new" label={T.depois} />
         </div>
       )}
       {mode === "toggle" && <ToggleView before={before} after={after} width={width} height={height} />}
@@ -172,14 +174,14 @@ function ToggleView({ before, after, width, height }: CompareProps) {
   return (
     <div className="image-single">
       <div className="image-legend">
-        {label("old", "Antes")}
-        {label("new", "Depois")}
-        <span className="muted">passe o mouse para espiar · clique para fixar</span>
+        {label("old", T.antes)}
+        {label("new", T.depois)}
+        <span className="muted">{T.espiarFixar}</span>
       </div>
       <Stage width={width} height={height} className={shown}>
         <img className="image-layer" src={image.url} style={layerStyle(image, width, height)} alt="" draggable={false} />
       </Stage>
-      <Caption image={image} kind={shown} label={shown === "old" ? "Antes" : "Depois"} />
+      <Caption image={image} kind={shown} label={shown === "old" ? T.antes : T.depois} />
     </div>
   );
 }
@@ -197,9 +199,9 @@ function SwipeView({ before, after, width, height }: CompareProps) {
   return (
     <div className="image-single">
       <div className="image-legend">
-        <span className="image-label old">Antes</span>
+        <span className="image-label old">{T.antes}</span>
         <span className="muted">arraste sobre a imagem</span>
-        <span className="image-label new">Depois</span>
+        <span className="image-label new">{T.depois}</span>
       </div>
       <Stage
         width={width}
@@ -229,7 +231,7 @@ function SwipeView({ before, after, width, height }: CompareProps) {
         step={0.1}
         value={position}
         onChange={(e) => setPosition(Number(e.target.value))}
-        aria-label="Posição da divisória"
+        aria-label={T.posicaoDivisoria}
       />
     </div>
   );
@@ -268,14 +270,16 @@ function PixelDiffView({ before, after, width, height }: CompareProps) {
       <div className="image-legend">
         {result &&
           (result.changed === 0 ? (
-            <span className="badge ok">Nenhum pixel diferente</span>
+            <span className="badge ok">{T.nenhumPixelDiferente}</span>
           ) : (
             <span className="badge pink">
-              {result.changed.toLocaleString("pt-BR")} pixels diferentes (
-              {percent.toLocaleString("pt-BR", { maximumFractionDigits: percent < 1 ? 3 : 1 })}%)
+              {T.pixelsDiferentes(
+                result.changed.toLocaleString(localidade()),
+                percent.toLocaleString(localidade(), { maximumFractionDigits: percent < 1 ? 3 : 1 }),
+              )}
             </span>
           ))}
-        <span className="muted">em rosa sobre a versão nova esmaecida</span>
+        <span className="muted">{T.emRosa}</span>
       </div>
       <Stage width={width} height={height} className="diff">
         <canvas ref={canvasRef} className="diff-canvas" />
