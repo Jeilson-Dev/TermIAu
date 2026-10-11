@@ -56,7 +56,7 @@ body {
 
 #panes {
   flex: 1;
-  min-height: 0; /* senão o conteúdo do xterm impede a coluna de encolher */
+  min-height: 0; /* otherwise the xterm content keeps the column from shrinking */
   position: relative;
 }
 
