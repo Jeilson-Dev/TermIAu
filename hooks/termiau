@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Mostra um arquivo no visor do painel do TermIAu de onde foi chamado.
+# Shows a file in the viewer of the TermIAu panel it was called from.
 #
-#   termiau ver src/main.ts:848          o arquivo, rolado até a linha e com ela marcada
-#   termiau ver src/main.ts:848-870      o trecho todo marcado
-#   termiau ver docs/plano.md            .md abre renderizado
-#   termiau ver lib/x.dart:103 --ref main   como o arquivo está na main
+#   termiau ver src/main.ts:848          the file, scrolled to the line with it marked
+#   termiau ver src/main.ts:848-870      the whole range marked
+#   termiau ver docs/plan.md             .md opens rendered
+#   termiau ver lib/x.dart:103 --ref main   the file as it is on main
 #
-# O app escreve este script em ~/.termiau/bin a cada abertura (ver
-# `instalar_cli` no lib.rs). Como o hook, ele só fala com o socket do app: quem
-# diz de qual painel é o pedido é o TERMIAU_PAINEL, que o shell do painel herda
-# — e o Claude, rodando nele, também.
+# The app writes this script to ~/.termiau/bin every time it opens (see
+# `instalar_cli` in lib.rs). Like the hook, it only talks to the app's socket:
+# TERMIAU_PAINEL says which panel the request is from; the panel's shell
+# inherits it — and so does Claude, running in it.
 set -uo pipefail
 
 uso() {
@@ -36,10 +36,10 @@ if [ -z "${TERMIAU_SOCK:-}" ] || [ ! -S "$TERMIAU_SOCK" ]; then
   exit 1
 fi
 
-# `arquivo:10`, `arquivo:10-20`, `arquivo:10:5` (a coluna é ignorada) e o
-# `#L10-L20` dos links do GitHub.
+# `file:10`, `file:10-20`, `file:10:5` (the column is ignored) and GitHub
+# links' `#L10-L20`.
 linha="" ate=""
-# Um formato por vez: o `(.+)` é guloso, e num `:10:5` só ele engoliria o `:10`.
+# One format at a time: `(.+)` is greedy, and on a `:10:5` it alone would swallow the `:10`.
 if [[ "$alvo" =~ ^(.+)#L([0-9]+)(-L([0-9]+))?$ ]] ||
   [[ "$alvo" =~ ^(.+):([0-9]+):[0-9]+$ ]] ||
   [[ "$alvo" =~ ^(.+):([0-9]+)(-([0-9]+))?$ ]]; then
@@ -66,7 +66,7 @@ fi
 PAINEL="${TERMIAU_PAINEL:-0}"
 case "$PAINEL" in '' | *[!0-9]*) PAINEL=0 ;; esac
 
-# JSON sem `jq`: só aspas e barras precisam de escape num caminho.
+# JSON without `jq`: only quotes and backslashes need escaping in a path.
 json() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
 num() { [ -n "$1" ] && printf '%s' "$1" || printf null; }
 txt() { [ -n "$1" ] && json "$1" || printf null; }

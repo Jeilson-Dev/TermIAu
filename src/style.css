@@ -1,7 +1,7 @@
-/* Dracula — a mesma paleta do spec (https://draculatheme.com/spec) e os mesmos
-   nomes que o src/differ/styles.css usa. As duas metades do app são documentos
-   separados e não compartilham folha de estilo; compartilham o vocabulário, que
-   é o que faz a aba do diff e o terminal parecerem o mesmo programa. */
+/* Dracula — the same palette as the spec (https://draculatheme.com/spec) and the same
+   names src/differ/styles.css uses. The app's two halves are separate documents
+   and don't share a stylesheet; they share the vocabulary, which
+   is what makes the diff tab and the terminal look like the same program. */
 :root {
   color-scheme: dark;
 
@@ -22,21 +22,21 @@
   --red: #ff5555;
   --yellow: #f1fa8c;
 
-  /* O vão entre painéis: a largura do divisor no grid (escrita pelo
-     `aplicarFracao`, em src/main.ts) e a espessura da alça da gaveta. É ele que
-     afasta um painel do outro — com a tela dividida, o vão é fundo, não borda. */
+  /* The gap between panels: the divider's width in the grid (written by
+     `aplicarFracao`, in src/main.ts) and the thickness of the drawer's handle. It is what
+     keeps one panel away from another — with the screen split, the gap is background, not border. */
   --vao: 10px;
   --canto: 10px;
-  /* Quanto o painel sem o teclado apaga. Ele apaga por inteiro — fundo, texto e
-     sombra — e, como o que está atrás dele é o `--fosso`, apagar é recuar. */
+  /* How much the panel without the keyboard dims. It dims entirely — background, text and
+     shadow — and, since what is behind it is `--fosso`, dimming is receding. */
   --apagado: 0.42;
-  /* O fundo que aparece nos vãos e em volta dos cartões. Mais escuro que o
-     `--bg-darker`, que é o mais fundo da paleta: aqui não é superfície do app,
-     é o vazio entre as superfícies, e é o contraste com ele que dá o relevo. */
+  /* The background showing in the gaps and around the cards. Darker than
+     `--bg-darker`, the deepest in the palette: here it isn't an app surface,
+     it is the void between surfaces, and the contrast with it is what gives relief. */
   --fosso: #0c0d11;
-  /* O tempo das trocas de foco — painel, aba, anel roxo. Todas com a mesma
-     duração de propósito: é sempre a mesma coisa acontecendo, o foco indo de um
-     lugar pro outro, e durações diferentes fariam parecer efeitos soltos. */
+  /* The timing of focus changes — panel, tab, purple ring. All with the same
+     duration on purpose: it is always the same thing happening, focus going from one
+     place to another, and different durations would make them look like separate effects. */
   --tempo: 560ms;
 }
 
@@ -48,8 +48,8 @@ html, body {
 }
 
 body {
-  /* Coluna: a barra de abas ocupa o que precisa, o terminal fica com o resto.
-     Sem isto o #panes com height:100% empurraria a barra pra fora da janela. */
+  /* Column: the tab bar takes what it needs, the terminal takes the rest.
+     Without this #panes with height:100% would push the bar out of the window. */
   display: flex;
   flex-direction: column;
 }
@@ -60,14 +60,14 @@ body {
   position: relative;
 }
 
-/* Uma por aba; só a ativa fica visível. Escondemos com display:none — as
-   inativas ficam com dimensão zero e por isso são remedidas ao voltar.
+/* One per tab; only the active one is visible. We hide with display:none — the
+   inactive ones get zero size and so are re-measured when they come back.
 
-   Coluna: a árvore de painéis fica com o espaço, e a gaveta do app (quando há
-   uma e está aberta) com a fatia de baixo. O respiro em volta vale com um
-   painel ou com seis: o ⌘D não pode mexer o terminal de lugar — o que estava
-   escrito na linha de cima continuaria na linha de cima, mas deslocado, e é
-   isso que se vê como tremida. */
+   Column: the panel tree takes the space, and the app's drawer (when there is
+   one and it is open) the bottom share. The breathing room around it holds with one
+   panel or with six: ⌘D must not move the terminal — what was
+   written on the line above would stay on the line above, but shifted, and that
+   is what shows up as a jitter. */
 .aba {
   display: flex;
   flex-direction: column;
@@ -88,10 +88,10 @@ body {
   display: none;
 }
 
-/* Trocar de aba: a que entra aparece. É `animation` e não `transition` porque
-   ela vem do `display:none` — não há estado anterior de onde transicionar, e o
-   navegador reinicia a animação toda vez que ela volta a ser exibida. Só
-   opacidade: mexer em escala borraria o texto do terminal no meio do caminho. */
+/* Switching tabs: the incoming one fades in. It is `animation` and not `transition` because
+   it comes from `display:none` — there is no previous state to transition from, and the
+   browser restarts the animation every time it is shown again. Opacity
+   only: touching the scale would blur the terminal's text midway. */
 @keyframes termiau-aba-entra {
   from { opacity: 0.4; }
   to { opacity: 1; }
@@ -101,10 +101,10 @@ body {
   animation: termiau-aba-entra var(--tempo) ease-out;
 }
 
-/* O cartão. `overflow:hidden` é o que faz a barra do painel, em cima, e a
-   gaveta, embaixo, respeitarem o arredondamento — e a sombra o descola do
-   fundo. Vale para as folhas da árvore, dividida ou não; o terminal de dentro
-   de uma gaveta não entra, que ele já está dentro de um cartão. */
+/* The card. `overflow:hidden` is what makes the panel bar, on top, and the
+   drawer, below, respect the rounding — and the shadow lifts it off the
+   background. Applies to the tree's leaves, split or not; the terminal inside
+   a drawer is left out, since it is already inside a card. */
 .aba > .folha,
 .aba .divisao > .folha,
 .aba > .moldura {
@@ -116,11 +116,11 @@ body {
   --borda: var(--bg-lighter);
 }
 
-/* A borda do cartão, num pseudo-elemento e não num `box-shadow: inset`: o inset
-   fica por baixo dos filhos, e os filhos aqui são opacos — a barra do painel
-   comia o traço de cima e o xterm, que transborda o próprio box, o de baixo. O
-   ::after é o último filho, então passa por cima de todos e fecha os quatro
-   lados. `inherit` no raio o mantém colado no canto arredondado. */
+/* The card's border, in a pseudo-element and not a `box-shadow: inset`: the inset
+   sits below the children, and the children here are opaque — the panel bar
+   ate the top stroke and xterm, which overflows its own box, the bottom one. The
+   ::after is the last child, so it goes over all of them and closes all four
+   sides. `inherit` on the radius keeps it glued to the rounded corner. */
 .aba > .folha::after,
 .aba .divisao > .folha::after,
 .aba > .moldura::after {
@@ -129,26 +129,26 @@ body {
   inset: 0;
   border: 1px solid var(--borda);
   border-radius: inherit;
-  /* Ele cobre o terminal inteiro: sem isto, clicar e arrastar texto pararia
-     nele em vez de chegar ao xterm. */
+  /* It covers the whole terminal: without this, clicking and dragging text would stop
+     on it instead of reaching xterm. */
   pointer-events: none;
   transition: border-color var(--tempo) ease;
 }
 
-/* Fora do foco o painel apaga — mas só quando há outro painel de quem se
-   distinguir. Com um só ele está sempre em foco, e apagá-lo seria apagar a
-   janela inteira. */
+/* Out of focus the panel dims — but only when there is another panel to
+   tell it apart from. With a single one it is always focused, and dimming it would dim the
+   whole window. */
 .aba.dividida .divisao > .folha {
   opacity: var(--apagado);
-  /* A troca de foco é instantânea, mas a acesa não: o rastro diz de onde o
-     teclado saiu. */
+  /* The focus change is instant, but lighting up isn't: the trail says where the
+     keyboard came from. */
   transition: opacity var(--tempo) ease;
 }
 
-/* Um painel maximizado: só o caminho da raiz até ele fica na tela (quem marca
-   é o `marcarMaximizada`). Os cortes desse caminho viram flex, e o grid com as
-   frações de cada um fica guardado no `style` pra quando recolher. Os outros
-   painéis só saem de vista — continuam vivos, com o shell rodando. */
+/* A maximized panel: only the path from the root to it stays on screen
+   (`marcarMaximizada` marks it). That path's splits become flex, and the grid with
+   each one's fractions stays stored in `style` for when it restores. The other
+   panels just go out of view — they stay alive, with the shell running. */
 .aba.maximizada .divisao.caminho {
   display: flex;
   flex-direction: column;
@@ -162,32 +162,32 @@ body {
   flex: 1;
 }
 
-/* Sozinho na tela, não há de quem se distinguir: o apagado e o anel saem. */
+/* Alone on screen, there is nothing to tell it apart from: the dimming and the ring go away. */
 .aba.maximizada.dividida .divisao > .folha.caminho {
   opacity: 1;
   --borda: var(--bg-lighter);
   box-shadow: 0 1px 4px #000000a6;
 }
 
-/* Um corte: primeiro filho, divisor, segundo filho. Quem escreve os tracks é o
-   `aplicarFracao` em src/main.ts, porque a fatia muda ao arrastar o divisor.
-   Sem fundo de propósito, inclusive nos cortes aninhados: o que aparece nos vãos
-   é sempre o fundo da aba. */
+/* A split: first child, divider, second child. `aplicarFracao` in src/main.ts
+   writes the tracks, because the share changes when dragging the divider.
+   No background on purpose, including in nested splits: what shows in the gaps
+   is always the tab's background. */
 .divisao {
   display: grid;
   height: 100%;
   background: transparent;
 }
 
-/* Itens de grid não encolhem além do conteúdo por padrão, e o conteúdo aqui é
-   um terminal: sem isto um painel espremido empurraria o vizinho pra fora. */
+/* Grid items don't shrink below their content by default, and the content here is
+   a terminal: without this a squeezed panel would push its neighbor out. */
 .divisao > * {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
-/* O painel em si: barra em cima, terminal no meio, gaveta embaixo. */
+/* The panel itself: bar on top, terminal in the middle, drawer below. */
 .folha {
   display: flex;
   flex-direction: column;
@@ -195,9 +195,9 @@ body {
   box-sizing: border-box;
 }
 
-/* O terminal dentro do painel: entre a barra, em cima, e a gaveta, embaixo.
-   Dentro dele, a `.folha-tela` (o terminal e o chat) e, quando o visor está
-   dividido, a alça e o visor ao lado dela. */
+/* The terminal inside the panel: between the bar, on top, and the drawer, below.
+   Inside it, `.folha-tela` (the terminal and the chat) and, when the viewer is
+   split, the handle and the viewer beside it. */
 .folha-termo {
   flex: 1;
   min-height: 0;
@@ -212,20 +212,20 @@ body {
   position: relative;
 }
 
-/* O respiro vai no `.xterm`, e NÃO na `.folha-tela`: o FitAddon mede a altura
-   do pai e desconta só o padding do próprio `.xterm`. Com o padding no pai (e
-   `border-box`), os 10px de cima+baixo entravam na conta como se fossem espaço
-   livre — sempre que a sobra da divisão pela altura da célula dava menos de
-   10px, ganhava-se uma linha a mais do que cabia, e a última saía cortada. */
+/* The breathing room goes on `.xterm`, NOT on `.folha-tela`: FitAddon measures the
+   parent's height and only discounts `.xterm`'s own padding. With the padding on the parent (and
+   `border-box`), the 10px top+bottom counted as free
+   space — whenever the remainder of dividing by the cell height was less than
+   10px, we got one more line than fit, and the last one came out clipped. */
 .folha-tela > .xterm {
   height: 100%;
   padding: 6px 4px 4px 8px;
   box-sizing: border-box;
 }
 
-/* Transparente de propósito: o que se vê no vão é o fundo da aba. Pintá-lo
-   devolveria a barra que separava os painéis antes de eles virarem cartões —
-   ele continua sendo só a área que se arrasta. */
+/* Transparent on purpose: what shows in the gap is the tab's background. Painting it
+   would bring back the bar that separated the panels before they became cards —
+   it is still just the draggable area. */
 .divisor {
   background: transparent;
 }
@@ -238,34 +238,34 @@ body {
   cursor: row-resize;
 }
 
-/* Qual painel tem o teclado. Só aparece quando há mais de um: com um só, o
-   contorno seria uma moldura permanente em volta da janela inteira. */
+/* Which panel has the keyboard. Only shows when there is more than one: with one, the
+   outline would be a permanent frame around the whole window. */
 .folha.com-gaveta.focada > .folha-termo,
 .gaveta > .folha.focada {
   box-shadow: inset 0 0 0 1px var(--selection);
 }
 
-/* O cartão em foco: aceso por inteiro, o anel `inset` acompanhando o canto
-   arredondado e a sombra mais funda o levantando sobre os vizinhos. Só com a
-   tela dividida — com um painel só o anel seria uma moldura permanente, e não
-   há de quem distinguir. */
+/* The focused card: fully lit, the `inset` ring following the rounded
+   corner and the deeper shadow lifting it above its neighbors. Only with the
+   screen split — with a single panel the ring would be a permanent frame, and there is
+   nothing to tell it apart from. */
 .aba.dividida .divisao > .folha.focada {
   opacity: 1;
   --borda: var(--comment);
   box-shadow: 0 6px 22px #000000bf;
 }
 
-/* Três estados falam mesmo sem o teclado: o painel que espera por você, o que
-   vai receber o arquivo sendo arrastado e o de contexto cheio. Apagá-los
-   engoliria o aviso. */
+/* Three states speak even without the keyboard: the panel waiting for you, the one
+   about to get the file being dragged and the one with full context. Dimming them
+   would swallow the notice. */
 .aba.dividida .divisao > .folha.esperando,
 .aba.dividida .divisao > .folha.recebendo,
 .aba.dividida .divisao > .folha.contexto-cheio {
   opacity: 1;
 }
 
-/* A gaveta: o terminal do app que o play do painel roda, embaixo do terminal
-   dele. A alça tem a espessura do divisor, e arrastá-la muda a altura. */
+/* The drawer: the terminal of the app the panel's play button runs, below its
+   terminal. The handle is as thick as the divider, and dragging it changes the height. */
 .gaveta {
   flex: none;
   display: flex;
@@ -290,24 +290,24 @@ body {
   min-height: 0;
 }
 
-/* Cursor: patinha no lugar do bloco.
-   Depende do renderer DOM do xterm — é o ativo porque não carregamos
-   os addons webgl/canvas. Se um dia carregar, o cursor volta a ser bloco.
+/* Cursor: a little paw instead of the block.
+   It depends on xterm's DOM renderer — the active one because we don't load
+   the webgl/canvas addons. If one day we do, the cursor goes back to a block.
 
-   São dois pseudo-elementos: o ::before tapa a célula e o ::after desenha a
-   patinha por cima. Um só não resolve — a caixa da patinha é mais larga que a
-   célula (veja o `inset` abaixo) e um fundo opaco nela vazaria para os vizinhos. */
+   There are two pseudo-elements: ::before covers the cell and ::after draws the
+   paw on top. One alone doesn't work — the paw's box is wider than the
+   cell (see the `inset` below) and an opaque background on it would leak onto the neighbors. */
 .xterm .xterm-cursor-block {
   position: relative;
   background-color: transparent !important;
   border-color: transparent !important;
-  /* O xterm pinta a letra sob o cursor com a cor do fundo (bloco invertido).
-     Devolvemos a cor do texto: é ela que reaparece quando a patinha pisca. */
+  /* xterm paints the letter under the cursor with the background color (inverted block).
+     We give back the text color: it is what reappears when the paw blinks. */
   color: var(--fg) !important;
 }
 
-/* Tapa a letra: a patinha tem vãos entre os dedinhos e o glifo aparecia neles.
-   A cor é a do fundo do terminal — a mesma do tema em src/main.ts. */
+/* Covers the letter: the paw has gaps between its toes and the glyph showed through them.
+   The color is the terminal's background — the same as the theme in src/main.ts. */
 .xterm .xterm-cursor-block::before {
   content: "";
   position: absolute;
@@ -315,58 +315,58 @@ body {
   background: var(--bg);
 }
 
-/* A patinha, por cima do ::before. Pseudo-elemento posicionado pinta acima do
-   texto do elemento, então ela cobre o glifo sem depender de z-index. */
+/* The paw, over ::before. A positioned pseudo-element paints above the
+   element's text, so it covers the glyph without depending on z-index. */
 .xterm .xterm-cursor-block::after {
   content: "";
   position: absolute;
-  /* A célula é estreita e alta. Alargando um pouco a caixa, o `contain`
-     deixa de ser limitado pela largura sem estourar a altura da linha. */
+  /* The cell is narrow and tall. Widening the box a little, `contain`
+     stops being limited by the width without overflowing the line height. */
   inset: 14% -22%;
   background: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Cg%20fill='%23ffb86c'%3E%3Cellipse%20cx='19'%20cy='47'%20rx='10'%20ry='13'%20transform='rotate%28-20%2019%2047%29'/%3E%3Cellipse%20cx='40'%20cy='29'%20rx='11'%20ry='14.5'%20transform='rotate%28-7%2040%2029%29'/%3E%3Cellipse%20cx='63'%20cy='29'%20rx='11'%20ry='14.5'%20transform='rotate%287%2063%2029%29'/%3E%3Cellipse%20cx='84'%20cy='47'%20rx='10'%20ry='13'%20transform='rotate%2820%2084%2047%29'/%3E%3Cellipse%20cx='51'%20cy='76'%20rx='25'%20ry='19.5'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat;
 }
 
-/* `step-end`: alterna entre visível e ausente, sem meio-termo translúcido. */
+/* `step-end`: toggles between visible and absent, with no translucent in-between. */
 @keyframes termiau-paw-blink {
   0%, 49% { opacity: 1; visibility: visible; }
   50%, 100% { opacity: 0; visibility: hidden; }
 }
 
-/* Os dois somem juntos — é o sumiço do tapa-letra que revela o glifo de volta.
-   Animações separadas, mesma duração e mesmo início: ficam em fase.
+/* Both vanish together — the letter cover vanishing is what reveals the glyph again.
+   Separate animations, same duration and same start: they stay in phase.
 
-   `.xterm-focus` é o xterm marcando qual terminal tem o teclado. Sem esse
-   degrau a patinha piscaria em todo painel aberto, e não só naquele em que se
-   está digitando — que é o que o piscar quer dizer. */
+   `.xterm-focus` is xterm marking which terminal has the keyboard. Without that
+   step the paw would blink in every open panel, not just the one where you
+   are typing — which is what the blinking means. */
 .xterm .xterm-focus .xterm-cursor-block.xterm-cursor-blink::before,
 .xterm .xterm-focus .xterm-cursor-block.xterm-cursor-blink::after {
   animation: termiau-paw-blink 1.2s step-end infinite;
 }
 
 
-/* ---------- barra de abas ---------- */
+/* ---------- tab bar ---------- */
 
 #tabs {
   display: flex;
   align-items: stretch;
-  /* O mesmo fundo dos vãos entre painéis: a barra deixa de ser uma superfície
-     com abas coladas nela e passa a ser o escuro onde os chips flutuam. O vão
-     entre eles é o mesmo `--vao` de lá, pela metade — são chips, não painéis. */
+  /* The same background as the gaps between panels: the bar stops being a surface
+     with tabs stuck to it and becomes the dark where the chips float. The gap
+     between them is the same `--vao` as there, halved — they are chips, not panels. */
   gap: calc(var(--vao) / 2);
-  /* Embaixo, nada: quem dá o vão entre os chips e o cartão é o `padding` da
-     aba, logo abaixo, que também é `--vao`. Somar os dois deixava o de baixo
-     três vezes o de cima. Nas laterais o mesmo `--vao` da aba, para os chips
-     começarem e terminarem na mesma coluna que o cartão. */
+  /* Below, nothing: the gap between the chips and the card comes from the tab's
+     `padding`, right below, which is also `--vao`. Adding both made the bottom one
+     three times the top. On the sides the same `--vao` as the tab, so the chips
+     start and end in the same column as the card. */
   padding: var(--vao) var(--vao) 0;
   box-sizing: border-box;
   background: var(--fosso);
-  /* A barra não pode encolher nem rolar junto: com muitas abas elas é que
-     espremem, como no Terminal.app. */
+  /* The bar must not shrink or scroll along: with many tabs they are what
+     squeeze, like in Terminal.app. */
   flex: none;
   overflow: hidden;
-  /* Nada na barra é texto pra ler duas vezes: é rótulo de botão. Herdado pelos
-     chips. O prefixo não é enfeite — é o que o WKWebView honra de verdade, e
-     sem ele arrastar uma aba ia pintando de azul o título das que passavam. */
+  /* Nothing on the bar is text to read twice: it is button labels. Inherited by the
+     chips. The prefix isn't decoration — it is what WKWebView really honors, and
+     without it dragging a tab painted blue the titles of the ones it passed. */
   user-select: none;
   -webkit-user-select: none;
 }
@@ -379,34 +379,34 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  /* min-width:0 libera o flex a espremer; o basis dá o tamanho "cheio" que
-     cada aba tenta ocupar enquanto sobra espaço. */
+  /* min-width:0 lets flex squeeze; the basis gives the "full" size
+     each tab tries to take while there is room. */
   flex: 1 1 180px;
   min-width: 0;
   max-width: 220px;
-  /* Linha de 18px, e não `line-height: 1`: com a linha do tamanho da fonte, um
-     emoji no título (o 🟢 de um prompt, por exemplo) é mais alto que ela e o
-     `overflow: hidden` do título cortava o topo e a base dele. */
+  /* An 18px line, not `line-height: 1`: with the line as tall as the font, an
+     emoji in the title (a prompt's 🟢, for example) is taller than it and the
+     title's `overflow: hidden` clipped its top and bottom. */
   padding: 7px 8px 7px 10px;
   font: 12px/18px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
   color: var(--comment);
   background: var(--bg-dark);
   border: none;
-  /* Um pouco menos que o canto do painel: o chip é menor, e o mesmo raio nele
-     pareceria mais redondo do que lá. */
+  /* A bit less than the panel's corner: the chip is smaller, and the same radius on it
+     would look rounder than there. */
   border-radius: calc(var(--canto) - 2px);
   cursor: default;
-  /* Âncora do anel roxo, que é um ::after. */
+  /* Anchor for the purple ring, which is an ::after. */
   position: relative;
-  /* As abas paradas ficam recuadas, como os painéis sem o teclado. */
+  /* Idle tabs stay receded, like panels without the keyboard. */
   opacity: 0.7;
   transition: opacity var(--tempo) ease, background-color var(--tempo) ease,
     color var(--tempo) ease;
 }
 
-/* O anel da aba de agora. Ele chega fechando sobre o chip — entra um pouco
-   maior e assenta — e sai desmanchando na mesma medida, que é o que dá a
-   sensação de o foco ter ido de uma aba pra outra e não de ter piscado. */
+/* The current tab's ring. It arrives closing over the chip — comes in a bit
+   larger and settles — and leaves coming apart by the same amount, which is what gives the
+   feeling of focus having moved from one tab to another rather than having blinked. */
 .tab::after {
   content: "";
   position: absolute;
@@ -415,7 +415,7 @@ body {
   border-radius: inherit;
   opacity: 0;
   transform: scale(1.06);
-  /* O anel cobre o chip inteiro, inclusive o X de fechar. */
+  /* The ring covers the whole chip, including the close X. */
   pointer-events: none;
   transition: opacity var(--tempo) ease, transform var(--tempo) cubic-bezier(0.2, 0.7, 0.3, 1),
     border-color var(--tempo) ease;
@@ -426,17 +426,17 @@ body {
   transform: none;
 }
 
-/* Aba armada: o primeiro clique no ✕ acendeu o anel de vermelho, e o segundo,
-   dentro de CONFIRMA_FECHAR (src/main.ts), fecha. O aviso é o anel e não o ✕
-   porque o que importa saber não é que o botão foi apertado, é QUAL aba vai
-   embora — o anel contorna a aba inteira e responde isso sozinho.
+/* Armed tab: the first click on ✕ lit the ring red, and the second,
+   within CONFIRMA_FECHAR (src/main.ts), closes it. The notice is the ring and not ✕
+   because what matters isn't that the button was pressed, it is WHICH tab is going
+   away — the ring outlines the whole tab and answers that on its own.
 
-   `transition: none` aqui e não no `.tab::after`: o anel do foco chega devagar
-   de propósito (--tempo, 560ms), mas isto é um aviso dentro de uma janela de
-   1s, e um aviso que leva meio segundo pra aparecer chega tarde. Então entra
-   seco. Sair é o contrário: tirada a classe, valem de novo os tempos lá de
-   cima, e o vermelho se desfaz no mesmo compasso do resto da barra — que é o
-   jeito de a aba dizer que não vai fechar mais. */
+   `transition: none` here and not on `.tab::after`: the focus ring arrives slowly
+   on purpose (--tempo, 560ms), but this is a notice within a 1s
+   window, and a notice that takes half a second to show arrives late. So it comes in
+   sharp. Leaving is the opposite: with the class removed, the timings above apply
+   again, and the red fades at the same pace as the rest of the bar — which is the
+   tab's way of saying it won't close anymore. */
 .tab.armada::after {
   border-color: var(--red);
   opacity: 1;
@@ -449,9 +449,9 @@ body {
   opacity: 1;
 }
 
-/* A aba de agora: acesa por inteiro e no tom do terminal. O anel roxo entrou no
-   lugar do traço que ficava em cima — num chip arredondado o traço vira um arco
-   torto. Quem o desenha é o ::after, logo acima. */
+/* The current tab: fully lit and in the terminal's tone. The purple ring took the
+   place of the stroke that sat on top — on a rounded chip the stroke becomes a crooked
+   arc. ::after, right above, draws it. */
 .tab.ativa {
   opacity: 1;
   color: var(--fg);
@@ -459,8 +459,8 @@ body {
 }
 
 .tab-titulo {
-  /* Do tamanho do texto: a branch vem colada nele, e o ✕ vai para a direita
-     pelo `margin-left: auto`. */
+  /* As wide as the text: the branch comes right after it, and ✕ goes to the right
+     through `margin-left: auto`. */
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -477,8 +477,8 @@ body {
   line-height: 15px;
   text-align: center;
   color: var(--comment);
-  /* Invisível até o mouse chegar na aba: um X em cada aba o tempo todo
-     compete com o título pela atenção. */
+  /* Invisible until the mouse reaches the tab: an X on every tab all the time
+     competes with the title for attention. */
   opacity: 0;
 }
 
@@ -492,16 +492,16 @@ body {
   color: var(--fg);
 }
 
-/* A aba presa: ícone só, largura fixa, encostada na esquerda. Ela está sempre
-   na barra — um chip do tamanho dos outros roubaria espaço do nome do que está
-   rodando, que é a informação que muda. */
+/* The pinned tab: icon only, fixed width, against the left. It is always
+   on the bar — a chip the size of the others would steal space from the name of what is
+   running, which is the information that changes. */
 .tab.presa {
   flex: none;
   width: 34px;
   justify-content: center;
   padding: 6px 0;
-  /* O traço que separava a fixture das abas de verdade não sobrevive ao canto
-     arredondado: quem separa agora é um vão maior que o dos outros chips. */
+  /* The stroke that separated the fixture from the real tabs doesn't survive the rounded
+     corner: what separates now is a gap larger than the other chips'. */
   margin-right: calc(var(--vao) / 2);
 }
 
@@ -509,18 +509,18 @@ body {
   display: block;
 }
 
-/* O "+": um chip do tamanho do ✕ das abas, encostado no fim da barra. `order`
-   o mantém lá sem depender da ordem no DOM — chip de aba nova entra sempre no
-   fim da barra, e sem isto ele empurraria o botão pra dentro da fila. */
+/* The "+": a chip the size of the tabs' ✕, against the end of the bar. `order`
+   keeps it there without depending on DOM order — a new tab's chip always comes in at the
+   end of the bar, and without this it would push the button into the row. */
 .tab-mais {
   order: 1;
   flex: none;
-  /* Um vão a mais que o dos chips entre si, como o da aba presa do outro lado:
-     ele não é mais uma aba na fila, é o que abre a próxima. */
+  /* One gap more than the chips' among themselves, like the pinned tab's on the other side:
+     it is no longer a tab in the row, it is what opens the next one. */
   margin-left: calc(var(--vao) / 2);
-  /* Flex, e não o centro que o <button> dá de graça: o de dentro do botão é
-     alinhamento de texto, pela linha de base. Aqui o que está dentro é desenho,
-     e desenho se centra pela caixa. */
+  /* Flex, not the centering <button> gives for free: the inside of the button is
+     text alignment, by the baseline. Here what is inside is a drawing,
+     and a drawing is centered by its box. */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -534,8 +534,8 @@ body {
   transition: background-color 120ms ease, color 120ms ease;
 }
 
-/* `block`: um <svg> é inline por padrão e ganharia o espaço de descida da
-   linha embaixo, empurrando o desenho pra cima. */
+/* `block`: an <svg> is inline by default and would get the line's descender
+   space below, pushing the drawing up. */
 .tab-mais svg {
   display: block;
 }
@@ -545,19 +545,19 @@ body {
   color: var(--fg);
 }
 
-/* A aba do diff com repositório aberto: roxa, a mesma cor que acende no botão de
-   diff do painel daquele projeto. Os dois acesos ao mesmo tempo são o que diz
-   que um está mostrando o outro. Vence o realce da aba ativa de propósito — a
-   ligação continua valendo com a aba na frente. */
+/* The diff tab with a repository open: purple, the same color that lights up on the
+   diff button of that project's panel. Both lit at the same time is what says
+   one is showing the other. It beats the active tab's highlight on purpose — the
+   link still holds with the tab in front. */
 .tab.presa.ligado {
   color: var(--purple);
   opacity: 1;
 }
 
-/* A aba do diff enquanto não há repositório aberto nela. Continua na barra —
-   ela é fixa, e sumir e voltar faria os outros chips dançarem — mas apagada e
-   sem reagir ao ponteiro, que é o que diz que clicar ali não leva a lugar
-   nenhum. O :hover precisa vir junto, senão o realce das abas a reacenderia. */
+/* The diff tab while no repository is open in it. It stays on the bar —
+   it is fixed, and vanishing and coming back would make the other chips dance — but dimmed and
+   not reacting to the pointer, which is what says clicking there leads
+   nowhere. :hover must come along, otherwise the tabs' highlight would relight it. */
 .tab.desabilitada,
 .tab.desabilitada:hover {
   opacity: 0.3;
@@ -565,17 +565,17 @@ body {
   cursor: default;
 }
 
-/* Apagada e na tela ao mesmo tempo: é o ⌘, — as preferências moram no differ e
-   abrem sem repositório nenhum. Some do caminho do olho menos que as outras
-   apagadas, senão a aba que está sendo vista pareceria não estar. */
+/* Dimmed and on screen at the same time: it is ⌘, — the preferences live in the differ and
+   open with no repository. It gets out of the eye's way less than the other
+   dimmed ones, otherwise the tab being viewed would seem not to be. */
 .tab.desabilitada.ativa {
   opacity: 0.55;
 }
 
-/* O differ, dentro da aba presa. Documento à parte de propósito: o CSS dele é
-   global (mexe em body, em button, na barra de rolagem) e os atalhos dele são
-   de uma tecla — nada disso alcança o terminal daqui. A moldura é quem corta o
-   canto: o `border-radius` do cartão não alcança o conteúdo de um iframe. */
+/* The differ, inside the pinned tab. A separate document on purpose: its CSS is
+   global (it touches body, button, the scrollbar) and its shortcuts are
+   single keys — none of that reaches the terminal from here. The frame is what clips the
+   corner: the card's `border-radius` doesn't reach an iframe's content. */
 .quadro {
   display: block;
   width: 100%;
@@ -583,9 +583,9 @@ body {
   border: 0;
 }
 
-/* A aba sendo arrastada passa por cima das outras, e a sombra a descola da
-   barra — sem isso, duas abas de cor parecida se atravessando viram uma mancha
-   e não dá pra ver qual está na mão. */
+/* The tab being dragged goes over the others, and the shadow lifts it off the
+   bar — without it, two tabs of similar color crossing become a blur
+   and you can't see which one is in hand. */
 .tab.arrastando {
   position: relative;
   z-index: 1;
@@ -595,11 +595,11 @@ body {
 }
 
 
-/* ---------- barra do painel ---------- */
+/* ---------- panel bar ---------- */
 
-/* Uma linha no topo de cada painel: o título dele e o que se faz com ele. A
-   tipografia é a das abas. Apagada nos painéis sem o teclado — com a tela
-   dividida, o título aceso diz de relance qual painel está em foco. */
+/* A line at the top of each panel: its title and what can be done with it. The
+   typography is the tabs'. Dimmed on panels without the keyboard — with the screen
+   split, the lit title says at a glance which panel is focused. */
 .painel-barra {
   flex: none;
   display: flex;
@@ -617,8 +617,8 @@ body {
 }
 
 .tarefa-titulo {
-  /* Do tamanho do texto, e não esticado: a branch vem colada logo depois dele.
-     Quem empurra os controles para a direita é o `margin-left: auto` deles. */
+  /* As wide as the text, not stretched: the branch comes right after it.
+     The controls' `margin-left: auto` is what pushes them to the right. */
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -631,8 +631,8 @@ body {
   color: var(--fg);
 }
 
-/* A branch, entre colchetes, depois do título — na barra do painel e no chip
-   da aba. Não encolhe: quem cede espaço é o título, que tem reticências. */
+/* The branch, in brackets, after the title — on the panel bar and on the tab
+   chip. It doesn't shrink: the title is what gives up space, with an ellipsis. */
 .ramo {
   flex: none;
   display: inline-flex;
@@ -644,8 +644,8 @@ body {
   display: none;
 }
 
-/* O contexto da sessão do Claude, depois da branch: uma pílula só, com a
-   barra enchendo por dentro e o número por cima. É um botão — o clique manda o
+/* The Claude session's context, after the branch: a single pill, with the
+   bar filling inside and the number on top. It is a button — the click sends
    /compact. */
 .tarefa-btn.tarefa-contexto {
   --cor: var(--purple);
@@ -657,8 +657,8 @@ body {
   margin-left: 8px;
   padding: 0 10px;
   overflow: hidden;
-  /* A proporção do chip das abas (8px em 32px de altura): um raio do tamanho
-     da metade da altura fazia uma pílula redonda que não combinava com elas. */
+  /* The tab chip's proportion (8px in 32px of height): a radius of
+     half the height made a round pill that didn't match them. */
   border-radius: 4px;
   background: var(--bg-lighter);
   font-size: 10px;
@@ -691,12 +691,12 @@ body {
   box-shadow: inset 0 0 0 1px var(--cor);
 }
 
-/* Amarelo a partir de 60% usado, vermelho a partir de 75%: a hora de compactar. */
+/* Yellow from 60% used, red from 75%: time to compact. */
 .tarefa-contexto[data-nivel="atencao"] { --cor: var(--yellow); }
 .tarefa-contexto[data-nivel="perigo"] { --cor: var(--red); }
 
-/* O modelo e o esforço, logo depois do contexto: a mesma caixa, sem a barra
-   enchendo. O clique abre a lista para trocar. */
+/* Model and effort, right after the context: the same box, without the bar
+   filling. The click opens the list to change them. */
 .tarefa-btn.tarefa-claude-opcao {
   flex: none;
   height: 16px;
@@ -725,13 +725,13 @@ body {
   opacity: 0.8;
 }
 
-/* O chip já dá 6px de vão; um espaço de texto basta entre título e branch. */
+/* The chip already gives a 6px gap; a text space is enough between title and branch. */
 .tab-ramo {
   margin-left: -3px;
 }
 
-/* O teto é o tamanho de "branch-longa": o que passa disso passeia lá dentro,
-   do mesmo jeito que o nome da estação no rodapé. */
+/* The cap is the width of "branch-longa": whatever exceeds it scrolls inside,
+   the same way as the station's name in the footer. */
 .ramo-caixa {
   display: inline-block;
   max-width: 12ch;
@@ -802,11 +802,11 @@ body {
   display: block;
 }
 
-/* Play e escolha eram um botão só, partido, como no VS Code. Não são mais: a
-   caixa costurada lia como uma lista, e o nome da configuração — o alvo maior
-   dela — rodava o app em vez de abrir a escolha. Agora são dois botões soltos,
-   iguais aos outros da barra: o ▶ roda, o nome com a seta escolhe. O grupo
-   sobrou como a unidade que some junto onde não há launch.json. */
+/* Play and pick used to be a single split button, like in VS Code. Not anymore: the
+   stitched box read as a list, and the configuration's name — its biggest
+   target — ran the app instead of opening the choice. Now they are two separate buttons,
+   like the others on the bar: ▶ runs, the name with the arrow picks. The group
+   remained as the unit that goes away together where there is no launch.json. */
 .tarefa-play-grupo {
   display: flex;
   gap: 4px;
@@ -833,9 +833,9 @@ body {
   color: var(--comment);
 }
 
-/* Uma configuração só: não há o que escolher, mas o nome ainda diz o que o ▶
-   roda. O botão fica e vira rótulo — sem seta, sem hover e sem o apagado dos
-   botões desligados, que aqui esconderia justamente a informação. */
+/* A single configuration: there is nothing to pick, but the name still says what ▶
+   runs. The button stays and becomes a label — no arrow, no hover and none of the dimming of
+   disabled buttons, which here would hide precisely the information. */
 .tarefa-escolher.rotulo {
   cursor: default;
 }
@@ -862,8 +862,8 @@ body {
   color: var(--yellow);
 }
 
-/* O botão de diff do painel cujo repositório está aberto na aba do diff. Roxo é
-   a cor que a barra de cima já usa para "é aqui que você está". */
+/* The diff button of the panel whose repository is open in the diff tab. Purple is
+   the color the top bar already uses for "this is where you are". */
 .tarefa-diff.ligado {
   color: var(--purple);
 }
@@ -873,13 +873,13 @@ body {
   background: var(--bg-lighter);
 }
 
-/* Uma lista só para a janela, posta junto do botão que a abriu (quem escreve
-   top e right é o `alternarMenu`): dentro do painel, a borda dele a cortaria. */
+/* A single list for the window, placed beside the button that opened it
+   (`alternarMenu` writes top and right): inside the panel, its edge would clip it. */
 .tarefa-menu {
   position: fixed;
   z-index: 20;
-  /* Solta no body, a lista não herda a fonte da barra: sem isto os itens saíam
-     na fonte padrão da página. */
+  /* Loose in body, the list doesn't inherit the bar's font: without this the items came out
+     in the page's default font. */
   font: 12px/1.2 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
   user-select: none;
   -webkit-user-select: none;
@@ -891,13 +891,13 @@ body {
   border-radius: 6px;
   box-shadow: 0 6px 20px #0009;
   overflow-y: auto;
-  /* O max-height que o alternarMenu escreve é a altura da caixa inteira na
-     tela. Sem isto ele valeria só para o conteúdo, e o padding e a borda
-     empurravam o fim da lista 10px além do limite calculado. */
+  /* The max-height alternarMenu writes is the height of the whole box on
+     screen. Without this it would apply only to the content, and the padding and border
+     pushed the end of the list 10px past the computed limit. */
   box-sizing: border-box;
 }
 
-/* "──── DEV ────" do launch.json: título do grupo, não se clica. */
+/* launch.json's "──── DEV ────": a group title, not clickable. */
 .tarefa-menu-grupo {
   padding: 8px 10px 3px;
   color: var(--comment);
@@ -941,10 +941,10 @@ body {
 }
 
 
-/* ---------- sinais das sessões do Claude ---------- */
+/* ---------- Claude session signals ---------- */
 
-/* Bolinha antes do título da aba. Sem sessão fica transparente, mas ocupa o
-   mesmo espaço: o título não dança quando o Claude começa ou termina. */
+/* A dot before the tab's title. With no session it is transparent, but takes the
+   same space: the title doesn't dance when Claude starts or finishes. */
 .tab-sinal {
   flex: none;
   width: 6px;
@@ -953,12 +953,12 @@ body {
   background: transparent;
 }
 
-/* Trabalhando: presente, sem chamar. É informação de canto de olho. */
+/* Working: present, without calling attention. It is corner-of-the-eye information. */
 .tab[data-claude="trabalhando"] .tab-sinal {
   background: var(--comment);
 }
 
-/* Esperando por você: a cor da patinha, piscando. */
+/* Waiting for you: the paw's color, blinking. */
 .tab[data-claude="esperando"] .tab-sinal {
   background: var(--orange);
   animation: termiau-pulso 1.1s ease-in-out infinite;
@@ -969,12 +969,12 @@ body {
   50% { opacity: 0.2; }
 }
 
-/* A aba de trás que espera por você: a bolinha sozinha some no canto do olho,
-   então o anel inteiro acende de laranja e pisca — o mesmo anel que fica roxo
-   na aba de agora e vermelho na armada. Só nas de trás: na da frente o painel
-   já contorna de laranja, e o roxo do foco é que diz onde se está. Armada
-   vence: o vermelho é um aviso de 1s e não pode ser engolido pelo piscar. A
-   aba também deixa de ficar recuada, senão o laranja sairia apagado. */
+/* A background tab waiting for you: the dot alone gets lost in the corner of the eye,
+   so the whole ring lights up orange and blinks — the same ring that is purple
+   on the current tab and red on the armed one. Only on background tabs: on the front one the panel
+   already has an orange outline, and the focus purple is what says where you are. Armed
+   wins: the red is a 1s notice and must not be swallowed by the blinking. The
+   tab also stops being receded, otherwise the orange would come out dimmed. */
 .tab[data-claude="esperando"]:not(.ativa) {
   opacity: 1;
   color: var(--fg-dim);
@@ -987,19 +987,19 @@ body {
   animation: termiau-pulso 1.1s ease-in-out infinite;
 }
 
-/* No painel, `outline` e não `box-shadow`: o box-shadow já é do painel em foco,
-   e os dois podem valer ao mesmo tempo — o painel que espera pode ser o focado. */
+/* On the panel, `outline` and not `box-shadow`: box-shadow already belongs to the focused panel,
+   and both may apply at the same time — the waiting panel may be the focused one. */
 .folha.esperando {
   outline: 1px solid var(--orange);
   outline-offset: -1px;
   animation: termiau-pulso 1.6s ease-in-out infinite;
 }
 
-/* O painel que vai receber o arquivo que está sendo arrastado. Vem depois do
-   `.esperando` de propósito: os dois são outline e podem valer ao mesmo tempo,
-   e durante o arrasto o destino importa mais do que o aviso. Mais grosso que o
-   contorno do foco porque é a única resposta que existe enquanto o ponteiro
-   está com o arquivo — o cursor do app nem aparece. */
+/* The panel about to get the file being dragged. It comes after
+   `.esperando` on purpose: both are outlines and may apply at the same time,
+   and during the drag the destination matters more than the notice. Thicker than the
+   focus outline because it is the only response there is while the pointer
+   holds the file — the app's cursor doesn't even show. */
 .folha.recebendo {
   outline: 2px solid var(--cyan);
   outline-offset: -2px;
@@ -1008,28 +1008,28 @@ body {
 }
 
 
-/* ---------- faixa da voz ---------- */
+/* ---------- voice strip ---------- */
 
 #voz {
   flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
-  /* Altura fixa, e a faixa nunca sai da coluna: o espaço é reservado mesmo
-     calada. Era o hidden que fazia os painéis se remedirem a cada ⌘E. */
+  /* Fixed height, and the strip never leaves the column: the space is reserved even
+     when quiet. `hidden` was what made the panels re-measure on every ⌘E. */
   height: 30px;
   padding: 0 10px;
   box-sizing: border-box;
   background: var(--bg-dark);
   border-top: 1px solid var(--bg-darker);
   font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
-  /* Apagado: o parcial é palpite, e ainda vai mudar enquanto você fala. */
+  /* Dimmed: the partial is a guess, and will still change while you speak. */
   color: var(--comment);
 }
 
-/* A onda é o único sinal de que o microfone está mesmo aberto — o parcial fica
-   parado enquanto você não fala, e parado não distingue ligado de travado.
-   Cada barrinha é um instante: chegam ~20 por segundo, as novas pela direita. */
+/* The wave is the only sign the microphone is really open — the partial stays
+   still while you don't speak, and still doesn't tell on from frozen.
+   Each little bar is an instant: ~20 arrive per second, new ones from the right. */
 .voz-onda {
   flex: none;
   display: flex;
@@ -1037,8 +1037,8 @@ body {
   gap: 1px;
   width: 65px;
   height: 14px;
-  /* Calada a faixa fica vazia, mas o lugar da onda continua ocupado: o texto
-     começa na mesma coluna com o microfone aberto ou fechado. */
+  /* Quiet, the strip is empty, but the wave's place stays taken: the text
+     starts in the same column with the microphone open or closed. */
   opacity: 0;
   transition: opacity 140ms linear;
 }
@@ -1052,7 +1052,7 @@ body {
   height: 100%;
   border-radius: 1px;
   background: var(--pink);
-  /* Espelhada no meio: scaleY cresce dos dois lados a partir do centro. */
+  /* Mirrored in the middle: scaleY grows both ways from the center. */
   transform: scaleY(0.06);
   transition: transform 80ms linear;
 }
@@ -1065,10 +1065,10 @@ body {
 }
 
 
-/* ---------- o uso do Claude no rodapé ---------- */
+/* ---------- Claude usage in the footer ---------- */
 
-/* No canto esquerdo da faixa, antes da onda da voz. O hover abre os detalhes
-   para a direita, por cima do parcial (que fica vazio quase sempre). */
+/* In the strip's left corner, before the voice wave. Hover opens the details
+   to the right, over the partial (which is almost always empty). */
 #uso {
   flex: none;
   display: flex;
@@ -1085,23 +1085,23 @@ body {
   display: none;
 }
 
-/* 1px acima do centro: a faixa tem a borda em cima, e o círculo centrado de
-   verdade parecia baixo. */
+/* 1px above center: the strip has its border on top, and a truly centered
+   circle looked low. */
 .uso-icone {
   display: inline-flex;
   transform: translateY(-1px);
 }
 
-/* O relógio é o tempo: no ciano das barras de tempo, e não acende com o
-   ritmo — quem acende são os tokens, ao lado. */
+/* The clock is time: in the cyan of the time bars, and it doesn't light up with
+   the pace — the tokens, beside it, are what light up. */
 .uso-icone .circulo {
   stroke: #3a9fb5;
   transition: stroke-dashoffset 900ms cubic-bezier(0.22, 0.61, 0.36, 1), stroke 300ms ease;
 }
 
-/* Os ponteiros: giram em volta do centro do círculo (8,8 no viewBox). O da
-   hora acompanha a ponta do trecho aceso; o do minuto dá uma volta no hover,
-   pelo `escoarUso` (src/main.ts), e para. */
+/* The hands: they rotate around the circle's center (8,8 in the viewBox). The
+   hour hand follows the tip of the lit segment; the minute hand makes a turn on hover,
+   through `escoarUso` (src/main.ts), and stops. */
 .uso-icone .ponteiros {
   color: var(--fg-dim);
 }
@@ -1116,14 +1116,14 @@ body {
   transition: transform 900ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-/* O brilho que corre pelo círculo, da ponta para o começo: ele escoando. */
+/* The shine running along the circle, from tip to start: it draining. */
 .uso-icone .circulo-brilho {
   stroke: color-mix(in srgb, #3a9fb5, white 50%);
   opacity: 0;
 }
 
-/* Os tokens disponíveis: uma barra em pé, que esvazia de cima para baixo, e
-   o número ao lado. */
+/* The available tokens: an upright bar, emptying from top to bottom, and
+   the number beside it. */
 .uso-resumo {
   display: flex;
   align-items: center;
@@ -1140,7 +1140,7 @@ body {
   height: 18px;
 }
 
-/* Em pé, o cheio sobe do fundo: a altura é a fração, e a largura é toda. */
+/* Upright, the fill rises from the bottom: the height is the fraction, and the width is full. */
 .uso-mini .uso-cheio {
   position: absolute;
   left: 0;
@@ -1160,15 +1160,15 @@ body {
   height: 6px;
 }
 
-/* A cor é a do ritmo: laranja é ir rápido demais, vermelho é acabar antes de
-   renovar. No ritmo, os tokens ficam no roxo da rádio. */
+/* The color is the pace's: orange is going too fast, red is running out before
+   renewing. On pace, the tokens stay in the radio's purple. */
 #uso[data-nivel="atencao"] .uso-mini .uso-cheio { --cor: var(--orange); }
 #uso[data-nivel="perigo"] .uso-mini .uso-cheio { --cor: var(--red); }
 #uso[data-nivel="atencao"] .uso-pct { color: var(--orange); }
 #uso[data-nivel="perigo"] .uso-pct { color: var(--red); font-weight: 600; }
 
-/* Duas colunas, sessão e semana, cada uma com duas linhas no meio da faixa de
-   30px. Fechadas não ocupam nada; o hover as abre para a direita. */
+/* Two columns, session and week, each with two lines in the middle of the 30px
+   strip. Closed, they take no space; hover opens them to the right. */
 .uso-detalhe {
   display: flex;
   align-items: center;
@@ -1216,8 +1216,8 @@ body {
   gap: 5px;
 }
 
-/* Os rótulos dizem o que a barra conta ("Tempo restante", "Tokens
-   disponíveis"): largura fixa para as barras das duas linhas alinharem. */
+/* The labels say what the bar counts ("Time left", "Tokens
+   available"): a fixed width so the bars on both lines align. */
 .uso-rotulo {
   width: 92px;
 }
@@ -1230,8 +1230,8 @@ body {
   overflow: hidden;
 }
 
-/* O tempo é ciano, o uso é roxo (ou a cor do ritmo). A cor vai em `--cor`
-   para a barrinha de dentro sair dela, só que mais clara. */
+/* Time is cyan, usage is purple (or the pace's color). The color goes in `--cor`
+   so the inner little bar comes out of it, only lighter. */
 .uso-cheio {
   --cor: var(--purple);
   display: block;
@@ -1243,10 +1243,10 @@ body {
   transition: width 900ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-/* Como o ponteiro que gira dentro do círculo: uma barrinha dentro da barra,
-   alguns tons mais clara que ela, que sai da ponta e anda até o começo
-   encolhendo — o sentido em que a barra diminui. Quem a anima é o
-   `escoarUso` (src/main.ts), junto com o brilho do círculo. */
+/* Like the hand rotating inside the circle: a little bar inside the bar,
+   a few shades lighter than it, that leaves the tip and travels to the start
+   shrinking — the direction in which the bar decreases. `escoarUso`
+   (src/main.ts) animates it, along with the circle's shine. */
 .uso-ponteiro {
   position: absolute;
   top: 0;
@@ -1258,7 +1258,7 @@ body {
   opacity: 0;
 }
 
-/* Um ciano mais fechado que o do tema: no claro a barrinha que anda sumia. */
+/* A deeper cyan than the theme's: in the light one the moving little bar vanished. */
 .uso-tempo .uso-cheio {
   --cor: #3a9fb5;
 }
@@ -1273,11 +1273,11 @@ body {
   color: var(--fg-dim);
 }
 
-/* ---------- a rádio do rodapé ---------- */
+/* ---------- the footer radio ---------- */
 
-/* Do outro lado da mesma faixa. O `margin-left: auto` é o que a encosta na
-   direita sem precisar que o `.voz-texto` tenha largura nenhuma: com o
-   microfone fechado o parcial é vazio, e a rádio fica no lugar de sempre. */
+/* On the other side of the same strip. `margin-left: auto` is what pushes it to the
+   right without `.voz-texto` needing any width: with the
+   microphone closed the partial is empty, and the radio stays in its usual place. */
 #lofi {
   flex: none;
   display: flex;
@@ -1307,20 +1307,20 @@ body {
   color: var(--fg);
 }
 
-/* Sem estação não há o que tocar, e com uma só não há para onde andar. */
+/* No station, nothing to play; with only one, nowhere to go. */
 .lofi-btn:disabled {
   opacity: 0.35;
   cursor: default;
 }
 
-/* Tocando, o ▶/⏸ acende: é o único jeito de saber, sem som, que a rádio está
-   no ar — as outras pistas (o título, o volume) ficam iguais paradas. */
+/* While playing, ▶/⏸ lights up: it is the only way to know, without sound, that the radio is
+   on air — the other clues (the title, the volume) look the same when stopped. */
 #lofi.tocando .lofi-tocar {
   color: var(--purple);
 }
 
-/* Enquanto o stream abre o primeiro segundo o botão não responde, e piscar
-   é o que diz que ele ouviu o clique. */
+/* While the stream opens the button doesn't respond for the first second, and blinking
+   is what says it heard the click. */
 #lofi.carregando .lofi-tocar {
   color: var(--purple);
   animation: lofi-pulso 1s ease-in-out infinite;
@@ -1330,22 +1330,22 @@ body {
   50% { opacity: 0.35; }
 }
 
-/* Fininho de propósito: é um controle secundário numa faixa de 30px, e um
-   slider de altura normal empurraria o resto para fora do alinhamento. */
-/* O volume é um botão como os outros, e o que muda nele é o anel de dentro: a
-   transição é do traço, para o degrau não aparecer como um salto.
+/* Thin on purpose: it is a secondary control on a 30px strip, and a
+   normal-height slider would push the rest out of alignment. */
+/* The volume is a button like the others, and what changes on it is the inner ring: the
+   transition is on the stroke, so the step doesn't show as a jump.
 
-   O traço aceso vai no mesmo roxo do ▶ — é a pista de que ali há nível, e duas
-   cores para duas coisas que dizem "ligado" fariam procurar a diferença. O
-   fundo do anel e o corte do mudo ficam na cor da faixa: mudo é a ausência do
-   roxo, e o botão inteiro apaga junto. */
+   The lit stroke is the same purple as ▶ — it is the clue that there is a level there, and two
+   colors for two things that say "on" would make you look for the difference. The
+   ring's background and the mute slash stay in the strip's color: mute is the absence of
+   purple, and the whole button dims along. */
 .lofi-volume .anel {
   stroke: var(--purple);
   transition: stroke-dashoffset 140ms ease-out;
 }
 
-/* O analisador de espectro. Dez colunas de 3px com 1px de vão: 39px no canto
-   apertado da faixa, que ele divide com o nome da estação. */
+/* The spectrum analyzer. Ten 3px columns with a 1px gap: 39px in the strip's
+   tight corner, which it shares with the station's name. */
 .spec {
   flex: none;
   display: flex;
@@ -1367,15 +1367,15 @@ body {
   height: 100%;
 }
 
-/* A barra e o pico crescem do chão da coluna. A cor é da COLUNA e não da barra:
-   o degradê é medido nos 14px inteiros e fica preso embaixo (`background-size`
-   + `bottom`), então o vermelho só aparece quando a barra chega mesmo lá em
-   cima — se ele acompanhasse a altura da barra, qualquer barrinha de um
-   segmento já nasceria vermelha no topo dela.
+/* The bar and the peak grow from the column's floor. The color belongs to the COLUMN, not the bar:
+   the gradient is measured over the full 14px and stays pinned at the bottom (`background-size`
+   + `bottom`), so red only shows when the bar really reaches the
+   top — if it followed the bar's height, any one-segment little
+   bar would be born red at its top.
 
-   A máscara é o que a recorta em LEDs em vez de barra lisa. Ela também corre
-   `to top`, do chão: fosse `to bottom`, os segmentos começariam no topo de cada
-   barra e as dez colunas ficariam desalinhadas entre si. */
+   The mask is what cuts it into LEDs instead of a smooth bar. It also runs
+   `to top`, from the floor: were it `to bottom`, the segments would start at the top of each
+   bar and the ten columns would be misaligned with each other. */
 .spec-nivel,
 .spec-pico {
   position: absolute;
@@ -1390,10 +1390,10 @@ body {
   mask-image: repeating-linear-gradient(to top, #000 0 2px, transparent 2px 3px);
 }
 
-/* O pico é um segmento solto, e por isso não usa a máscara: ele JÁ é do tamanho
-   de um LED, e com ela cairia no vão entre dois e sumiria metade das vezes.
-   Cor chapada, e não o degradê: flutuando a alturas diferentes, o degradê seria
-   medido a partir do PRÓPRIO pico, e ele sairia roxo em qualquer altura. */
+/* The peak is a loose segment, and so it doesn't use the mask: it ALREADY is the size
+   of an LED, and with the mask it would fall into the gap between two and vanish half the time.
+   Flat color, not the gradient: floating at different heights, the gradient would be
+   measured from the peak ITSELF, and it would come out purple at any height. */
 .spec-pico {
   height: 2px;
   background-image: none;
@@ -1403,31 +1403,31 @@ body {
   opacity: 0.9;
 }
 
-/* O nome da estação, e a faixa do momento atrás dele. Largura FIXA, e não um
-   teto: a faixa troca sozinha a cada música, e com um teto a caixa encolhia e
-   crescia junto com o texto — os botões e o volume, que vêm antes dela na
-   mesma linha, pulavam de um lado para o outro a cada troca de música. Fixa,
-   nada anda: o que não cabe passeia lá dentro. */
+/* The station's name, and the current track behind it. A FIXED width, not a
+   cap: the track changes on its own with every song, and with a cap the box shrank and
+   grew along with the text — the buttons and the volume, which come before it on the
+   same line, jumped from side to side on every song change. Fixed,
+   nothing moves: whatever doesn't fit scrolls inside. */
 .lofi-titulo {
   flex: none;
   width: 100px;
   overflow: hidden;
 }
 
-/* O que passeia. `inline-block` para ter largura própria: é a diferença entre
-   ela e a da caixa que diz o quanto há para andar, e um `span` comum mediria
-   sempre a largura da caixa. A transição é montada e desmontada pelo JS, que é
-   quem sabe a distância — e distância depende do texto. */
+/* What scrolls. `inline-block` to have its own width: the difference between
+   it and the box's is what says how far there is to go, and a plain `span` would always measure
+   the box's width. The transition is set up and torn down by JS, which
+   knows the distance — and the distance depends on the text. */
 .lofi-titulo-texto {
   display: inline-block;
   white-space: nowrap;
   will-change: transform;
 }
 
-/* ---------- o editor de estações (Rádio ▸ Estações…) ---------- */
+/* ---------- the station editor (Radio ▸ Stations…) ---------- */
 
-/* A regra do `hidden` vem junto: o `display: flex` aqui embaixo venceria o
-   `display: none` que o atributo traz de fábrica, e a caixa nunca sumiria. */
+/* The `hidden` rule comes along: the `display: flex` down here would beat the
+   `display: none` the attribute brings by default, and the box would never vanish. */
 .lofi-editor {
   position: fixed;
   inset: 0;
@@ -1469,11 +1469,11 @@ body {
   font-weight: 600;
 }
 
-/* A lista das quarenta e seis. `flex-basis: auto` — e NÃO `flex: 1 1 0` — porque
-   a caixa se dimensiona pelo conteúdo: com base zero a lista nasce com altura
-   zero, o conteúdo fica lá dentro rolável e invisível, e a caixa aparece vazia.
-   Com `auto` ela pede a altura do conteúdo, o `max-height` corta, e o resto
-   rola. */
+/* The list of forty-six. `flex-basis: auto` — and NOT `flex: 1 1 0` — because
+   the box sizes itself by its content: with a zero basis the list is born with zero
+   height, the content stays inside scrollable and invisible, and the box shows up empty.
+   With `auto` it asks for the content's height, `max-height` cuts it, and the rest
+   scrolls. */
 .lofi-lista {
   display: flex;
   flex-direction: column;
@@ -1484,17 +1484,17 @@ body {
   max-height: 60vh;
 }
 
-/* O gênero, atrás do nome da estação. Serve para escolher entre duzentos e
-   cinquenta nomes que não dizem o que tocam — "Moss Garden" e "Limbik
-   Frequencies" não se explicam. */
+/* The genre, behind the station's name. It helps choose among two hundred and
+   fifty names that don't say what they play — "Moss Garden" and "Limbik
+   Frequencies" don't explain themselves. */
 .lofi-genero {
   margin-left: 8px;
   color: var(--comment);
   font-size: 11px;
 }
 
-/* A marca das que tocam sem mostrador. No canto, pequena e apagada: é uma
-   diferença pequena, e quem está escolhendo rádio está escolhendo som. */
+/* The mark for the ones that play without a display. In the corner, small and dimmed: it is a
+   small difference, and whoever is choosing a radio is choosing sound. */
 .lofi-sem-spec {
   flex: none;
   padding-right: 9px;
@@ -1515,8 +1515,8 @@ body {
   background: var(--bg-lighter);
 }
 
-/* A que está no ar fica no mesmo roxo do ▶ lá embaixo: é a mesma informação, e
-   duas cores para ela fariam procurar a diferença. */
+/* The one on air gets the same purple as ▶ down below: it is the same information, and
+   two colors for it would make you look for the difference. */
 .lofi-linha.atual .lofi-nome {
   color: var(--purple);
 }
@@ -1537,8 +1537,8 @@ body {
 }
 
 
-/* A barra de rolagem do terminal. Escopada no xterm: sem o escopo ela pegaria
-   a página inteira, e a aba do diff já tem a dela. */
+/* The terminal's scrollbar. Scoped to xterm: without the scope it would catch
+   the whole page, and the diff tab already has its own. */
 .xterm .xterm-viewport::-webkit-scrollbar {
   width: 10px;
 }
@@ -1558,11 +1558,11 @@ body {
   background: transparent;
 }
 
-/* ---------- a lista de atalhos (Ajuda ▸ Atalhos do Teclado) ---------- */
+/* ---------- the shortcut list (Help ▸ Keyboard Shortcuts) ---------- */
 
-/* A casca é a do seletor de estações (.lofi-editor, .lofi-caixa); aqui só o
-   que é da lista. Duas colunas de grupos quando a janela deixa: são seis
-   grupos curtos, e uma coluna só rolaria à toa. */
+/* The shell is the station picker's (.lofi-editor, .lofi-caixa); here only
+   what belongs to the list. Two columns of groups when the window allows: there are six
+   short groups, and a single column would scroll for nothing. */
 .ajuda-caixa {
   width: 640px;
 }
@@ -1571,8 +1571,8 @@ body {
   flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
-  /* A barra de rolagem do macOS flutua por cima do conteúdo em vez de tomar
-     espaço dele: sem esta folga ela cobria as teclas da coluna da direita. */
+  /* The macOS scrollbar floats over the content instead of taking
+     space from it: without this slack it covered the keys in the right column. */
   padding-right: 14px;
   columns: 2 260px;
   column-gap: 24px;
@@ -1620,7 +1620,7 @@ body {
   white-space: nowrap;
 }
 
-/* A caixa de pergunta (o ⌘Q, os hooks). Estreita: é uma frase e dois botões. */
+/* The dialog (⌘Q, the hooks). Narrow: it is one sentence and two buttons. */
 .pergunta-caixa {
   width: 400px;
   gap: 10px;
@@ -1662,7 +1662,7 @@ body {
   font-weight: 600;
 }
 
-/* O anel diz qual dos dois o espaço e o ↩ vão apertar. */
+/* The ring says which of the two space and ↩ will press. */
 .pergunta-btn:focus {
   outline: 2px solid var(--fg);
   outline-offset: 2px;
@@ -1673,12 +1673,12 @@ body {
 }
 
 
-/* ---------- os seus prompts, destacados no terminal ---------- */
+/* ---------- your prompts, highlighted in the terminal ---------- */
 
-/* A decoração que o xterm põe sobre cada linha que você mandou pro Claude. Fica
-   por cima do texto, então é um véu ralo e uma barra na margem — o bastante
-   para o olho achar as suas linhas na rolagem sem apagar o que está escrito. O
-   clique atravessa: selecionar o texto de baixo continua funcionando. */
+/* The decoration xterm puts over each line you sent to Claude. It sits
+   over the text, so it is a thin veil and a bar in the margin — enough
+   for the eye to find your lines in the scrollback without hiding what is written. The
+   click goes through: selecting the text below still works. */
 .xterm .xterm-decoration.prompt-marca {
   box-sizing: border-box;
   border-left: 2px solid var(--pink);
@@ -1689,8 +1689,8 @@ body {
 
 /* ---------- modo chat ---------- */
 
-/* O chat cobre o terminal sem tirá-lo do lugar: o xterm continua medindo a
-   mesma área por baixo. */
+/* The chat covers the terminal without moving it: xterm keeps measuring the
+   same area underneath. */
 .folha-termo {
   position: relative;
 }
@@ -1704,13 +1704,13 @@ body {
   background: var(--bg);
   font: 13px/1.55 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
   color: var(--fg);
-  /* O que muda aqui dentro não refaz o layout do resto do app, e vice-versa. */
+  /* What changes in here doesn't redo the rest of the app's layout, and vice versa. */
   contain: strict;
 }
 
-/* Fora da área visível a fala não é desenhada nem medida: mudar a largura do
-   painel (dividir, maximizar) custa o que está na tela, e não a conversa toda.
-   O tamanho de reserva é um palpite até ela aparecer uma vez. */
+/* Outside the visible area a turn is neither drawn nor measured: changing the panel's
+   width (split, maximize) costs what is on screen, not the whole conversation.
+   The reserved size is a guess until it shows up once. */
 .chat-fala,
 .chat-ferramenta {
   flex: none;
@@ -1766,7 +1766,7 @@ body {
   overflow-wrap: anywhere;
 }
 
-/* O seu balão: à direita e de outra cor, que é o que o terminal não dá. */
+/* Your bubble: on the right and in another color, which is what the terminal doesn't give. */
 .chat-voce {
   align-self: flex-end;
   max-width: min(82%, 720px);
@@ -1783,8 +1783,8 @@ body {
   gap: 8px;
 }
 
-/* Um texto longo (um log colado) nasce recolhido em poucas linhas, com um
-   esmaecido embaixo dizendo que tem mais. */
+/* A long text (a pasted log) is born collapsed to a few lines, with a
+   fade below saying there is more. */
 .chat-recolhivel.recolhida .chat-recolhivel-corpo {
   max-height: 8lh;
   overflow: hidden;
@@ -1811,8 +1811,8 @@ body {
   color: var(--fg);
 }
 
-/* Aberto, o "Recolher" flutua no rodapé da lista enquanto o texto passa por
-   ela: dá para fechar no meio, sem rolar até o fim. */
+/* Open, "Collapse" floats at the bottom of the list while the text passes through
+   it: you can close it midway, without scrolling to the end. */
 .chat-recolhivel:not(.recolhida) > .chat-recolhivel-botao {
   position: sticky;
   bottom: 8px;
@@ -1825,8 +1825,8 @@ body {
   background: var(--bg-light);
 }
 
-/* O que você colou: numa caixa à parte, em fonte de terminal, que é o que
-   costuma ser (um log, uma saída de comando). */
+/* What you pasted: in a separate box, in a terminal font, which is what it
+   usually is (a log, a command's output). */
 .chat-colado {
   padding: 6px 10px 8px;
   border-radius: 8px;
@@ -1950,8 +1950,8 @@ body {
   background: var(--bg-dark);
 }
 
-/* O que o Claude fez entre uma fala e outra: uma linha apagada por ferramenta,
-   que cabe de relance e não disputa com a conversa. */
+/* What Claude did between one turn and another: one dimmed line per tool,
+   which fits at a glance and doesn't compete with the conversation. */
 .chat-ferramenta {
   display: flex;
   gap: 1ch;
@@ -1967,8 +1967,8 @@ body {
   text-overflow: ellipsis;
 }
 
-/* O diff logo abaixo da ferramenta que o fez. Num painel largo ele não
-   atravessa a tela: fica do tamanho de um trecho de código. */
+/* The diff right below the tool that made it. In a wide panel it doesn't
+   cross the screen: it stays the size of a code snippet. */
 .chat-diffs {
   flex: none;
   display: flex;
@@ -1980,7 +1980,7 @@ body {
   contain-intrinsic-size: auto 120px;
 }
 
-/* Lado a lado são duas colunas de código: os 1000px do unificado as espremiam. */
+/* Side by side is two columns of code: the unified one's 1000px squeezed them. */
 .chat-diffs:has(.lado-a-lado) {
   width: 90%;
 }
@@ -1989,8 +1989,8 @@ body {
   padding-bottom: 4px;
   border-radius: 6px;
   background: var(--bg-dark);
-  /* clip, não hidden: hidden faria da caixa um contêiner de rolagem e o
-     "Recolher" flutuante (sticky) grudaria nela em vez de na lista. */
+  /* clip, not hidden: hidden would make the box a scroll container and the
+     floating (sticky) "Collapse" would stick to it instead of the list. */
   overflow: clip;
 }
 
@@ -2015,7 +2015,7 @@ body {
   color: var(--fg);
 }
 
-/* As cores do diff do terminal, mais apagadas: é para ler, não para gritar. */
+/* The terminal diff's colors, more muted: it is for reading, not shouting. */
 .chat-diff-linha.menos {
   background: color-mix(in srgb, var(--red) 22%, transparent);
 }
@@ -2040,7 +2040,7 @@ body {
   color: var(--comment);
 }
 
-/* O Claude parou para perguntar algo, e a pergunta está no terminal. */
+/* Claude stopped to ask something, and the question is in the terminal. */
 .chat-aviso {
   flex: none;
   display: flex;
@@ -2076,8 +2076,8 @@ body {
   cursor: pointer;
 }
 
-/* Permitir é a ação: cheia, na cor do aviso. Negar e ir ao terminal ficam
-   só no contorno. */
+/* Allow is the action: filled, in the notice's color. Deny and going to the terminal stay
+   outlined only. */
 .chat-aviso-nao,
 .chat-aviso-sim:not([hidden]) ~ .chat-aviso-ver {
   background: transparent;
@@ -2111,13 +2111,13 @@ body {
   cursor: zoom-in;
 }
 
-/* A sua mensagem já na tela, antes de o Claude a gravar. */
+/* Your message already on screen, before Claude stores it. */
 .chat-voce.pendente {
   opacity: 0.55;
 }
 
-/* O Claude está no turno dele: a linha que faz as vezes do asterisco girando
-   do terminal. */
+/* Claude is on its turn: the line that stands in for the terminal's spinning
+   asterisk. */
 .chat-pensando {
   flex: none;
   margin: 0 16px 6px;
@@ -2136,9 +2136,9 @@ body {
   }
 }
 
-/* A pergunta do Claude, respondida daqui: no lugar da faixa de aviso, com a
-   mesma cor dela. Várias perguntas rolam dentro do cartão, sem empurrar o
-   campo para fora da tela. */
+/* Claude's question, answered from here: in place of the notice strip, with the
+   same color. Several questions scroll inside the card, without pushing the
+   field off the screen. */
 .chat-pergunta {
   flex: none;
   display: flex;
@@ -2160,7 +2160,7 @@ body {
   display: none;
 }
 
-/* As perguntas do passo a passo: a de agora acesa, as respondidas com ✓. */
+/* The step-by-step questions: the current one lit, the answered ones with ✓. */
 .chat-pergunta-abas {
   display: flex;
   flex-wrap: wrap;
@@ -2341,10 +2341,10 @@ body {
   color: var(--cyan);
 }
 
-/* ---------- o visor: um arquivo por cima do terminal ---------- */
+/* ---------- the viewer: a file over the terminal ---------- */
 
-/* Como o chat, mas por cima dele: aberto de dentro do chat (⌘-clique numa
-   referência), fechar volta para a conversa. */
+/* Like the chat, but over it: opened from inside the chat (⌘-click on a
+   reference), closing goes back to the conversation. */
 .visor {
   position: absolute;
   inset: 0;
@@ -2361,10 +2361,10 @@ body {
   display: none;
 }
 
-/* Dividido: o visor sai de cima do terminal e toma uma fatia do painel. O
-   terminal fica com o resto, e o FitAddon o mede no tamanho novo. */
-/* Empilhado, o arquivo vai em cima e o terminal (ou o chat) embaixo: o
-   reverso da ordem no DOM, que é tela, alça, visor. */
+/* Split: the viewer leaves the top of the terminal and takes a share of the panel. The
+   terminal keeps the rest, and FitAddon measures it at the new size. */
+/* Stacked, the file goes on top and the terminal (or the chat) below: the
+   reverse of the DOM order, which is screen, handle, viewer. */
 .folha-termo.visor-abaixo {
   flex-direction: column-reverse;
 }
@@ -2379,7 +2379,7 @@ body {
   min-height: 0;
 }
 
-/* A borda entre os dois, que se arrasta. Mais larga que a linha que se vê. */
+/* The border between the two, which can be dragged. Wider than the visible line. */
 .visor-alca {
   display: none;
   flex: none;
@@ -2425,7 +2425,7 @@ body {
   min-width: 0;
   margin-left: 4px;
   overflow: hidden;
-  /* O fim do caminho é o que importa: o nome e a linha. */
+  /* The end of the path is what matters: the name and the line. */
   direction: rtl;
   text-align: left;
   text-overflow: ellipsis;
@@ -2447,9 +2447,9 @@ body {
   display: none;
 }
 
-/* A altura da linha igual à do botão, e não `line-height: 1` com flex: com a
-   fonte do sistema a caixa do texto tem mais folga embaixo que em cima, e o
-   rótulo subia. */
+/* The line height equal to the button's, not `line-height: 1` with flex: with the
+   system font the text box has more slack below than above, and the
+   label rose. */
 .visor-btn {
   flex: none;
   box-sizing: border-box;
@@ -2574,8 +2574,8 @@ body {
   color: var(--red);
 }
 
-/* A lista de /comandos: acima do campo, do tamanho dele, e com teto — são
-   dezenas, e ela não pode empurrar a conversa para fora da tela. */
+/* The /commands list: above the field, as wide as it, and with a cap — there are
+   dozens, and it must not push the conversation off the screen. */
 .chat-comandos {
   flex: none;
   max-height: 220px;
@@ -2621,7 +2621,7 @@ body {
   color: var(--fg-dim);
 }
 
-/* Antes da primeira fala: o Claude acabou de abrir, ou a conversa é nova. */
+/* Before the first turn: Claude just opened, or the conversation is new. */
 .chat-lista:not(:has(.chat-fala, .chat-ferramenta))::before {
   content: "Nenhuma mensagem ainda. Escreva abaixo para começar.";
   margin: auto;
@@ -2629,8 +2629,8 @@ body {
   color: var(--comment);
 }
 
-/* A lista do /resume usa a mesma caixa dos comandos: uma linha de instrução
-   em cima, e em cada sessão o título à esquerda e a idade à direita. */
+/* The /resume list uses the same box as the commands: an instruction line
+   on top, and in each session the title on the left and the age on the right. */
 .chat-comandos-cabeca {
   padding: 4px 8px 6px;
   font-size: 11px;
@@ -2656,12 +2656,12 @@ body {
   font-weight: 600;
 }
 
-/* O botão da prévia, dentro da caixa do diff, não encosta na borda. */
+/* The preview button, inside the diff box, doesn't touch the edge. */
 .chat-diff .chat-recolhivel-botao {
   margin-right: 8px;
 }
 
-/* Unificado ou lado a lado: o ícone fica no canto do cabeçalho do diff. */
+/* Unified or side by side: the icon sits in the corner of the diff header. */
 .chat-diff-resumo:has(.chat-diff-modo) {
   display: flex;
   align-items: center;
@@ -2684,8 +2684,8 @@ body {
   color: var(--fg);
 }
 
-/* Duas colunas, antes e depois. Cada metade quebra a própria linha em vez de
-   rolar: rolagem horizontal só numa coluna desalinharia as duas. */
+/* Two columns, before and after. Each half wraps its own lines instead of
+   scrolling: horizontal scrolling in a single column would misalign the two. */
 .chat-diff-linhas.lado-a-lado {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -2709,10 +2709,10 @@ body {
   background: color-mix(in srgb, var(--comment) 8%, transparent);
 }
 
-/* O contexto da sessão passou do limite vermelho (Preferências, ⌘,): o painel
-   ganha uma borda vermelha pulsando, a hora de compactar. No ::after, que é a
-   borda do cartão e passa por cima do terminal; o `outline` fica livre para o
-   laranja do painel que espera, e os dois valem ao mesmo tempo. */
+/* The session's context passed the red limit (Preferences, ⌘,): the panel
+   gets a pulsing red border, time to compact. On ::after, which is the
+   card's border and goes over the terminal; `outline` stays free for the
+   orange of the waiting panel, and both apply at the same time. */
 .aba > .folha.contexto-cheio::after,
 .aba .divisao > .folha.contexto-cheio::after {
   border: 2px solid var(--red);

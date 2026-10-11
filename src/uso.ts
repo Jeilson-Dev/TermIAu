@@ -1,20 +1,20 @@
-/// As contas do uso do Claude no rodapé, sem DOM — para ter teste, como o
-/// `visor.ts`. Os números vêm da status line do Claude Code, que o hook manda
-/// para o app (ver o começo de hooks/termiau-evento.sh).
+/// The math for Claude's usage in the footer, without DOM — so it can be tested, like
+/// `visor.ts`. The numbers come from Claude Code's status line, which the hook sends
+/// to the app (see the start of hooks/termiau-evento.sh).
 
 import { T } from "./i18n/terminal";
 
 export type Janela = { uso: number; renova: string | null };
 export type Uso = { sessao: Janela | null; semana: Janela | null };
 
-/// "" (no ritmo), "atencao" ou "perigo".
+/// "" (on pace), "atencao" or "perigo".
 export type Nivel = "" | "atencao" | "perigo";
 
-/// A janela da sessão: 5 horas. A da semana: 7 dias.
+/// The session window: 5 hours. The week's: 7 days.
 export const SESSAO_MIN = 300;
 export const SEMANA_MIN = 7 * 24 * 60;
 
-/// Quanto da janela ainda falta (0 a 1). Sem data, a janela está inteira.
+/// How much of the window is still left (0 to 1). Without a date, the window is whole.
 export function fracaoRestante(renova: string | null, janelaMin: number, agora = Date.now()): number {
   if (!renova) return 1;
   const ms = new Date(renova).getTime() - agora;
@@ -22,9 +22,9 @@ export function fracaoRestante(renova: string | null, janelaMin: number, agora =
   return Math.min(1, Math.max(0, ms / (janelaMin * 60_000)));
 }
 
-/// O perigo é estar à frente do ritmo, e não o uso em si: gastou mais do que o
-/// tempo que passou, e vai acabar antes de renovar. Abaixo da metade ainda há
-/// folga de sobra, e fica no ritmo. É a conta do Claude Usage Monitor.
+/// The danger is being ahead of pace, not the usage itself: spent more than the
+/// time that passed, and it will run out before renewing. Below half there is still
+/// plenty of slack, and it stays on pace. It is Claude Usage Monitor's math.
 export function nivelDoRitmo(uso: number, restante: number): Nivel {
   if (uso < 50) return "";
   const deficit = uso / 100 - (1 - restante);
@@ -33,14 +33,14 @@ export function nivelDoRitmo(uso: number, restante: number): Nivel {
   return "";
 }
 
-/// Sem janela de ritmo (a semana), o nível é o do uso.
+/// Without a pace window (the week), the level is the usage's.
 export function nivelDoUso(uso: number): Nivel {
   if (uso >= 90) return "perigo";
   if (uso >= 75) return "atencao";
   return "";
 }
 
-/// "1h53", "42min", "3d4h": quanto falta para renovar, curto para caber no rodapé.
+/// "1h53", "42min", "3d4h": how long until it renews, short enough to fit in the footer.
 export function faltaPara(renova: string | null, agora = Date.now()): string {
   if (!renova) return "";
   const ms = new Date(renova).getTime() - agora;
@@ -53,8 +53,8 @@ export function faltaPara(renova: string | null, agora = Date.now()): string {
   return `${min}min`;
 }
 
-/// O pedaço da status line do Claude Code com os limites: a porcentagem usada
-/// de cada janela e quando ela renova, em segundos desde 1970.
+/// The part of Claude Code's status line with the limits: the percentage used
+/// of each window and when it renews, in seconds since 1970.
 export type LimitesDaStatusLine = {
   five_hour?: { used_percentage?: number; resets_at?: number } | null;
   seven_day?: { used_percentage?: number; resets_at?: number } | null;
@@ -68,33 +68,33 @@ function janelaDaStatusLine(j: { used_percentage?: number; resets_at?: number } 
   };
 }
 
-/// O uso a partir dos limites da status line. Sem nenhum dos dois (uma conta
-/// sem plano, uma versão do Claude Code que não manda), nada.
+/// Usage from the status line's limits. With neither of them (an account
+/// without a plan, a Claude Code version that doesn't send them), nothing.
 export function usoDaStatusLine(l: LimitesDaStatusLine | null | undefined): Uso | undefined {
   const sessao = janelaDaStatusLine(l?.five_hour);
   const semana = janelaDaStatusLine(l?.seven_day);
   return sessao || semana ? { sessao, semana } : undefined;
 }
 
-/// A janela como está agora. A status line só fala quando o Claude roda; uma
-/// janela que já renovou desde a última notícia está zerada, e a próxima só
-/// começa a contar no próximo uso.
+/// The window as it is now. The status line only speaks when Claude runs; a
+/// window that renewed since the last news is at zero, and the next one only
+/// starts counting on the next use.
 export function janelaAgora(j: Janela | null, agora = Date.now()): Janela | null {
   if (!j?.renova) return j;
   return new Date(j.renova).getTime() <= agora ? { uso: 0, renova: null } : j;
 }
 
-/// Os limites do contexto da sessão, nas Preferências: amarelo a partir do
-/// primeiro, vermelho (e o painel contornado, pulsando) a partir do segundo.
+/// The session's context limits, in Preferences: yellow from the
+/// first, red (and the panel outlined, pulsing) from the second.
 export type LimitesDoContexto = { atencao: number; perigo: number; autoCompact: boolean; autoCompactEm: number };
 export const LIMITES_DO_CONTEXTO: LimitesDoContexto = { atencao: 60, perigo: 75, autoCompact: false, autoCompactEm: 76 };
 
 const limiteValido = (n: number | undefined, padrao: number) =>
   typeof n === "number" && n >= 1 && n <= 100 ? n : padrao;
 
-/// O nível do contexto usado. Um limite fora de 1 a 100 (o campo apagado, um
-/// número digitado pela metade) vale o padrão; o vermelho vence o amarelo
-/// quando os dois se cruzam.
+/// The level of context used. A limit outside 1 to 100 (the field cleared, a
+/// half-typed number) gets the default; red beats yellow
+/// when the two cross.
 export function nivelDoContexto(pct: number, limites: Partial<LimitesDoContexto> = {}): Nivel {
   const perigo = limiteValido(limites.perigo, LIMITES_DO_CONTEXTO.perigo);
   const atencao = limiteValido(limites.atencao, LIMITES_DO_CONTEXTO.atencao);
@@ -103,8 +103,8 @@ export function nivelDoContexto(pct: number, limites: Partial<LimitesDoContexto>
   return "";
 }
 
-/// A partir de quanto o auto-compact dispara, ou `null` com ele desligado. O
-/// limite tem de passar do vermelho: um que não passa vale o vermelho mais um.
+/// From how much auto-compact fires, or `null` when it is off. The
+/// limit must exceed red: one that doesn't gets red plus one.
 export function limiteDoAutoCompact(limites: Partial<LimitesDoContexto> = {}): number | null {
   if (!limites.autoCompact) return null;
   const perigo = limiteValido(limites.perigo, LIMITES_DO_CONTEXTO.perigo);

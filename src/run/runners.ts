@@ -1,40 +1,40 @@
-// O que o play sabe rodar, um módulo por `type` do launch.json. Cada um traduz a
-// configuração num comando de terminal e diz o que dá para fazer com o app no ar
-// (o hot reload do Flutter, por exemplo). Suportar uma linguagem nova é somar um
-// módulo aqui: a barra e a execução não mudam.
+// What the play button knows how to run, one module per launch.json `type`. Each one turns the
+// configuration into a terminal command and says what can be done with the app running
+// (Flutter's hot reload, for example). Supporting a new language means adding a
+// module here: the bar and the run don't change.
 
 import { resolver, type ConfigLaunch, type Contexto } from "./launch";
 import { palavra } from "./shell";
 import { T } from "../i18n/terminal";
 
-/** Um botão da barra enquanto o app roda: uma tecla mandada ao programa. */
+/** A bar button while the app runs: a key sent to the program. */
 export interface Acao {
   rotulo: string;
   icone: string;
   tecla: string;
 }
 
-/** O comando pronto para o painel. */
+/** The command ready for the panel. */
 export interface Plano {
-  /** O que roda, para mensagens: "Flutter", "Node"... */
+  /** What runs, for messages: "Flutter", "Node"... */
   rotulo: string;
   cwd: string;
   env: Record<string, string>;
   argv: string[];
   acoes?: Acao[];
-  /** Tecla que encerra com calma (o `q` do flutter run). Sem ela, o stop manda Ctrl+C. */
+  /** Key that quits gracefully (flutter run's `q`). Without it, stop sends Ctrl+C. */
   sair?: string;
 }
 
 export interface ContextoRunner extends Contexto {
-  /** Se o projeto Dart nesta pasta é Flutter (o pubspec depende do SDK). */
+  /** Whether the Dart project in this folder is Flutter (the pubspec depends on the SDK). */
   ehFlutter(pasta: string): Promise<boolean>;
 }
 
 export interface Runner {
-  /** Os valores de `type` que este módulo atende. */
+  /** The `type` values this module handles. */
   tipos: string[];
-  /** Lança Error com o motivo quando a configuração pede algo que ele não sabe fazer. */
+  /** Throws an Error with the reason when the configuration asks for something it can't do. */
   montar(cfg: ConfigLaunch, ctx: ContextoRunner): Promise<Plano>;
 }
 
@@ -42,7 +42,7 @@ const texto = (v: unknown): string | undefined => (typeof v === "string" && v ? 
 const lista = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 
-/** O que toda configuração tem igual: cwd, env e só `request: "launch"`. */
+/** What every configuration has in common: cwd, env and only `request: "launch"`. */
 function base(cfg: ConfigLaunch, ctx: Contexto) {
   if ((cfg.request ?? "launch") !== "launch") {
     throw new Error(T.requestNaoSuportado(String(cfg.request)));
@@ -53,7 +53,7 @@ function base(cfg: ConfigLaunch, ctx: Contexto) {
   const env: Record<string, string> = {};
   if (typeof cfg.env === "object" && cfg.env !== null) {
     for (const [k, v] of Object.entries(cfg.env)) {
-      // `"RELEASE_MODE": false` também vale: a extensão do Dart aceita e vira texto.
+      // `"RELEASE_MODE": false` works too: the Dart extension accepts it and turns it into text.
       if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") env[k] = r(String(v));
     }
   }
@@ -81,9 +81,9 @@ const dart: Runner = {
     if (modo && modo !== "debug") argv.push(`--${modo}`);
     argv.push(...toolArgs);
     if (program) argv.push("-t", program);
-    // Num app Flutter, a extensão do Dart manda os `args` ao próprio flutter run:
-    // é onde os launch.json põem `--dart-define=ENV=dev` e `--flavor`. Virar
-    // argumento do app faria ele rodar no ambiente padrão, sem aviso.
+    // In a Flutter app, the Dart extension sends the `args` to flutter run itself:
+    // it is where launch.json files put `--dart-define=ENV=dev` and `--flavor`. Making them
+    // app arguments would make it run in the default environment, without warning.
     argv.push(...args);
     return {
       rotulo: "Flutter",
@@ -147,7 +147,7 @@ export function runnerPara(tipo: string): Runner | undefined {
   return RUNNERS.find((r) => r.tipos.includes(tipo));
 }
 
-/** A linha que o painel recebe: `VAR=valor programa args`, depois da tarefa, se houver. */
+/** The line the panel gets: `VAR=value program args`, after the task, if any. */
 export function linhaDeComando(plano: Plano, antes: string | null): string {
   const env = Object.entries(plano.env)
     .filter(([k]) => /^[A-Za-z_]\w*$/.test(k))

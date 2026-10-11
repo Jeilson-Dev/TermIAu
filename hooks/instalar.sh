@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Liga os hooks do Claude Code ao TermIAu.
+# Connects Claude Code's hooks to TermIAu.
 #
-# O TermIAu só sabe em que pé está cada sessão pelo que chega no socket, e quem
-# escreve nele é o `termiau-evento.sh` — que precisa estar registrado no
-# settings.json do Claude Code. Sem este passo o app fica de pé, mas as abas
-# nunca acendem a bolinha de "esperando".
+# TermIAu only knows where each session stands from what arrives on the socket,
+# and `termiau-evento.sh` is what writes to it — it has to be registered in
+# Claude Code's settings.json. Without this step the app runs, but the tabs
+# never light up the "waiting" dot.
 #
-# O script é idempotente: rodar de novo só reescreve o mesmo bloco.
+# The script is idempotent: running it again only rewrites the same block.
 set -euo pipefail
 
 CLAUDE_DIR="$HOME/.claude"
@@ -17,12 +17,12 @@ ORIGEM="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/termiau-evento.sh"
 command -v jq >/dev/null || { echo "jq is missing"; exit 1; }
 command -v nc >/dev/null || { echo "nc is missing"; exit 1; }
 
-# O app faz esta mesma instalação sozinho (TermIAu ▸ Ligar ao Claude Code…, ver
-# `hooks_instalar` no lib.rs). Este script fica para quem está no repositório.
+# The app does this same installation on its own (TermIAu ▸ Connect to Claude Code…,
+# see `hooks_instalar` in lib.rs). This script stays for those working in the repository.
 
-# O hook mora em ~/.claude, não no repo: o repo pode estar num volume externo
-# que não está montado quando o Claude Code roda, e um hook que não existe vira
-# um erro em cada evento.
+# The hook lives in ~/.claude, not in the repo: the repo may be on an external
+# volume that isn't mounted when Claude Code runs, and a hook that doesn't exist
+# becomes an error on every event.
 mkdir -p "$CLAUDE_DIR/hooks"
 cp "$ORIGEM" "$DESTINO"
 chmod +x "$DESTINO"
@@ -31,27 +31,27 @@ chmod +x "$DESTINO"
 BACKUP="$SETTINGS.bak-$(date +%s)"
 cp "$SETTINGS" "$BACKUP"
 
-# Os cinco eventos que o `receber` do main.ts trata. `SessionEnd` entra porque
-# é ele que apaga o estado do painel — sem ele uma aba fica com a bolinha de
-# "esperando" de uma sessão que já morreu. `SessionStart` é o que conta qual é a
-# sessão assim que o Claude abre: é por ela que a aba é retomada na próxima
-# abertura, e sem ele o TermIAu só fica sabendo no primeiro prompt.
+# The events main.ts's `receber` handles. `SessionEnd` is here because it is
+# what clears the panel's state — without it a tab keeps the "waiting" dot of a
+# session that already died. `SessionStart` is what tells which session it is
+# as soon as Claude opens: it is how the tab is resumed on the next launch, and
+# without it TermIAu only finds out on the first prompt.
 #
-# O `Stop` é o fim de um turno: é ele que apaga o "trabalhando".
+# `Stop` is the end of a turn: it is what clears "working".
 #
-# Os três de ferramenta, no Bash, são a foto de antes e de depois de cada
-# comando: o diff que o Claude Code não grava quando o comando termina com erro
-# (ver `diff_do_bash` no termiau-evento.sh). Os de depois também avisam quando
-# uma pergunta do Claude foi respondida no terminal. O `PermissionRequest` tem
-# uma hora: numa pergunta, o hook espera a resposta do modo chat.
+# The three tool events, on Bash, are the snapshot before and after each
+# command: the diff Claude Code doesn't store when the command ends with an error
+# (see `diff_do_bash` in termiau-evento.sh). The after ones also report when
+# a Claude question was answered in the terminal. `PermissionRequest` has
+# an hour: on a question, the hook waits for chat mode's answer.
 #
-# Sem `async`: o hook devolve na hora (manda o JSON pro socket em segundo plano
-# e sai), então não há turno do Claude para segurar.
+# No `async`: the hook returns right away (sends the JSON to the socket in the
+# background and exits), so there is no Claude turn to hold up.
 EVENTOS='["SessionStart","UserPromptSubmit","PermissionRequest","Notification","SessionEnd","Stop","PreToolUse","PostToolUse","PostToolUseFailure"]'
 
 jq --arg cmd "bash $DESTINO" --argjson eventos "$EVENTOS" '
-  # Põe o hook do TermIAu, um por evento, substituindo qualquer registro
-  # anterior dele — é o que torna rodar de novo inofensivo.
+  # Puts the TermIAu hook, one per event, replacing any previous registration
+  # of it — that is what makes running it again harmless.
   reduce $eventos[] as $e (.;
     .hooks[$e] = (((.hooks[$e] // [])
       | map(.hooks |= map(select((.command // "") | contains("termiau-evento") | not)))
@@ -61,8 +61,8 @@ jq --arg cmd "bash $DESTINO" --argjson eventos "$EVENTOS" '
          + (if $e == "PreToolUse" then {matcher: "Bash"}
             elif ($e | test("ToolUse")) then {matcher: "Bash|AskUserQuestion"}
             else {} end)]))
-  # A status line passa pelo mesmo hook (o contexto e o uso vão para o app).
-  # Uma que não é a nossa fica: quem a pôs ali quis outra coisa.
+  # The status line goes through the same hook (context and usage go to the app).
+  # One that is not ours stays: whoever put it there wanted something else.
   | if (.statusLine | type) == "object" and ((.statusLine.command // "") | contains("termiau-evento") | not)
     then . else .statusLine = {type: "command", command: ($cmd + " status"), padding: 0} end
 ' "$BACKUP" > "$SETTINGS"

@@ -16,7 +16,7 @@ import {
 const linha = (o: unknown) => JSON.stringify(o);
 
 describe("lerFalas", () => {
-  it("separa você, o Claude e as ferramentas", () => {
+  it("separates you, Claude and the tools", () => {
     const jsonl = [
       linha({ type: "user", message: { content: "oi" } }),
       linha({ type: "assistant", message: { content: [{ type: "thinking", thinking: "" }] } }),
@@ -34,7 +34,7 @@ describe("lerFalas", () => {
     ]);
   });
 
-  it("pula o que não é conversa", () => {
+  it("skips what isn't conversation", () => {
     const jsonl = [
       linha({ type: "user", isMeta: true, message: { content: "meta" } }),
       linha({ type: "user", isSidechain: true, message: { content: "subagente" } }),
@@ -46,7 +46,7 @@ describe("lerFalas", () => {
     expect(lerFalas(jsonl)).toEqual([]);
   });
 
-  it("devolve o /comando como foi digitado", () => {
+  it("returns the /command as typed", () => {
     const jsonl = linha({
       type: "user",
       message: { content: "<command-name>/handoff</command-name>\n<command-args>run x</command-args>" },
@@ -54,7 +54,7 @@ describe("lerFalas", () => {
     expect(lerFalas(jsonl)).toEqual([{ quem: "voce", texto: "/handoff run x" }]);
   });
 
-  it("guarda as imagens coladas como data URL", () => {
+  it("keeps pasted images as data URLs", () => {
     const img = { type: "image", source: { type: "base64", media_type: "image/png", data: "AAA" } };
     const jsonl = [
       linha({ type: "user", message: { content: [{ type: "text", text: "olha[Image #1]" }, img] } }),
@@ -68,29 +68,29 @@ describe("lerFalas", () => {
 });
 
 describe("markdown", () => {
-  it("escapa o que entra", () => {
+  it("escapes what comes in", () => {
     expect(markdown("<b>oi</b>")).toBe("<p>&lt;b&gt;oi&lt;/b&gt;</p>");
   });
 
-  it("não formata dentro de código", () => {
+  it("doesn't format inside code", () => {
     expect(markdown("use `**x**` e **y**")).toBe("<p>use <code>**x**</code> e <strong>y</strong></p>");
     expect(markdown("```ts\na < b\n```")).toBe("<pre><code>a &lt; b</code></pre>");
   });
 
-  it("fecha o negrito que tem código no meio", () => {
+  it("closes bold that has code in the middle", () => {
     expect(markdown("- **Os `GET` ficaram.** Às 14h")).toBe(
       "<ul><li><strong>Os <code>GET</code> ficaram.</strong> Às 14h</li></ul>",
     );
   });
 
-  it("monta lista, título e tabela", () => {
+  it("builds lists, headings and tables", () => {
     expect(markdown("## T\n- a\n- b")).toBe("<h4>T</h4><ul><li>a</li><li>b</li></ul>");
     expect(markdown("| a | b |\n|---|---|\n| 1 | 2 |")).toBe(
       "<table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>",
     );
   });
 
-  it("só liga http", () => {
+  it("only links http", () => {
     expect(markdown("[x](javascript:alert(1))")).not.toContain("<a");
     expect(markdown("[x](https://a.b/c)")).toBe('<p><a href="https://a.b/c">x</a></p>');
   });
@@ -108,7 +108,7 @@ describe("linhasDePrompt", () => {
     "❯ ",
   ];
 
-  it("acha só os prompts conhecidos", () => {
+  it("finds only the known prompts", () => {
     const prompts = ["para remover o pooling o q falta eh...", "segunda pergunta bem\ncomprida"];
     expect(linhasDePrompt(tela, prompts)).toEqual([
       { linha: 0, altura: 1 },
@@ -116,11 +116,11 @@ describe("linhasDePrompt", () => {
     ]);
   });
 
-  it("sem prompt não marca nada", () => {
+  it("without a prompt marks nothing", () => {
     expect(linhasDePrompt(tela, [])).toEqual([]);
   });
 
-  it("casa com a linha quebrada por um painel estreito", () => {
+  it("matches a line wrapped by a narrow panel", () => {
     expect(linhasDePrompt(["> uma pergunta"], ["uma pergunta que continua depois da quebra"])).toEqual([
       { linha: 0, altura: 1 },
     ]);
@@ -136,24 +136,24 @@ describe("filtrarComandos", () => {
     { nome: "review", descricao: "embutido" },
   ];
 
-  it("põe na frente os que começam pelo digitado, sem repetir nome", () => {
+  it("puts first the ones starting with the typed text, without repeating names", () => {
     expect(filtrarComandos(todos, "rev").map((c) => `${c.nome}|${c.descricao}`)).toEqual([
       "review|meu",
       "code-review|",
     ]);
   });
 
-  it("acha o comando de plugin pelo nome curto", () => {
+  it("finds a plugin command by its short name", () => {
     expect(filtrarComandos(todos, "design-c").map((c) => c.nome)).toEqual(["design:design-critique"]);
   });
 
-  it("sem nada digitado devolve todos", () => {
+  it("with nothing typed returns all", () => {
     expect(filtrarComandos(todos, "")).toHaveLength(4);
   });
 });
 
 describe("partesDoSeu", () => {
-  it("tira as tags do texto colado", () => {
+  it("removes the tags from pasted text", () => {
     const t = 'antes\n<pasted_content id="56ad">\nlog\nmais\n</pasted_content id="56ad">\ndepois';
     expect(partesDoSeu(t, 0)).toEqual([
       { tipo: "texto", texto: "antes" },
@@ -162,11 +162,11 @@ describe("partesDoSeu", () => {
     ]);
   });
 
-  it("aceita a tag sem id", () => {
+  it("accepts the tag without an id", () => {
     expect(partesDoSeu("<pasted_content>x</pasted_content>", 0)).toEqual([{ tipo: "colado", texto: "x" }]);
   });
 
-  it("põe cada imagem onde o texto a cita, e a que sobra no fim", () => {
+  it("puts each image where the text cites it, and the leftover at the end", () => {
     expect(partesDoSeu("a[Image #3] b[Image #4]", 3)).toEqual([
       { tipo: "texto", texto: "a" },
       { tipo: "imagem", indice: 0 },
@@ -176,13 +176,13 @@ describe("partesDoSeu", () => {
     ]);
   });
 
-  it("deixa o marcador como texto quando não há imagem para ele", () => {
+  it("leaves the marker as text when there is no image for it", () => {
     expect(partesDoSeu("veja [Image #1]", 0)).toEqual([{ tipo: "texto", texto: "veja [Image #1]" }]);
   });
 });
 
 describe("linhasDoDiff", () => {
-  it("numera como o terminal: o que saiu pela linha de antes, o resto pela de depois", () => {
+  it("numbers like the terminal: removed lines by the old line, the rest by the new one", () => {
     const d = linhasDoDiff({
       caminho: "/x.ts",
       hunks: [{ oldStart: 40, newStart: 40, lines: [" a", "-b", "+B", "+C", " c"] }],
@@ -200,7 +200,7 @@ describe("linhasDoDiff", () => {
     });
   });
 
-  it("separa os trechos e ignora o aviso de fim de arquivo", () => {
+  it("separates the hunks and ignores the end-of-file notice", () => {
     const d = linhasDoDiff({
       caminho: "/x.ts",
       hunks: [
@@ -212,32 +212,32 @@ describe("linhasDoDiff", () => {
   });
 });
 
-describe("lerFalas e os diffs", () => {
-  it("põe o diff que o Rust extraiu como fala própria", () => {
+describe("lerFalas and the diffs", () => {
+  it("puts the diff Rust extracted as its own turn", () => {
     const arquivos = [{ caminho: "/x.ts", hunks: [{ oldStart: 1, newStart: 1, lines: ["+a"] }] }];
     expect(lerFalas(linha({ type: "diff", arquivos }))).toEqual([{ quem: "diff", arquivos }]);
   });
 });
 
-describe("as perguntas do Claude", () => {
+describe("Claude's questions", () => {
   const qs = [
     { question: "Qual cor?", header: "Cor", options: [{ label: "Azul" }, { label: "Verde" }] },
     { question: "Quais partes?", multiSelect: true, options: [{ label: "A" }, { label: "B" }] },
   ];
 
-  it("só aceita o formato do AskUserQuestion", () => {
+  it("only accepts the AskUserQuestion format", () => {
     expect(questoesDe({ questions: qs })).toEqual(qs);
     expect(questoesDe({ questions: [] })).toBeUndefined();
     expect(questoesDe({ questions: [{ question: "x" }] })).toBeUndefined();
     expect(questoesDe(undefined)).toBeUndefined();
   });
 
-  it("espera todas as perguntas respondidas", () => {
+  it("waits for all questions to be answered", () => {
     expect(respostaDoHook(qs, [{ labels: ["Azul"] }, undefined])).toBeUndefined();
     expect(respostaDoHook(qs, [{ labels: ["Azul"] }, { labels: [], outra: "  " }])).toBeUndefined();
   });
 
-  it("monta a decisão com as respostas pelo texto da pergunta", () => {
+  it("builds the decision with answers keyed by question text", () => {
     const r = JSON.parse(respostaDoHook(qs, [{ labels: [], outra: "Roxo" }, { labels: ["A", "B"], outra: "C" }])!);
     expect(r).toEqual({
       hookSpecificOutput: {
@@ -252,23 +252,23 @@ describe("as perguntas do Claude", () => {
 });
 
 describe("jsonLegivel", () => {
-  it("abre o JSON de uma linha só", () => {
+  it("expands single-line JSON", () => {
     expect(jsonLegivel('{"type":"x","data":{"ok":true}}')).toBe('{\n  "type": "x",\n  "data": {\n    "ok": true\n  }\n}');
   });
 
-  it("deixa como está o que não é JSON ou já tem quebras", () => {
+  it("leaves alone what isn't JSON or already has line breaks", () => {
     expect(jsonLegivel('{"a": 1, …}')).toBe('{"a": 1, …}');
     expect(jsonLegivel("npm run build")).toBe("npm run build");
     expect(jsonLegivel('{\n"a":1}')).toBe('{\n"a":1}');
   });
 
-  it("vale dentro do bloco de código do markdown", () => {
+  it("works inside a markdown code block", () => {
     expect(markdown('```json\n{"a":[1]}\n```')).toContain("{\n  &quot;a&quot;: [\n    1\n  ]\n}");
   });
 });
 
 describe("ladoALado", () => {
-  it("põe o que saiu ao lado do que entrou, e o contexto com os dois números", () => {
+  it("puts removed lines beside added ones, and context with both numbers", () => {
     const { linhas } = linhasDoDiff({
       caminho: "/x.ts",
       hunks: [
@@ -288,22 +288,22 @@ describe("ladoALado", () => {
 });
 
 describe("provisoriosResolvidos", () => {
-  it("tira o provisório da fala que chegou, e não só o mais antigo", () => {
+  it("removes the provisional bubble of the turn that arrived, not just the oldest", () => {
     expect(provisoriosResolvidos(["a", "b"], "a")).toBe(1);
-    // Um provisório velho que nunca virou fala sai junto com o de depois.
+    // An old provisional one that never became a turn goes along with the one after it.
     expect(provisoriosResolvidos(["!ls", "3.6 valido"], "3.6 valido")).toBe(2);
   });
 
-  it("casa mensagens da fila que o Claude juntou numa fala só", () => {
+  it("matches queued messages Claude merged into a single turn", () => {
     expect(provisoriosResolvidos(["um", "dois", "três"], "um\ndois")).toBe(2);
   });
 
-  it("ignora o embrulho do colado, as imagens e os espaços", () => {
+  it("ignores the paste wrapper, the images and the spaces", () => {
     expect(provisoriosResolvidos(["olha  [Image #1]"], "olha")).toBe(1);
     expect(provisoriosResolvidos(["x", "y"], '<pasted_content id="1">\ny\n</pasted_content>')).toBe(2);
   });
 
-  it("sem nada parecido, sai o mais antigo; sem provisório, nada", () => {
+  it("with nothing similar, the oldest goes; with no provisional, nothing", () => {
     expect(provisoriosResolvidos(["a", "b"], "zzz")).toBe(1);
     expect(provisoriosResolvidos([], "a")).toBe(0);
   });

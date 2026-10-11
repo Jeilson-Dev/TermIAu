@@ -1,9 +1,9 @@
-// O .vscode/launch.json, e o tasks.json que ele cita, lidos sem o VS Code.
+// The .vscode/launch.json, and the tasks.json it references, read without VS Code.
 
 import { palavra } from "./shell";
 import { T } from "../i18n/terminal";
 
-/** Uma entrada de `configurations`. Além destes campos, cada `type` tem os seus. */
+/** An entry in `configurations`. Besides these fields, each `type` has its own. */
 export interface ConfigLaunch {
   name: string;
   type: string;
@@ -11,7 +11,7 @@ export interface ConfigLaunch {
   [campo: string]: unknown;
 }
 
-/** Uma entrada de `tasks` no tasks.json, só com o que o play sabe rodar. */
+/** An entry in tasks.json's `tasks`, with only what the play button can run. */
 export interface Tarefa {
   label?: string;
   type?: string;
@@ -23,16 +23,16 @@ export interface Tarefa {
   options?: { cwd?: string };
 }
 
-/** O que as variáveis `${...}` precisam saber. */
+/** What the `${...}` variables need to know. */
 export interface Contexto {
-  /** A pasta que tem o `.vscode`: o `${workspaceFolder}`. */
+  /** The folder holding `.vscode`: the `${workspaceFolder}`. */
   pasta: string;
   home: string;
 }
 
 const ehObjeto = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 
-/** Índice das aspas que fecham a string aberta em `inicio`. */
+/** Index of the quote that closes the string opened at `inicio`. */
 function fimDaString(texto: string, inicio: number): number {
   let i = inicio + 1;
   while (i < texto.length && texto[i] !== '"') i += texto[i] === "\\" ? 2 : 1;
@@ -49,7 +49,7 @@ function semComentarios(texto: string): string {
       i = fim;
     } else if (c === "/" && texto[i + 1] === "/") {
       const fim = texto.indexOf("\n", i);
-      i = fim < 0 ? texto.length : fim - 1; // a quebra de linha fica
+      i = fim < 0 ? texto.length : fim - 1; // the newline stays
     } else if (c === "/" && texto[i + 1] === "*") {
       const fim = texto.indexOf("*/", i + 2);
       i = fim < 0 ? texto.length : fim + 1;
@@ -80,7 +80,7 @@ function semVirgulasSobrando(texto: string): string {
   return saida;
 }
 
-/** JSON com comentários e vírgula sobrando: o formato que o VS Code aceita nesses arquivos. */
+/** JSON with comments and trailing commas: the format VS Code accepts in these files. */
 export function lerJsonc(texto: string): unknown {
   return JSON.parse(semVirgulasSobrando(semComentarios(texto)));
 }
@@ -93,23 +93,23 @@ export function configsDe(texto: string): ConfigLaunch[] {
   );
 }
 
-/** O que o play oferece: as configurações que ele roda e a lista com os títulos de grupo. */
+/** What the play button offers: the configurations it runs and the list with group titles. */
 export interface ListaDoPlay {
   configs: ConfigLaunch[];
-  /** Na ordem do launch.json; uma string é o título do grupo que vem embaixo. */
+  /** In launch.json order; a string is the title of the group below it. */
   menu: (ConfigLaunch | string)[];
 }
 
 /**
- * O launch.json como o play o mostra. Fica de fora a configuração com `codeLens`,
- * que a extensão do Dart só usa nos links "Run | Debug" em cima dos testes — no
- * play ela rodaria o app com `--update-goldens`. E o separador, como um
- * `──── DEV ────` apontando para um arquivo que não existe, o truque para agrupar
- * a lista do VS Code, vira título de grupo em vez de algo que o play rodaria.
+ * launch.json as the play button shows it. Left out is the configuration with `codeLens`,
+ * which the Dart extension only uses in the "Run | Debug" links above tests — in the
+ * play button it would run the app with `--update-goldens`. And the separator, like a
+ * `──── DEV ────` pointing to a file that doesn't exist, the trick for grouping
+ * VS Code's list, becomes a group title instead of something the play button would run.
  */
 export function listaDoPlay(configs: ConfigLaunch[]): ListaDoPlay {
   const menu: (ConfigLaunch | string)[] = [];
-  // Um grupo sem nada embaixo (só tinha configurações de CodeLens) não aparece.
+  // A group with nothing below it (it only had CodeLens configurations) doesn't show.
   const semGrupoVazio = () => {
     if (typeof menu[menu.length - 1] === "string") menu.pop();
   };
@@ -127,7 +127,7 @@ export function listaDoPlay(configs: ConfigLaunch[]): ListaDoPlay {
   return { configs: menu.filter((m): m is ConfigLaunch => typeof m !== "string"), menu };
 }
 
-/** "──── DEV ────" -> "DEV". Nulo quando o nome não tem traços nas duas pontas. */
+/** "──── DEV ────" -> "DEV". Null when the name doesn't have dashes at both ends. */
 function tituloDeSeparador(nome: string): string | null {
   if (!/^\s*[─━═—–=-]{3,}/.test(nome) || !/[─━═—–=-]{3,}\s*$/.test(nome)) return null;
   return nome.replace(/[─━═—–=<>-]{2,}/g, "").trim();
@@ -140,9 +140,9 @@ export function tarefasDe(texto: string): Tarefa[] {
 }
 
 /**
- * Troca as variáveis do VS Code. `${env:X}` passa intacta: quem a expande é o shell
- * (ver `palavra`). As que dependem do editor (`${file}`, `${input:...}`) não têm
- * resposta aqui e param a execução com o nome delas.
+ * Replaces VS Code's variables. `${env:X}` passes intact: the shell expands it
+ * (see `palavra`). Those that depend on the editor (`${file}`, `${input:...}`) have no
+ * answer here and stop the run with their name.
  */
 export function resolver(valor: string, ctx: Contexto): string {
   return valor.replace(/\$\{([^}]+)\}/g, (todo, nome: string) => {
@@ -165,16 +165,16 @@ export function resolver(valor: string, ctx: Contexto): string {
 }
 
 /**
- * O `preLaunchTask` da configuração, como linha de shell que vem antes do app
- * (`tarefa && app`). Nulo quando não há. Tarefas que o play ainda não sabe rodar
- * param a execução dizendo por quê, em vez de rodar o app sem ela.
+ * The configuration's `preLaunchTask`, as a shell line that comes before the app
+ * (`task && app`). Null when there is none. Tasks the play button can't run yet
+ * stop the run saying why, instead of running the app without it.
  */
 export function tarefaAntes(cfg: ConfigLaunch, tarefas: Tarefa[], ctx: Contexto): string | null {
   const nome = cfg.preLaunchTask;
   if (typeof nome !== "string" || !nome) return null;
   const tarefa =
     tarefas.find((t) => t.label === nome) ??
-    // Tarefas do npm detectadas pelo VS Code se chamam "npm: <script>".
+    // npm tasks detected by VS Code are named "npm: <script>".
     tarefas.find((t) => t.type === "npm" && `npm: ${t.script}` === nome);
   if (!tarefa) throw new Error(T.tarefaAusente(nome));
   if (tarefa.dependsOn) throw new Error(T.tarefaDependsOn(nome));
@@ -188,7 +188,7 @@ export function tarefaAntes(cfg: ConfigLaunch, tarefas: Tarefa[], ctx: Contexto)
   if (tarefa.type === "npm" && tarefa.script) {
     comando = ["npm", "run", palavra(tarefa.script), ...args].join(" ");
   } else if (tarefa.type === "shell" && tarefa.command) {
-    // O `command` de uma tarefa shell já é linha de shell: vai como está.
+    // A shell task's `command` is already a shell line: it goes as is.
     comando = [r(tarefa.command).replace(/\$\{env:(\w+)\}/g, "${$1}"), ...args].join(" ");
   } else if (tarefa.type === "process" && tarefa.command) {
     comando = [palavra(r(tarefa.command)), ...args].join(" ");

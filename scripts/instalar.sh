@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Empacota o TermIAu e põe em /Applications. Dois canais, uma máquina:
+# Packages TermIAu and puts it in /Applications. Two channels, one machine:
 #
 #   ./scripts/instalar.sh dev    -> "TermIAu Dev.app"  (dev.jeilson.termiau.dev)
 #   ./scripts/instalar.sh prod   -> "TermIAu.app"      (dev.jeilson.termiau)
 #
-# Os dois convivem lado a lado: nome de bundle e identificador diferentes são
-# dois apps distintos para o macOS — Dock, permissão de microfone e preferências
-# separadas — e o socket dos hooks já nasce um por processo (ver Config::socket
-# em src-tauri/src/lib.rs). Dá para deixar a de sempre aberta e testar a dev ao
-# lado, sem uma pisar na outra.
+# Both live side by side: a different bundle name and identifier make two
+# distinct apps for macOS — separate Dock, microphone permission and preferences
+# — and the hooks socket is already one per process (see Config::socket
+# in src-tauri/src/lib.rs). You can keep the usual one open and test dev beside
+# it, without one stepping on the other.
 set -euo pipefail
 
 canal="${1:-}"
@@ -18,27 +18,27 @@ cd "$raiz"
 case "$canal" in
   dev)  conf=(--config src-tauri/tauri.dev.conf.json); nome="TermIAu Dev" ;;
   prod) conf=();                                      nome="TermIAu"     ;;
-  *) echo "uso: $0 dev|prod [--rodar]" >&2; exit 2 ;;
+  *) echo "usage: $0 dev|prod [--rodar]" >&2; exit 2 ;;
 esac
 
-# Só o .app: o .dmg é para entregar a alguém, e aqui a entrega é um cp.
+# Only the .app: the .dmg is for handing to someone, and here the handoff is a cp.
 npx tauri build "${conf[@]}" --bundles app
 
 origem="src-tauri/target/release/bundle/macos/$nome.app"
 destino="/Applications/$nome.app"
-[ -d "$origem" ] || { echo "não achei o bundle em $origem" >&2; exit 1; }
+[ -d "$origem" ] || { echo "bundle not found at $origem" >&2; exit 1; }
 
-# Fecha a versão em pé antes de trocar o binário debaixo dela: um app cujo .app
-# sumiu no meio da execução morre sem explicação nenhuma.
+# Close the running version before swapping the binary under it: an app whose .app
+# vanished mid-run dies with no explanation at all.
 pkill -f "^$destino/Contents/MacOS/" 2>/dev/null || true
 
 rm -rf "$destino"
 cp -R "$origem" "$destino"
-# Bundle não assinado que passou por cópia herda quarentena, e aí o Gatekeeper
-# barra a abertura. Assinatura ad-hoc: vale nesta máquina, que é o alvo.
+# An unsigned bundle that went through a copy inherits quarantine, and then Gatekeeper
+# blocks opening it. Ad-hoc signing: valid on this machine, which is the target.
 xattr -cr "$destino" 2>/dev/null || true
 codesign --force --deep --sign - "$destino" >/dev/null 2>&1 || true
 
-echo "instalado: $destino"
+echo "installed: $destino"
 [ "${2:-}" = "--rodar" ] && open -a "$destino"
 exit 0

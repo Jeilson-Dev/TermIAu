@@ -16,32 +16,32 @@ portable-pty = "0.9"
 base64 = "0.22"
 libc = "0.2"
 
-# Transcrição local (o antigo Escuta). O whisper-rs compila o whisper.cpp com
-# Metal — é o que faz a primeira build demorar.
+# Local transcription (the former Escuta). whisper-rs builds whisper.cpp with
+# Metal — that is what makes the first build slow.
 anyhow = "1"
 cpal = "0.18"
 serde = { version = "1", features = ["derive"] }
 whisper-rs = { version = "0.16.0", features = ["metal"] }
 ureq = "3.2"
 
-# O differ (a aba presa com o diff da branch). Ele fala com o `git` da linha de
-# comando, então não entra biblioteca de git nenhuma; o store é o JSON que
-# lembra a branch alvo de cada repositório e o que já foi revisado.
-# `preserve_order`: o app reescreve o settings.json do Claude Code ao instalar os
-# hooks, e sem isto as chaves do usuário voltariam em ordem alfabética.
+# The differ (the pinned tab with the branch's diff). It talks to the command-line
+# `git`, so no git library comes in; the store is the JSON that
+# remembers each repository's target branch and what has already been reviewed.
+# `preserve_order`: the app rewrites Claude Code's settings.json when installing the
+# hooks, and without this the user's keys would come back in alphabetical order.
 serde_json = { version = "1", features = ["preserve_order"] }
 tauri-plugin-store = "2"
-# Vigia do .git, para a aba do diff se refazer sozinha a cada commit.
+# Watcher for .git, so the diff tab redoes itself on every commit.
 notify = "8"
 
-# Área de transferência (o ⌘⇧V). O Tauri não expõe os arquivos que estão na
-# área, só texto — e o Finder não põe texto nenhum lá quando você copia um
-# arquivo. Estas duas já vêm com o wry, então não custam build.
+# Clipboard (⌘⇧V). Tauri doesn't expose the files on the clipboard,
+# only text — and Finder puts no text there at all when you copy a
+# file. These two already come with wry, so they cost no build time.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSPasteboardItem"] }
 objc2-foundation = { version = "0.3", features = ["NSURL", "NSLocale", "NSArray", "NSString"] }
 
-# Os testes do differ montam repositórios git de verdade numa pasta temporária.
+# The differ's tests build real git repositories in a temporary folder.
 [dev-dependencies]
 tempfile = "3"
 

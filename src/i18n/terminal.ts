@@ -1,8 +1,8 @@
-/// Os textos do terminal (`src/main.ts` e os módulos dele). O `en` tem a forma
-/// do `pt`: uma chave esquecida numa das línguas não compila.
+/// The terminal's texts (`src/main.ts` and its modules). `en` has the shape
+/// of `pt`: a key forgotten in one of the languages doesn't compile.
 import { traducoes } from "./index";
 
-/// Os gêneros das estações vêm em português no `estacoes.ts`.
+/// The stations' genres come in Portuguese in `estacoes.ts`.
 const GENEROS_EN: Record<string, string> = {
   "ambient · lo-fi": "ambient · lo-fi",
   "campus · pública": "campus · public",
@@ -22,21 +22,21 @@ const GENEROS_EN: Record<string, string> = {
 };
 
 const pt = {
-  // aba presa
+  // pinned tab
   diffDaBranch: "Diff da branch",
   diffDe: (nome: string) => `Diff de ${nome}`,
   repositorio: "repositório",
   nenhumRepositorio: "Nenhum repositório aberto — use o botão de diff de um painel",
   tituloDiff: "Diff — TermIAu",
 
-  // sessões do Claude
+  // Claude sessions
   compactandoSozinho: (pct: number) => `Contexto em ${pct}%: compactando sozinho.`,
   temUmaPergunta: "O Claude tem uma pergunta para você.",
   pedePermissao: (ferramenta: string, oque: string) =>
     `O Claude pede permissão para usar ${ferramenta}${oque ? `: ${oque}` : "."}`,
   umaFerramenta: "uma ferramenta",
 
-  // modo chat
+  // chat mode
   estaEsperando: "O Claude está esperando por você.",
   trabalhando: (tempo: string) => `Trabalhando… ${tempo} · esc interrompe`,
   jaRespondidaNoTerminal: "A pergunta já tinha sido respondida no terminal.",
@@ -69,7 +69,7 @@ const pt = {
   comecoNoTerminal: "O começo desta conversa ficou no terminal: aqui está só a parte mais recente.",
   programaRodando: "Há um programa rodando neste painel: o Claude não foi aberto",
 
-  // comandos do Claude Code
+  // Claude Code commands
   cmdClear: "Começa uma conversa nova",
   cmdCompact: "Resume a conversa para liberar contexto",
   cmdInit: "Cria o CLAUDE.md do projeto",
@@ -100,7 +100,7 @@ const pt = {
   cmdLogin: "Troca de conta",
   cmdExit: "Encerra o Claude Code",
 
-  // visor
+  // file viewer
   arranjoLado: "Lado a lado",
   arranjoAbaixo: "Arquivo em cima, terminal embaixo",
   arranjoSobre: "Por cima do terminal",
@@ -116,7 +116,7 @@ const pt = {
   verRenderizado: "Ver renderizado",
   naoAchei: (arquivo: string) => `Não achei ${arquivo}`,
 
-  // escuta
+  // dictation
   escutando: "escutando…",
   enviaEm: (s: number) => `↵ em ${s}s — digite para cancelar`,
   escutaDesligada: "escuta desligada — um minuto sem falar (⌘E para voltar)",
@@ -125,7 +125,7 @@ const pt = {
   baixandoModeloPct: (pct: number) => `baixando o modelo de transcrição… ${pct}%`,
   erroNaEscuta: (e: string) => `erro na escuta: ${e}`,
 
-  // barra do painel
+  // panel bar
   diffDestePainel: "Diff da branch deste painel",
   recolherPainel: "Recolher — ver os outros painéis (⌘⇧↩)",
   ocuparAba: "Ocupar a aba toda (⌘⇧↩)",
@@ -166,7 +166,7 @@ const pt = {
   gavetaOcupada: "o terminal do app está rodando outro comando",
   rodandoEscondido: (nome: string) => `${nome} rodando no terminal do app, escondido — ▤ mostra`,
 
-  // play: launch.json e tasks.json
+  // play: launch.json and tasks.json
   requestNaoSuportado: (request: string) => `"request": "${request}" ainda não é suportado — só "launch"`,
   faltaProgramOuExecutable: "falta `program` ou `runtimeExecutable`",
   faltaProgramOuModule: "falta `program` ou `module`",
@@ -176,7 +176,7 @@ const pt = {
   tarefaSegundoPlano: (nome: string) => `a tarefa "${nome}" roda em segundo plano, o que ainda não é suportado`,
   tarefaTipo: (nome: string, tipo: string) => `a tarefa "${nome}" é do tipo "${tipo}", que ainda não é suportado`,
 
-  // uso do Claude no rodapé
+  // Claude usage in the footer
   tempoRestante: "Tempo restante",
   tokensDisponiveis: "Tokens disponíveis",
   sessao: "Sessão",
@@ -185,7 +185,7 @@ const pt = {
   dicaDeUso: (nome: string, pct: number, falta: string) =>
     `${nome}:\n${pct}% de tokens disponíveis\n${falta} de tempo restante`,
 
-  // rádio
+  // radio
   estacoesLista: "Estações (lista)",
   tocar: "Tocar",
   pausar: "Pausar",
@@ -203,7 +203,7 @@ const pt = {
   semEspectro: "sem espectro",
   genero: (g: string) => g,
 
-  // lista de atalhos
+  // shortcut list
   atAbas: "Abas",
   atNovaAba: "Nova aba",
   atReabrirAAbaFechada: "Reabrir a aba fechada",
@@ -246,7 +246,7 @@ const pt = {
   atSairPerguntaAntes: "Sair (pergunta antes)",
   atalhosDoTeclado: "Atalhos do Teclado",
 
-  // caixas de pergunta
+  // dialogs
   abaFecha: (n: number) => (n === 1 ? "A aba aberta fecha" : `As ${n} abas abertas fecham`),
   naoVoltam: "Elas não voltam na próxima abertura — TermIAu ▸ Restaurar Abas ao Abrir liga isso.",
   voltamNasPastas: "Na próxima abertura elas voltam, nas mesmas pastas.",
@@ -273,27 +273,27 @@ const pt = {
     "Cada painel volta na pasta em que estava. Não achei o Claude Code (~/.claude), então não há sessões para retomar.",
   abasVoltamComSessoes: "Cada painel volta na pasta em que estava, e as sessões do Claude são retomadas.",
 
-  // página
+  // page
   imagemAnexada: "imagem anexada",
   novaAbaDica: "Nova aba (⌘T)",
   novaAba: "Nova aba",
 };
 
 const en: typeof pt = {
-  // aba presa
+  // pinned tab
   diffDaBranch: "Branch diff",
   diffDe: (nome) => `Diff of ${nome}`,
   repositorio: "repository",
   nenhumRepositorio: "No repository open — use a panel's diff button",
   tituloDiff: "Diff — TermIAu",
 
-  // sessões do Claude
+  // Claude sessions
   compactandoSozinho: (pct) => `Context at ${pct}%: compacting automatically.`,
   temUmaPergunta: "Claude has a question for you.",
   pedePermissao: (ferramenta, oque) => `Claude asks permission to use ${ferramenta}${oque ? `: ${oque}` : "."}`,
   umaFerramenta: "a tool",
 
-  // modo chat
+  // chat mode
   estaEsperando: "Claude is waiting for you.",
   trabalhando: (tempo) => `Working… ${tempo} · esc interrupts`,
   jaRespondidaNoTerminal: "The question had already been answered in the terminal.",
@@ -326,7 +326,7 @@ const en: typeof pt = {
   comecoNoTerminal: "The beginning of this conversation stayed in the terminal: only the most recent part is here.",
   programaRodando: "A program is running in this panel: Claude was not opened",
 
-  // comandos do Claude Code
+  // Claude Code commands
   cmdClear: "Start a new conversation",
   cmdCompact: "Summarize the conversation to free up context",
   cmdInit: "Create the project's CLAUDE.md",
@@ -357,7 +357,7 @@ const en: typeof pt = {
   cmdLogin: "Switch accounts",
   cmdExit: "Quit Claude Code",
 
-  // visor
+  // file viewer
   arranjoLado: "Side by side",
   arranjoAbaixo: "File on top, terminal below",
   arranjoSobre: "Over the terminal",
@@ -373,7 +373,7 @@ const en: typeof pt = {
   verRenderizado: "Show rendered",
   naoAchei: (arquivo) => `Could not find ${arquivo}`,
 
-  // escuta
+  // dictation
   escutando: "listening…",
   enviaEm: (s) => `↵ in ${s}s — type to cancel`,
   escutaDesligada: "listening off — a minute without speaking (⌘E to resume)",
@@ -382,7 +382,7 @@ const en: typeof pt = {
   baixandoModeloPct: (pct) => `downloading the transcription model… ${pct}%`,
   erroNaEscuta: (e) => `listening error: ${e}`,
 
-  // barra do painel
+  // panel bar
   diffDestePainel: "This panel's branch diff",
   recolherPainel: "Restore — show the other panels (⌘⇧↩)",
   ocuparAba: "Fill the whole tab (⌘⇧↩)",
@@ -423,7 +423,7 @@ const en: typeof pt = {
   gavetaOcupada: "the app terminal is running another command",
   rodandoEscondido: (nome) => `${nome} running in the app terminal, hidden — ▤ shows it`,
 
-  // play: launch.json e tasks.json
+  // play: launch.json and tasks.json
   requestNaoSuportado: (request) => `"request": "${request}" is not supported yet — only "launch"`,
   faltaProgramOuExecutable: "missing `program` or `runtimeExecutable`",
   faltaProgramOuModule: "missing `program` or `module`",
@@ -433,7 +433,7 @@ const en: typeof pt = {
   tarefaSegundoPlano: (nome) => `the task "${nome}" runs in the background, which is not supported yet`,
   tarefaTipo: (nome, tipo) => `the task "${nome}" is of type "${tipo}", which is not supported yet`,
 
-  // uso do Claude no rodapé
+  // Claude usage in the footer
   tempoRestante: "Time left",
   tokensDisponiveis: "Tokens available",
   sessao: "Session",
@@ -441,7 +441,7 @@ const en: typeof pt = {
   semJanela: (nome) => `${nome}:\nno open window`,
   dicaDeUso: (nome, pct, falta) => `${nome}:\n${pct}% of tokens available\n${falta} of time left`,
 
-  // rádio
+  // radio
   estacoesLista: "Stations (list)",
   tocar: "Play",
   pausar: "Pause",
@@ -459,7 +459,7 @@ const en: typeof pt = {
   semEspectro: "no spectrum",
   genero: (g) => GENEROS_EN[g] ?? g,
 
-  // lista de atalhos
+  // shortcut list
   atAbas: "Tabs",
   atNovaAba: "New tab",
   atReabrirAAbaFechada: "Reopen the closed tab",
@@ -502,7 +502,7 @@ const en: typeof pt = {
   atSairPerguntaAntes: "Quit (asks first)",
   atalhosDoTeclado: "Keyboard Shortcuts",
 
-  // caixas de pergunta
+  // dialogs
   abaFecha: (n) => (n === 1 ? "The open tab closes" : `The ${n} open tabs close`),
   naoVoltam: "They won't come back next launch — TermIAu ▸ Restore Tabs on Launch turns that on.",
   voltamNasPastas: "They come back next launch, in the same folders.",
@@ -529,7 +529,7 @@ const en: typeof pt = {
     "Each panel comes back in the folder it was in. Claude Code (~/.claude) wasn't found, so there are no sessions to resume.",
   abasVoltamComSessoes: "Each panel comes back in the folder it was in, and the Claude sessions are resumed.",
 
-  // página
+  // page
   imagemAnexada: "attached image",
   novaAbaDica: "New tab (⌘T)",
   novaAba: "New tab",

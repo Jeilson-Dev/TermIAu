@@ -1,23 +1,23 @@
-/// A conversa de uma sessão do Claude Code, lida do transcript dela (o JSONL em
-/// `~/.claude/projects`), e o que o terminal precisa para achar na tela o que
-/// você escreveu. Nada de DOM nem de xterm aqui: é o que deixa isto testável.
+/// A Claude Code session's conversation, read from its transcript (the JSONL in
+/// `~/.claude/projects`), and what the terminal needs to find on screen what
+/// you wrote. No DOM or xterm here: that is what makes this testable.
 
 import { T } from "./i18n/terminal";
 
-/// Uma fala da conversa, na ordem em que aconteceu.
+/// One turn of the conversation, in the order it happened.
 export type Fala =
   | { quem: "claude"; texto: string }
-  /// `imagens`: as que você colou, como data URLs, na ordem em que o texto as
-  /// cita (`[Image #N]`).
+  /// `imagens`: the ones you pasted, as data URLs, in the order the text
+  /// cites them (`[Image #N]`).
   | { quem: "voce"; texto: string; imagens?: string[] }
-  /// Uma ferramenta que o Claude usou: o nome e uma linha do que ela fez.
+  /// A tool Claude used: the name and one line of what it did.
   | { quem: "ferramenta"; nome: string; resumo: string }
-  /// O que uma ferramenta mudou nos arquivos — um Edit, um Write, ou um
-  /// comando do Bash que mexeu em arquivo —, logo abaixo dela.
+  /// What a tool changed in the files — an Edit, a Write, or a
+  /// Bash command that touched a file —, right below it.
   | { quem: "diff"; arquivos: ArquivoDiff[] };
 
-/// Um arquivo mudado e os trechos da mudança, como o Claude Code os guarda.
-/// O Rust já tirou do resultado da ferramenta (ver `diff_do_resultado`).
+/// A changed file and the hunks of the change, as Claude Code stores them.
+/// Rust already extracted it from the tool result (see `diff_do_resultado`).
 export type ArquivoDiff = {
   caminho: string;
   hunks: { oldStart: number; newStart: number; lines: string[] }[];
@@ -37,14 +37,14 @@ type Linha = {
   message?: { content?: string | Bloco[] };
 };
 
-/// O que o Claude Code escreve no lugar do usuário: a saída de um comando
-/// local, um lembrete do sistema, o aviso de uma tarefa. Não é você falando.
+/// What Claude Code writes in the user's place: the output of a local
+/// command, a system reminder, a task notice. It isn't you speaking.
 const NAO_E_VOCE = /^\s*<(local-command-|system-reminder|task-notification|user-prompt-submit-hook|bash-)/;
 const COMANDO = /<command-name>([\s\S]*?)<\/command-name>/;
 const ARGUMENTOS = /<command-args>([\s\S]*?)<\/command-args>/;
 
-/// O que você digitou, tirado do que o transcript guarda. Um `/comando` vem
-/// embrulhado em tags; volta a ser o que foi digitado.
+/// What you typed, taken from what the transcript stores. A `/command` comes
+/// wrapped in tags; it goes back to what was typed.
 function doUsuario(texto: string): string | undefined {
   const comando = COMANDO.exec(texto);
   if (comando) return `${comando[1].trim()} ${ARGUMENTOS.exec(texto)?.[1].trim() ?? ""}`.trim();
@@ -52,8 +52,8 @@ function doUsuario(texto: string): string | undefined {
   return texto.trim() || undefined;
 }
 
-/// O texto de uma fala sua sem o que muda entre o que você digitou e o que o
-/// Claude grava: o embrulho do texto colado, as `[Image #N]`, os espaços.
+/// The text of one of your turns without what differs between what you typed and what
+/// Claude stores: the pasted-text wrapper, the `[Image #N]`s, the spaces.
 const comparavel = (texto: string) =>
   texto
     .replace(/<\/?pasted_content[^>]*>/g, "")
@@ -61,13 +61,13 @@ const comparavel = (texto: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
-/// Quantos dos balões provisórios (o texto de cada um, do mais antigo ao mais
-/// novo) a fala sua que chegou do transcript resolve. Não é sempre o mais
-/// antigo: mensagens mandadas com o Claude trabalhando ficam na fila dele e
-/// podem chegar juntas, numa fala só; e um provisório que nunca virou fala
-/// (um `!comando`, um envio que não pegou) não pode tomar o lugar de outro e
-/// deixar o certo duplicado na tela. Os provisórios de antes do que casou
-/// saem junto: o transcript é em ordem, e eles não vêm mais.
+/// How many of the provisional bubbles (each one's text, from oldest to
+/// newest) your turn arriving from the transcript resolves. It isn't always the
+/// oldest: messages sent while Claude works wait in its queue and
+/// may arrive together, in a single turn; and a provisional one that never became a turn
+/// (a `!command`, a send that didn't take) must not take another's place and
+/// leave the right one duplicated on screen. The provisional ones before the match
+/// go along: the transcript is in order, and they won't come anymore.
 export function provisoriosResolvidos(pendentes: string[], fala: string): number {
   if (!pendentes.length) return 0;
   const chegou = comparavel(fala);
@@ -78,12 +78,12 @@ export function provisoriosResolvidos(pendentes: string[], fala: string): number
     const t = comparavel(p);
     if (t && chegou.includes(t)) ultimo = i;
   });
-  // Nada parecido: o Claude gravou diferente do que foi digitado. Sai o mais
-  // antigo, como antes.
+  // Nothing similar: Claude stored something different from what was typed. The oldest
+  // goes, as before.
   return ultimo >= 0 ? ultimo + 1 : 1;
 }
 
-/// Os campos em que cada ferramenta diz o que fez, do mais legível ao menos.
+/// The fields in which each tool says what it did, from most readable to least.
 const RESUMOS = ["description", "command", "file_path", "pattern", "query", "url", "prompt", "skill"];
 
 export function resumoDe(input: Record<string, unknown> | undefined): string {
@@ -94,8 +94,8 @@ export function resumoDe(input: Record<string, unknown> | undefined): string {
   return "";
 }
 
-/// As falas de um trecho do transcript. Cada linha é um JSON; a que não for
-/// (uma linha cortada, um formato novo) é pulada, e a conversa segue.
+/// The turns of a transcript chunk. Each line is a JSON; one that isn't
+/// (a cut line, a new format) is skipped, and the conversation goes on.
 export function lerFalas(jsonl: string): Fala[] {
   const falas: Fala[] = [];
   for (const bruta of jsonl.split("\n")) {
@@ -110,14 +110,14 @@ export function lerFalas(jsonl: string): Fala[] {
       if (linha.arquivos?.length) falas.push({ quem: "diff", arquivos: linha.arquivos });
       continue;
     }
-    // Os subagentes escrevem no mesmo arquivo; a conversa é só a principal.
+    // Subagents write to the same file; the conversation is only the main one.
     if (linha.isSidechain || linha.isMeta) continue;
     const conteudo = linha.message?.content;
     if (conteudo === undefined) continue;
     const blocos: Bloco[] = typeof conteudo === "string" ? [{ type: "text", text: conteudo }] : conteudo;
 
     if (linha.type === "user") {
-      // O resultado de uma ferramenta volta como mensagem "do usuário".
+      // A tool's result comes back as a "user" message.
       if (blocos.some((b) => b.type === "tool_result")) continue;
       const texto = blocos
         .map((b) => (b.type === "text" ? (b.text ?? "") : ""))
@@ -128,7 +128,7 @@ export function lerFalas(jsonl: string): Fala[] {
           ? [`data:${b.source.media_type ?? "image/png"};base64,${b.source.data}`]
           : [],
       );
-      // Só imagem, sem texto: ainda é você falando.
+      // Image only, no text: it is still you speaking.
       const seu = doUsuario(texto) ?? (imagens.length && !NAO_E_VOCE.test(texto) ? "" : undefined);
       if (seu !== undefined) falas.push(imagens.length ? { quem: "voce", texto: seu, imagens } : { quem: "voce", texto: seu });
     } else if (linha.type === "assistant") {
@@ -143,23 +143,23 @@ export function lerFalas(jsonl: string): Fala[] {
   return falas;
 }
 
-// ---------- o que você escreveu, em partes ----------
+// ---------- what you wrote, in parts ----------
 
-/// Um pedaço do seu balão: texto seu, um texto que você colou (que o Claude
-/// Code embrulha em `<pasted_content>`), ou uma das imagens da fala.
+/// A piece of your bubble: your text, text you pasted (which Claude
+/// Code wraps in `<pasted_content>`), or one of the turn's images.
 export type Parte =
   | { tipo: "texto"; texto: string }
   | { tipo: "colado"; texto: string }
   | { tipo: "imagem"; indice: number };
 
-/// A tag de abrir e a de fechar podem vir com o `id` ou sem ele — a de fechar,
-/// estranhamente, repete o id.
+/// The opening and closing tags may come with or without the `id` — the closing one,
+/// oddly, repeats the id.
 const COLADO = /<pasted_content(?:\s+id="[^"]*")?>\n?([\s\S]*?)\n?<\/pasted_content(?:\s+id="[^"]*")?>/g;
 const IMAGEM = /\[Image #\d+\]/g;
 
-/// Parte o seu texto nos pedaços que o balão desenha de jeitos diferentes. A
-/// k-ésima `[Image #N]` é a k-ésima imagem da fala: o N é contado na sessão
-/// inteira, não na fala. Imagem que o texto não cita vai para o fim.
+/// Splits your text into the pieces the bubble draws in different ways. The
+/// k-th `[Image #N]` is the turn's k-th image: N is counted across the whole
+/// session, not the turn. An image the text doesn't cite goes at the end.
 export function partesDoSeu(texto: string, imagens: number): Parte[] {
   const partes: Parte[] = [];
   let usadas = 0;
@@ -186,15 +186,15 @@ export function partesDoSeu(texto: string, imagens: number): Parte[] {
   return partes;
 }
 
-// ---------- o diff de uma edição ----------
+// ---------- the diff of an edit ----------
 
-/// Uma linha do diff como o terminal a mostra: o que saiu, o que entrou, o
-/// contexto em volta, ou o `…` entre dois trechos distantes. `numero` é a linha
-/// no arquivo: a de antes para o que saiu, a de depois para o resto.
-/// `antigo`: o número que uma linha de contexto tinha antes, que o lado a lado mostra.
+/// A diff line as the terminal shows it: what went out, what came in, the
+/// surrounding context, or the `…` between two distant hunks. `numero` is the line
+/// in the file: the old one for what went out, the new one for the rest.
+/// `antigo`: the number a context line had before, which side by side shows.
 export type LinhaDiff = { tipo: "-" | "+" | " " | "…"; texto: string; numero?: number; antigo?: number };
 
-/// As linhas de um arquivo do diff, numeradas, e quantas entraram e saíram.
+/// A diff file's lines, numbered, and how many came in and went out.
 export function linhasDoDiff(arquivo: ArquivoDiff): { linhas: LinhaDiff[]; mais: number; menos: number } {
   const linhas: LinhaDiff[] = [];
   let mais = 0;
@@ -204,7 +204,7 @@ export function linhasDoDiff(arquivo: ArquivoDiff): { linhas: LinhaDiff[]; mais:
     let velha = h.oldStart;
     let nova = h.newStart;
     for (const l of h.lines) {
-      // "\\ No newline at end of file" não é linha do arquivo.
+      // "\ No newline at end of file" isn't a line of the file.
       if (l.startsWith("\\")) continue;
       const tipo = l[0] === "+" || l[0] === "-" ? l[0] : " ";
       if (tipo === "-") {
@@ -221,12 +221,12 @@ export function linhasDoDiff(arquivo: ArquivoDiff): { linhas: LinhaDiff[]; mais:
   return { linhas, mais, menos };
 }
 
-/// Uma linha do lado a lado: o antes à esquerda, o depois à direita. Um lado
-/// vazio é linha que só existe no outro.
+/// A side-by-side line: before on the left, after on the right. An empty
+/// side is a line that only exists on the other.
 export type ParDiff = { pulo: true } | { pulo?: false; antes?: LinhaDiff; depois?: LinhaDiff };
 
-/// As linhas do diff em duas colunas, como o differ mostra: o contexto dos dois
-/// lados, e cada bloco de linhas que saíram ao lado das que entraram no lugar.
+/// The diff lines in two columns, as the differ shows them: the context on both
+/// sides, and each block of removed lines beside the ones that replaced them.
 export function ladoALado(linhas: LinhaDiff[]): ParDiff[] {
   const pares: ParDiff[] = [];
   let saiu: LinhaDiff[] = [];
@@ -238,7 +238,7 @@ export function ladoALado(linhas: LinhaDiff[]): ParDiff[] {
   };
   for (const l of linhas) {
     if (l.tipo === "-") {
-      // Um `-` depois de `+` começa outro bloco.
+      // A `-` after a `+` starts another block.
       if (entrou.length) fechar();
       saiu.push(l);
     } else if (l.tipo === "+") entrou.push(l);
@@ -257,7 +257,7 @@ export function ladoALado(linhas: LinhaDiff[]): ParDiff[] {
 export const escapar = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-/// Negrito, itálico e link de um trecho que já não tem código dentro.
+/// Bold, italic and links in a snippet that no longer has code in it.
 function enfase(s: string): string {
   return escapar(s)
     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>')
@@ -265,10 +265,10 @@ function enfase(s: string): string {
     .replace(/(^|[^*\w])\*([^*\s][^*]*)\*(?!\w)/g, "$1<em>$2</em>");
 }
 
-/// O código entre crases sai antes de tudo: o que está dentro dele não é
-/// markdown, e um `**` ali tem de continuar sendo dois asteriscos. Sai para um
-/// marcador e volta no fim, em vez de partir a linha nele: um negrito pode
-/// começar antes do código e terminar depois, e partida a linha ele não fecha.
+/// Code between backticks comes out before everything: what is inside isn't
+/// markdown, and a `**` there must stay two asterisks. It goes out to a
+/// placeholder and comes back at the end, instead of splitting the line at it: a bold may
+/// start before the code and end after it, and with the line split it wouldn't close.
 function emLinha(s: string): string {
   const codigos: string[] = [];
   const semCodigo = s.replace(/`([^`\n]+)`/g, (_, c: string) => `\u0000${codigos.push(c) - 1}\u0000`);
@@ -282,9 +282,9 @@ const celulas = (linha: string) =>
     .split("|")
     .map((c) => c.trim());
 
-/// Um JSON escrito numa linha só, como o Claude costuma citar um payload, sai
-/// com quebras e recuo. O que não for JSON válido, ou já vier em várias
-/// linhas, fica como está.
+/// JSON written on a single line, as Claude often quotes a payload, comes out
+/// with line breaks and indentation. What isn't valid JSON, or already comes on several
+/// lines, stays as is.
 export function jsonLegivel(codigo: string): string {
   const t = codigo.trim();
   if (t.includes("\n") || !/^[[{]/.test(t)) return codigo;
@@ -295,12 +295,12 @@ export function jsonLegivel(codigo: string): string {
   }
 }
 
-/// O markdown que o Claude costuma escrever, em HTML: título, lista, tabela,
-/// bloco de código, e a ênfase de dentro da linha. Não é um parser completo — é
-/// o bastante para uma resposta ficar legível, e tudo o que entra é escapado.
-/// `rebaixar`: quantos níveis os títulos descem. No balão do chat um `#` vira
-/// h3, senão gritaria mais que a conversa; no visor o documento é a página
-/// inteira, e os títulos ficam como estão.
+/// The markdown Claude usually writes, as HTML: headings, lists, tables,
+/// code blocks, and inline emphasis. It isn't a complete parser — it is
+/// enough for an answer to be readable, and everything that comes in is escaped.
+/// `rebaixar`: how many levels headings go down. In the chat bubble a `#` becomes
+/// h3, otherwise it would shout louder than the conversation; in the viewer the document is the whole
+/// page, and headings stay as they are.
 export function markdown(texto: string, rebaixar = 2): string {
   const linhas = texto.replace(/\r/g, "").split("\n");
   const html: string[] = [];
@@ -330,7 +330,7 @@ export function markdown(texto: string, rebaixar = 2): string {
       continue;
     }
 
-    // Tabela: a linha de cabeçalho e, logo abaixo, a de tracinhos.
+    // Table: the header line and, right below, the dashes line.
     if (linha.includes("|") && /^\s*\|?\s*:?-{2,}/.test(linhas[i + 1] ?? "")) {
       fecharParagrafo();
       const cabeca = celulas(linha).map((c) => `<th>${emLinha(c)}</th>`).join("");
@@ -351,7 +351,7 @@ export function markdown(texto: string, rebaixar = 2): string {
       for (; i < linhas.length; i++) {
         const m = /^(\s*)([-*]|\d+[.)])\s+(.*)$/.exec(linhas[i]);
         if (m) itens.push(emLinha(m[3]));
-        // Linha recuada logo abaixo de um item é a continuação dele.
+        // An indented line right below an item is its continuation.
         else if (itens.length && /^\s+\S/.test(linhas[i])) itens[itens.length - 1] += `<br>${emLinha(linhas[i].trim())}`;
         else break;
       }
@@ -370,24 +370,24 @@ export function markdown(texto: string, rebaixar = 2): string {
   return html.join("");
 }
 
-// ---------- o que você escreveu, na tela do terminal ----------
+// ---------- what you wrote, on the terminal screen ----------
 
-/// O sinal que o Claude Code põe na frente do que você mandou. Mudou de uma
-/// versão para outra, então valem os que ele já usou.
+/// The marker Claude Code puts in front of what you sent. It changed from one
+/// version to another, so every one it has used counts.
 const SINAL = /^\s*[>❯›〉]\s+/;
-/// Quantos caracteres do começo do prompt bastam para reconhecer a linha. A
-/// tela quebra o texto na largura do painel, então só o começo é comparável.
+/// How many characters from the start of the prompt are enough to recognize the line. The
+/// screen wraps the text at the panel width, so only the start is comparable.
 const COMECO = 24;
-/// Um prompt colado pode ter centenas de linhas; o destaque não vai tão longe.
+/// A pasted prompt may have hundreds of lines; the highlight doesn't go that far.
 const ALTURA_MAXIMA = 12;
 
 const compacto = (s: string) => s.replace(/\s+/g, " ").trim();
 
-/// Onde, entre as linhas da tela, estão os prompts que você mandou: a linha em
-/// que cada um começa e quantas ele ocupa (até a primeira em branco).
+/// Where, among the screen lines, the prompts you sent are: the line where
+/// each one starts and how many it takes (up to the first blank one).
 ///
-/// Só casa com prompt conhecido, e não com qualquer linha que comece pelo
-/// sinal: uma citação na resposta do Claude começa com `>` também.
+/// Only matches a known prompt, not any line starting with the
+/// marker: a quote in Claude's answer starts with `>` too.
 export function linhasDePrompt(tela: string[], prompts: string[]): { linha: number; altura: number }[] {
   const comecos = new Set<string>();
   for (const p of prompts) {
@@ -403,8 +403,8 @@ export function linhasDePrompt(tela: string[], prompts: string[]): { linha: numb
     const resto = compacto(tela[i].slice(sinal[0].length));
     let casou = false;
     for (const c of comecos) {
-      // A linha pode ser mais curta que o começo guardado: o painel é estreito
-      // e a quebra veio antes. Aí é a linha inteira que tem de bater.
+      // The line may be shorter than the stored start: the panel is narrow
+      // and the wrap came earlier. Then it is the whole line that must match.
       if (resto.startsWith(c) || (resto.length >= 8 && c.startsWith(resto))) {
         casou = true;
         break;
@@ -419,19 +419,19 @@ export function linhasDePrompt(tela: string[], prompts: string[]): { linha: numb
   return achados;
 }
 
-// ---------- os /comandos ----------
+// ---------- the /commands ----------
 
 export type Comando = {
   nome: string;
   descricao: string;
-  /// Abre um menu ou uma tela no terminal (escolher modelo, retomar sessão): o
-  /// chat não tem como mostrar isso, então quem o manda é levado para lá.
+  /// Opens a menu or a screen in the terminal (pick a model, resume a session): the
+  /// chat has no way to show that, so whoever sends it is taken there.
   interativo?: boolean;
 };
 
-/// Os comandos que já vêm no Claude Code. Escritos à mão: ele não os publica em
-/// lugar nenhum que dê para ler de fora. Os seus (comandos, skills, plugins)
-/// vêm do disco, pelo `comandos_listar` do Rust.
+/// The commands that come built into Claude Code. Written by hand: it doesn't publish them
+/// anywhere readable from outside. Yours (commands, skills, plugins)
+/// come from disk, through Rust's `comandos_listar`.
 export const COMANDOS_DO_CLAUDE: Comando[] = [
   { nome: "clear", descricao: T.cmdClear },
   { nome: "compact", descricao: T.cmdCompact },
@@ -464,9 +464,9 @@ export const COMANDOS_DO_CLAUDE: Comando[] = [
   { nome: "exit", descricao: T.cmdExit },
 ];
 
-/// Os comandos que casam com o que foi digitado depois da barra: primeiro os
-/// que começam por ele, depois os que o têm no meio. O primeiro de cada nome
-/// vence — um comando seu com o nome de um embutido é o que o Claude roda.
+/// The commands matching what was typed after the slash: first the ones
+/// starting with it, then the ones containing it. The first of each name
+/// wins — a command of yours with a built-in's name is what Claude runs.
 export function filtrarComandos(todos: Comando[], digitado: string): Comando[] {
   const q = digitado.toLowerCase();
   const vistos = new Set<string>();
@@ -475,7 +475,7 @@ export function filtrarComandos(todos: Comando[], digitado: string): Comando[] {
   for (const c of todos) {
     const nome = c.nome.toLowerCase();
     if (vistos.has(nome)) continue;
-    // `plugin:nome` também é achado pelo nome sozinho.
+    // `plugin:name` is also found by the name alone.
     const curto = nome.slice(nome.lastIndexOf(":") + 1);
     if (nome.startsWith(q) || curto.startsWith(q)) comeca.push(c);
     else if (nome.includes(q)) contem.push(c);
@@ -485,9 +485,9 @@ export function filtrarComandos(todos: Comando[], digitado: string): Comando[] {
   return [...comeca, ...contem];
 }
 
-// ---------- as perguntas do Claude (AskUserQuestion) ----------
+// ---------- Claude's questions (AskUserQuestion) ----------
 
-/// Uma pergunta como o Claude a manda no `tool_input` do `AskUserQuestion`.
+/// A question as Claude sends it in `AskUserQuestion`'s `tool_input`.
 export type Questao = {
   question: string;
   header?: string;
@@ -495,12 +495,12 @@ export type Questao = {
   options: { label: string; description?: string; preview?: string }[];
 };
 
-/// O que você escolheu numa pergunta: as opções marcadas e, se escreveu, o
-/// texto do "Outra".
+/// What you picked in a question: the checked options and, if you wrote it, the
+/// "Other" text.
 export type Escolha = { labels: string[]; outra?: string };
 
-/// As perguntas de um `tool_input`, ou nada se ele não tiver a forma esperada:
-/// aí o cartão não aparece, e a pergunta fica com o terminal.
+/// The questions in a `tool_input`, or nothing if it doesn't have the expected shape:
+/// then the card doesn't show, and the question stays with the terminal.
 export function questoesDe(input: Record<string, unknown> | undefined): Questao[] | undefined {
   const qs = input?.questions;
   if (!Array.isArray(qs) || !qs.length) return undefined;
@@ -513,18 +513,18 @@ export function questoesDe(input: Record<string, unknown> | undefined): Questao[
   return ok ? (qs as Questao[]) : undefined;
 }
 
-/// O texto da resposta de uma pergunta: o "Outra" vale por si; marcadas várias,
-/// vão juntas por vírgula, como o terminal faz.
+/// The answer text for a question: "Other" stands on its own; with several checked,
+/// they go together separated by commas, as the terminal does.
 export function textoDaEscolha(e: Escolha | undefined): string | undefined {
   const outra = e?.outra?.trim();
   const partes = [...(e?.labels ?? []), ...(outra ? [outra] : [])];
   return partes.length ? partes.join(", ") : undefined;
 }
 
-/// A saída do hook que responde as perguntas: a mesma decisão que a extensão
-/// do VS Code devolve pelo SDK — `allow`, com as perguntas de volta e as
-/// respostas pelo texto de cada uma. `undefined` enquanto faltar responder
-/// alguma.
+/// The hook output that answers the questions: the same decision the VS Code
+/// extension returns through the SDK — `allow`, with the questions back and the
+/// answers keyed by each one's text. `undefined` while any is still
+/// unanswered.
 export function respostaDoHook(questoes: Questao[], escolhas: (Escolha | undefined)[]): string | undefined {
   const answers: Record<string, string> = {};
   for (const [i, q] of questoes.entries()) {

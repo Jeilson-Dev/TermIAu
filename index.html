@@ -1,19 +1,19 @@
 <!doctype html>
-<html lang="pt-br">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <title>TermIAu</title>
   </head>
   <body>
-    <!-- A barra só aparece com duas ou mais abas; com uma, é ruído. -->
+    <!-- The bar only shows with two or more tabs; with one, it is noise. -->
     <div id="tabs" hidden>
-      <!-- O "+" fica sempre no fim da fila por `order` no CSS, e não pela ordem
-           aqui: os chips das abas entram por `appendChild` e passariam por cima
-           dele. Faz o mesmo que ⌘T. -->
-      <button id="nova-aba" class="tab-mais" title="Nova aba (⌘T)" aria-label="Nova aba">
-        <!-- Desenhado, e não o caractere "+": o glifo se apoia na linha de base
-             e fica alto dentro do botão. Dois traços num viewBox quadrado caem
-             no centro de verdade. -->
+      <!-- The "+" always stays at the end of the row through `order` in CSS, not
+           through the order here: tab chips come in via `appendChild` and would
+           go past it. It does the same as ⌘T. -->
+      <button id="nova-aba" class="tab-mais" title="New tab (⌘T)" aria-label="New tab">
+        <!-- Drawn, not the "+" character: the glyph rests on the baseline and
+             sits high inside the button. Two strokes in a square viewBox land
+             truly in the center. -->
         <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
           <path d="M6 1.75v8.5M1.75 6h8.5" stroke="currentColor" stroke-width="1.5"
                 stroke-linecap="round" />
@@ -21,19 +21,19 @@
       </button>
     </div>
     <div id="panes"></div>
-    <!-- Faixa da voz: o espaço é reservado sempre. Aparecer e desaparecer
-         faria os painéis encolherem e crescerem a cada ⌘E — o terminal
-         inteiro pulava. Vazia ela é só uma linha escura no rodapé.
-         As barrinhas da onda quem cria é o src/main.ts. -->
+    <!-- Voice strip: its space is always reserved. Appearing and disappearing
+         would make the panels shrink and grow on every ⌘E — the whole
+         terminal jumped. Empty, it is just a dark line in the footer.
+         src/main.ts creates the wave's little bars. -->
     <div id="voz">
-      <!-- O uso do Claude (sessão e semana) no canto esquerdo: o hover abre os
-           detalhes para a direita. Quem o monta é o src/main.ts. -->
+      <!-- Claude's usage (session and week) in the left corner: hovering opens
+           the details to the right. src/main.ts builds it. -->
       <div id="uso"></div>
       <span class="voz-onda" aria-hidden="true"></span>
       <span class="voz-texto"></span>
-      <!-- A rádio fica na mesma faixa, encostada do outro lado: a escuta manda
-           na esquerda (onda e parcial), a rádio na direita. Os botões, o volume
-           e o iframe escondido quem cria é o src/main.ts. -->
+      <!-- The radio sits on the same strip, against the other side: dictation
+           rules the left (wave and partial), the radio the right. src/main.ts
+           creates the buttons, the volume and the hidden iframe. -->
       <div id="lofi"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>

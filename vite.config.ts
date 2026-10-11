@@ -7,15 +7,15 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
-    // Por consulta, e não pelos avisos do sistema: o projeto mora num volume
-    // externo, e lá os avisos de mudança param de chegar no meio da sessão — o
-    // Vite seguia servindo o arquivo de antes, sem erro nenhum.
+    // Polling, not system notifications: the project lives on an external
+    // volume, and there change notifications stop arriving mid-session — Vite
+    // kept serving the previous file, with no error at all.
     watch: { ignored: ["**/src-tauri/**", "**/node_modules/**"], usePolling: true, interval: 300 },
   },
   build: {
-    // Duas páginas: o terminal e o differ. São bundles separados porque a aba
-    // presa carrega o differ num <iframe> — e assim o React e o shiki, que só
-    // ele usa, não entram no bundle que abre a janela.
+    // Two pages: the terminal and the differ. They are separate bundles because
+    // the pinned tab loads the differ in an <iframe> — so React and shiki, which
+    // only it uses, stay out of the bundle that opens the window.
     rollupOptions: {
       input: {
         index: "index.html",

@@ -5,19 +5,19 @@ fn main() {
     tauri_build::build()
 }
 
-/// O ggml-metal do whisper.cpp usa `@available`, e o clang traduz isso numa
-/// chamada a `___isPlatformVersionAtLeast` — função que mora no compiler-rt
-/// dele, não na libc nem no `compiler_builtins` do Rust. Como o rustc linka com
-/// `-nodefaultlibs`, essa biblioteca não entra sozinha, e o link do release
-/// morre em "Undefined symbols for architecture arm64".
+/// whisper.cpp's ggml-metal uses `@available`, and clang turns that into a
+/// call to `___isPlatformVersionAtLeast` — a function that lives in its
+/// compiler-rt, not in libc nor in Rust's `compiler_builtins`. Since rustc links with
+/// `-nodefaultlibs`, that library doesn't come in on its own, and the release link
+/// dies with "Undefined symbols for architecture arm64".
 ///
-/// No debug passava, mas por acaso: aquele objeto do whisper foi compilado por
-/// um clang anterior, que ainda emitia a função antiga (`___isOSVersionAtLeast`,
-/// essa sim já resolvida). Quem recompilar do zero com o Xcode 26 esbarra nisso
-/// nos dois perfis.
+/// Debug worked, but by chance: that whisper object was compiled by
+/// an earlier clang, which still emitted the old function (`___isOSVersionAtLeast`,
+/// which is already resolved). Anyone rebuilding from scratch with Xcode 26 hits this
+/// in both profiles.
 ///
-/// O caminho vem do próprio clang em vez de escrito à mão: ele carrega a versão
-/// da toolchain (…/clang/17/lib/darwin) e muda a cada Xcode.
+/// The path comes from clang itself instead of being hardcoded: it carries the
+/// toolchain version (…/clang/17/lib/darwin) and changes with every Xcode.
 #[cfg(target_os = "macos")]
 fn ligar_compiler_rt() {
     println!("cargo:rerun-if-changed=build.rs");
@@ -31,9 +31,9 @@ fn ligar_compiler_rt() {
     let caminho = String::from_utf8_lossy(&saida.stdout).trim().to_string();
     let arquivo = std::path::Path::new(&caminho);
 
-    // Sem achar o arquivo, o clang devolve o nome cru que recebeu. Aí não há o
-    // que linkar, e vale mais deixar o link falhar com a mensagem dele do que
-    // apontar para um diretório que não existe.
+    // When it can't find the file, clang returns the raw name it got. Then there is
+    // nothing to link, and it is better to let the link fail with its own message than
+    // to point to a directory that doesn't exist.
     let Some(pasta) = arquivo.parent().filter(|_| arquivo.is_file()) else {
         return;
     };

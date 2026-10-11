@@ -1,37 +1,37 @@
-/// As estações da rádio do rodapé.
+/// The footer radio's stations.
 ///
-/// Vêm de [recommended-radio-streams](https://github.com/deroverda/recommended-radio-streams),
-/// uma curadoria em CC0 de rádios independentes, comunitárias e de nicho —
-/// underground eletrônico, freeform, jazz, ambient, campus, chiptune, world.
-/// O CC0 cobre a LISTA; cada estação tem os termos dela.
+/// They come from [recommended-radio-streams](https://github.com/deroverda/recommended-radio-streams),
+/// a CC0 curation of independent, community and niche radios —
+/// electronic underground, freeform, jazz, ambient, campus, chiptune, world.
+/// CC0 covers the LIST; each station has its own terms.
 ///
-/// A lista aqui não é a de lá inteira: as 430 originais passaram por três
-/// filtros, e cada um foi medido, não presumido.
+/// The list here isn't the whole one from there: the original 430 went through three
+/// filters, and each one was measured, not assumed.
 ///
-///  1. Só `https`. De uma página `tauri://` o WebKit recusa stream `http` como
-///     conteúdo misto, com `NotSupportedError` no `play()`. Corta 113.
-///  2. Só as que responderam. Sondei cada uma tocando de verdade numa WebView;
-///     55 deram erro, recusa ou silêncio.
-///  3. O resto entra, marcado pelo que o Web Audio consegue ver.
+///  1. `https` only. From a `tauri://` page WebKit refuses an `http` stream as
+///     mixed content, with `NotSupportedError` on `play()`. Cuts 113.
+///  2. Only those that responded. I probed each one by actually playing it in a WebView;
+///     55 gave an error, a refusal or silence.
+///  3. The rest goes in, marked by what Web Audio can see.
 ///
-/// `espectro` é o que separa as duas metades, e não é o mesmo que "manda CORS".
-/// Pelo cabeçalho, 249 mandavam; tocando de verdade, só 56 entregam amostra ao
-/// grafo. As outras tocam mudas ali dentro — e, como o grafo é quem fala com o
-/// alto-falante, tocariam em silêncio. Por isso elas vão pelo caminho direto,
-/// sem grafo e sem mostrador. Ver `ligarAnalisador` no `main.ts`.
+/// `espectro` is what splits the two halves, and it isn't the same as "sends CORS".
+/// By the header, 249 sent it; actually playing, only 56 deliver samples to the
+/// graph. The others play muted in there — and, since the graph is what talks to the
+/// speaker, they would play in silence. So they go the direct way,
+/// without a graph and without a display. See `ligarAnalisador` in `main.ts`.
 ///
-/// Gerada em 18/09/2026. Rádio pequena sai do ar; o seletor avisa quando uma
-/// não abre, e refazer a lista é rodar a sondagem de novo.
+/// Generated on 2026-09-18. Small radios go off the air; the picker says when one
+/// won't open, and redoing the list means running the probe again.
 export type Estacao = {
   nome: string;
   url: string;
   genero: string;
-  /// Entrega amostra ao Web Audio: toca pelo grafo, com espectro e com o anel
-  /// de volume. Falso toca pelo caminho direto, com o volume do elemento.
+  /// Delivers samples to Web Audio: plays through the graph, with the spectrum and the volume
+  /// ring. False plays the direct way, with the element's volume.
   espectro: boolean;
 };
 
-/// As 56 com espectro primeiro, cada metade em ordem de nome.
+/// The 56 with spectrum first, each half in name order.
 export const ESTACOES: Estacao[] = [
   { nome: "20ft Radio", url: "https://20ft-radio.radiocult.fm/stream", genero: "independente", espectro: true },
   { nome: "Aaja Music - Channel 1", url: "https://aaja.radiocult.fm/stream", genero: "independente", espectro: true },

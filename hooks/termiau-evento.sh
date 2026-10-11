@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Encaminha um evento do Claude Code para o painel do TermIAu de onde ele veio.
+# Forwards a Claude Code event to the TermIAu panel it came from.
 #
-# Quem diz de qual painel é o ambiente: o TermIAu põe TERMIAU_PAINEL e
-# TERMIAU_SOCK em cada shell que abre, e este hook roda como descendente dele.
-# Fora do TermIAu as duas não existem e o hook sai calado — é o que deixa o
-# mesmo settings.json servir para o iTerm2, o VS Code e qualquer outro terminal.
+# The environment says which panel: TermIAu sets TERMIAU_PAINEL and
+# TERMIAU_SOCK in every shell it opens, and this hook runs as its descendant.
+# Outside TermIAu neither exists and the hook exits quietly — that is what lets the
+# same settings.json serve iTerm2, VS Code and any other terminal.
 set -uo pipefail
 
-# ---------- a status line do Claude Code ----------
+# ---------- Claude Code's status line ----------
 #
-# Registrado também como `statusLine` (com o argumento `status`). O Claude Code
-# manda a cada atualização um JSON com o contexto da sessão e os limites de 5h e
-# de 7 dias; dentro do TermIAu ele vai para o app — que mostra o contexto na
-# barra do painel e o uso no rodapé — e a linha fica vazia, porque o app já
-# mostra tudo. Fora dele vale a status line que você tinha, se ainda existir.
+# Also registered as `statusLine` (with the `status` argument). Claude Code
+# sends on every update a JSON with the session's context and the 5h and
+# 7-day limits; inside TermIAu it goes to the app — which shows the context on the
+# panel bar and the usage in the footer — and the line stays empty, because the app already
+# shows everything. Outside it, the status line you had applies, if it still exists.
 if [ "${1:-}" = status ]; then
   if [ -z "${TERMIAU_SOCK:-}" ] || [ ! -S "$TERMIAU_SOCK" ]; then
     ANTIGA="$HOME/.claude/statusline-command.sh"
@@ -33,40 +33,40 @@ fi
 [ -n "${TERMIAU_SOCK:-}" ] || exit 0
 [ -S "$TERMIAU_SOCK" ] || exit 0
 
-# Lê o payload antes de ir pro segundo plano: em background a entrada padrão
-# do hook já teria fechado.
+# Read the payload before going to the background: in background the hook's
+# standard input would already have closed.
 PAYLOAD=$(cat)
 [ -n "${PAYLOAD// /}" ] || exit 0
 
-# ---------- o diff de um Bash, quando o Claude Code não o grava ----------
+# ---------- a Bash's diff, when Claude Code doesn't store it ----------
 #
-# Um comando que mexe em arquivo e termina com erro (um `sed -i … && grep` em
-# que o grep não acha nada) não deixa diff nenhum no transcript, e o modo chat
-# não teria o que mostrar. Então, dentro de um repositório git, este hook tira
-# uma foto da pasta antes do Bash (PreToolUse) e outra depois (PostToolUse ou
-# PostToolUseFailure); se mudou, o patch vai para ~/.termiau/diffs/<sessão>/
-# <tool_use_id>.patch, de onde o Rust o lê quando o transcript não tem o diff.
+# A command that changes a file and ends with an error (a `sed -i … && grep` where
+# grep finds nothing) leaves no diff in the transcript, and chat mode
+# would have nothing to show. So, inside a git repository, this hook takes
+# a snapshot of the folder before the Bash (PreToolUse) and another after (PostToolUse or
+# PostToolUseFailure); if it changed, the patch goes to ~/.termiau/diffs/<session>/
+# <tool_use_id>.patch, where Rust reads it when the transcript doesn't have the diff.
 #
-# A foto é um `git write-tree` sobre um index à parte: nem o seu index, nem o
-# stash, nem a árvore de trabalho são tocados. Entram também os arquivos fora
-# do git (menos os ignorados). O index à parte fica guardado entre um comando e
-# outro, e com ele o git só relê o que mudou.
+# The snapshot is a `git write-tree` over a separate index: neither your index, nor the
+# stash, nor the working tree are touched. Files outside git come in too
+# (except ignored ones). The separate index is kept between one command and
+# the next, and with it git only rereads what changed.
 
 DIFFS="$HOME/.termiau/diffs"
 
-# Um campo de texto do payload, sem `jq`. O Claude Code manda o JSON compacto
-# e numa linha só; os campos lidos aqui são ids e um caminho.
+# A text field of the payload, without `jq`. Claude Code sends the JSON compact
+# and on a single line; the fields read here are ids and a path.
 campo() {
   printf '%s' "$PAYLOAD" | grep -o "\"$1\":\"[^\"]*\"" | head -1 | sed 's/^"[^"]*":"//; s/"$//'
 }
 
-# Imprime a raiz do repositório e o tree da pasta inteira, uma linha cada.
+# Prints the repository root and the whole folder's tree, one line each.
 foto() {
   local raiz idx tmp arvore
   raiz=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) || return 1
   mkdir -p "$DIFFS/index" || return 1
   idx="$DIFFS/index/$(printf '%s' "$raiz" | cksum | cut -d' ' -f1)"
-  # Uma cópia por chamada: dois Bash em paralelo não disputam o mesmo index.
+  # One copy per call: two Bash calls in parallel don't fight over the same index.
   tmp="$idx.$$"
   if [ -f "$idx" ]; then
     cp "$idx" "$tmp"
@@ -89,13 +89,13 @@ diff_do_bash() {
   id=$(campo tool_use_id)
   sessao=$(campo session_id)
   cwd=$(campo cwd)
-  # Os dois viram nome de arquivo: só o formato que eles têm.
+  # Both become file names: only the format they have.
   case "$id$sessao" in '' | *[!A-Za-z0-9_-]*) return ;; esac
   [ -d "$cwd" ] || return
   antes="$DIFFS/antes/$id"
   if [ "$evento" = PreToolUse ]; then
     mkdir -p "$DIFFS/antes" || return
-    # As fotos de comandos que nunca terminaram (o Claude foi fechado no meio).
+    # Snapshots of commands that never finished (Claude was closed midway).
     find "$DIFFS/antes" -type f -mtime +1 -delete 2>/dev/null
     foto "$cwd" >"$antes" || rm -f "$antes"
     return
@@ -106,8 +106,8 @@ diff_do_bash() {
   depois=$(foto "$raiz" | sed -n 2p)
   [ -n "$depois" ] && [ "$depois" != "$arvore" ] || return
   mkdir -p "$DIFFS/$sessao" || return
-  # A primeira linha diz de que pasta são os caminhos do patch. Um comando que
-  # gera arquivos aos montes não vira um patch sem fim: 1 MB basta para a tela.
+  # The first line says which folder the patch's paths are from. A command that
+  # generates files by the bunch doesn't become an endless patch: 1 MB is enough for the screen.
   {
     printf '# raiz %s\n' "$raiz"
     git -C "$raiz" diff --no-color --no-ext-diff --no-renames -U3 "$arvore" "$depois" 2>/dev/null
@@ -118,8 +118,8 @@ PAINEL="${TERMIAU_PAINEL:-0}"
 case "$PAINEL" in '' | *[!0-9]*) PAINEL=0 ;; esac
 
 case "$PAYLOAD" in
-  # Depois de uma pergunta do Claude: ela foi respondida (no chat ou no
-  # terminal) e o cartão do chat sai. Vai para o app como os outros eventos.
+  # After a Claude question: it was answered (in the chat or in the
+  # terminal) and the chat card goes away. It goes to the app like the other events.
   *'"tool_name":"AskUserQuestion"'*) ;;
   *'"hook_event_name":"PreToolUse"'* | *'"hook_event_name":"PostToolUse"'* | *'"hook_event_name":"PostToolUseFailure"'*)
     diff_do_bash
@@ -127,14 +127,14 @@ case "$PAYLOAD" in
     ;;
 esac
 
-# ---------- a pergunta do Claude, respondida pelo modo chat ----------
+# ---------- Claude's question, answered by chat mode ----------
 #
-# Num `AskUserQuestion` o hook não devolve na hora: manda a pergunta ao app e
-# espera a resposta pela mesma conexão (ver `Pendentes` no lib.rs). O que
-# voltar é a saída do hook — a decisão com as respostas, que o Claude Code lê
-# como se você tivesse escolhido no terminal. Voltar vazio (o app fechou, ou a
-# pergunta foi respondida no terminal antes) é sair calado: aí vale o terminal,
-# que mostra a mesma pergunta o tempo todo e responde por conta própria.
+# On an `AskUserQuestion` the hook doesn't return right away: it sends the question to the app and
+# waits for the answer over the same connection (see `Pendentes` in lib.rs). What
+# comes back is the hook's output — the decision with the answers, which Claude Code reads
+# as if you had chosen in the terminal. Coming back empty (the app closed, or the
+# question was answered in the terminal first) means exiting quietly: then the terminal applies,
+# which shows the same question all along and answers on its own.
 case "$PAYLOAD" in
   *'"hook_event_name":"PermissionRequest"'*'"tool_name":"AskUserQuestion"'* | \
     *'"tool_name":"AskUserQuestion"'*'"hook_event_name":"PermissionRequest"'*)
@@ -143,11 +143,11 @@ case "$PAYLOAD" in
     ;;
 esac
 
-# ---------- o visor, ensinado ao Claude ----------
+# ---------- the viewer, taught to Claude ----------
 #
-# No começo da sessão, o que o hook escreve na saída entra no contexto do
-# Claude: é assim que ele fica sabendo do `termiau ver` — e só dentro do
-# TermIAu, porque fora dele o hook saiu lá no começo.
+# At the start of the session, what the hook writes to its output goes into Claude's
+# context: that is how it learns about `termiau ver` — and only inside
+# TermIAu, because outside it the hook exited at the very start.
 case "$PAYLOAD" in
   *'"hook_event_name":"SessionStart"'*)
     if [ -x "$HOME/.termiau/bin/termiau" ]; then
@@ -156,11 +156,11 @@ case "$PAYLOAD" in
     ;;
 esac
 
-# Devolve na hora. O TermIAu é quem decide o que fazer com o evento, e o hook
-# não pode segurar o turno do Claude enquanto isso.
+# Returns right away. TermIAu decides what to do with the event, and the hook
+# must not hold Claude's turn meanwhile.
 #
-# O payload vai embrulhado, e não editado: juntar o número do painel por fora
-# dispensa o `jq`, que quem só instalou o app pode não ter. O `nc` vem no macOS.
+# The payload goes wrapped, not edited: adding the panel number outside
+# spares `jq`, which someone who only installed the app may not have. `nc` ships with macOS.
 {
   printf '{"painel":%s,"evento":%s}' "$PAINEL" "$PAYLOAD" \
     | nc -U "$TERMIAU_SOCK" -w 1

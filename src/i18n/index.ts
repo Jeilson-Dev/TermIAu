@@ -1,16 +1,16 @@
-/// O idioma do app: o do sistema. Português para quem tem o português como
-/// primeira língua do macOS; inglês para todo o resto. O WebKit entrega a lista
-/// do sistema no `navigator.languages` (medido: um macOS em en-AU dá "en-AU"),
-/// então não é preciso perguntar ao Rust.
+/// The app's language: the system's. Portuguese for those with Portuguese as the
+/// first macOS language; English for everyone else. WebKit delivers the system's
+/// list in `navigator.languages` (measured: a macOS in en-AU gives "en-AU"),
+/// so there is no need to ask Rust.
 ///
-/// Os textos de cada parte do app moram num arquivo ao lado deste, como um par
-/// `{ pt, en }` com a mesma forma — o tipo do `en` é o do `pt`, e esquecer uma
-/// chave numa das línguas é erro de compilação.
+/// The texts of each part of the app live in a file beside this one, as a
+/// `{ pt, en }` pair with the same shape — `en`'s type is `pt`'s, and forgetting a
+/// key in one of the languages is a compile error.
 
 export type Idioma = "pt" | "en";
 
-/// Só a primeira língua da lista decide: quem pôs o inglês na frente quer o app
-/// em inglês, mesmo com o português logo atrás.
+/// Only the first language in the list decides: whoever put English in front wants the app
+/// in English, even with Portuguese right behind.
 export function idiomaDe(tags: readonly string[]): Idioma {
   return tags[0]?.toLowerCase().startsWith("pt") ? "pt" : "en";
 }
@@ -24,21 +24,21 @@ let atual: Idioma = idiomaDe(doSistema());
 
 export const idioma = (): Idioma => atual;
 
-/// Para os testes: o Node não tem o idioma do macOS.
+/// For tests: Node doesn't have the macOS language.
 export function definirIdioma(i: Idioma) {
   atual = i;
 }
 
-/// O locale para datas e números: o do sistema quando ele é da mesma língua do
-/// app (en-AU formata como na Austrália), senão o padrão da língua.
+/// The locale for dates and numbers: the system's when it is in the same language as the
+/// app (en-AU formats as in Australia), otherwise the language's default.
 export function localidade(): string {
   const primeiro = doSistema()[0];
   if (primeiro && idiomaDe([primeiro]) === atual) return primeiro;
   return atual === "pt" ? "pt-BR" : "en-US";
 }
 
-/// Os textos de uma parte do app, no idioma de agora. Lidos na hora do acesso,
-/// e não na carga do módulo: é o que deixa um teste trocar o idioma.
+/// The texts of a part of the app, in the current language. Read at access time,
+/// not at module load: that is what lets a test switch the language.
 export function traducoes<T extends object>(par: { pt: T; en: T }): T {
   return new Proxy({} as T, {
     get: (_, chave) => (par[atual] as Record<string | symbol, unknown>)[chave],

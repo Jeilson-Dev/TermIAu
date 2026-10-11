@@ -1,13 +1,13 @@
-/// Os textos da aba do diff (`src/differ`). O `en` tem a forma do `pt`: uma
-/// chave esquecida numa das línguas não compila.
+/// The diff tab's texts (`src/differ`). `en` has the shape of `pt`: a
+/// key forgotten in one of the languages doesn't compile.
 import { traducoes } from "./index";
 
-/// Um texto de ajuda com pedaços de código no meio: quem desenha põe cada
-/// `{ codigo }` num `<code>`.
+/// A help text with code pieces in it: the renderer puts each
+/// `{ codigo }` in a `<code>`.
 export type Trecho = string | { codigo: string; branch?: boolean };
 
 const pt = {
-  // barra de cima
+  // top bar
   escopoDaRevisao: "Escopo da revisão",
   escopoBranchDica: "Tudo o que a branch mudou desde que saiu da branch alvo",
   escopoBranch: "Branch inteira",
@@ -33,13 +33,13 @@ const pt = {
     "Com todos revisados, a revisão deste commit fica completa: o Incremental passa a partir dele no próximo commit",
   revisados: (feitos: number, total: number) => `${feitos} de ${total} revisados`,
 
-  // o repositório mudou
+  // the repository changed
   diffMudou: "O diff mudou",
   diffMudouTexto: "O repositório recebeu commits desde que esta revisão foi carregada.",
   nao: "Não",
   simRecarregar: "Sim, recarregar",
 
-  // preferências
+  // preferences
   preferencias: "Preferências",
   fecharEsc: "Fechar (Esc)",
   branchPadrao: "Branch padrão",
@@ -73,7 +73,7 @@ const pt = {
     " vai sozinho quando o contexto chega no limite e o Claude está parado. O limite tem de passar do vermelho; abaixo dele, vale o vermelho mais um.",
   ] as Trecho[],
 
-  // marcadores
+  // bookmarks
   trechoAlterado: "trecho alterado",
   trechoAlteradoDica: "Estas linhas mudaram desde a última revisão completa",
   trechoIntocado: "trecho intocado",
@@ -102,14 +102,14 @@ const pt = {
   salvar: "Salvar",
   adicionarMarcador: "Adicionar marcador",
 
-  // tabela do diff
+  // diff table
   adicionarMarcadorDica: "Adicionar marcador (arraste para marcar várias linhas)",
   semQuebraNoFim: "Sem quebra de linha no fim do arquivo",
   mostrarAbaixo: "Mostrar linhas abaixo",
   mostrarAcima: "Mostrar linhas acima",
   mostrarTodas: "Mostrar todas as linhas",
 
-  // estado do arquivo
+  // file status
   adicionado: "Adicionado",
   modificado: "Modificado",
   removido: "Removido",
@@ -118,7 +118,7 @@ const pt = {
   tipoAlterado: "Tipo alterado",
   adicoesRemocoes: (a: number, r: number) => `${a} ${a === 1 ? "adição" : "adições"}, ${r} ${r === 1 ? "remoção" : "remoções"}`,
 
-  // diff de imagem
+  // image diff
   imagemLadoALado: "Lado a lado",
   imagemLadoALadoDica: "Antes e depois, um ao lado do outro",
   imagemAlternar: "Alternar",
@@ -139,7 +139,7 @@ const pt = {
   pixelsDiferentes: (n: string, pct: string) => `${n} pixels diferentes (${pct}%)`,
   emRosa: "em rosa sobre a versão nova esmaecida",
 
-  // referências para colar num prompt
+  // references to paste into a prompt
   linha: (n: number) => `Linha ${n}`,
   linhas: (de: number, ate: number) => `Linhas ${de}–${ate}`,
   versaoAnterior: "versão anterior",
@@ -147,7 +147,7 @@ const pt = {
   resolvido: "resolvido",
   imagemIlegivel: "Não foi possível exibir esta imagem.",
 
-  // o contexto da pergunta ao Claude
+  // the context of the question to Claude
   versaoAnteriorAntes: "versão anterior (antes da mudança)",
   versaoNova: "versão nova",
   arquivoVersao: (caminho: string, versao: string) => `Arquivo: ${caminho} — ${versao}`,
@@ -170,7 +170,7 @@ a discussão, não traga alternativas que o revisor não escolheu e não cite a 
 imperativo, em português, sem título. Responda só com o comentário.`,
   modeloSemTexto: "O modelo não devolveu texto nenhum.",
 
-  // perguntas ao Claude
+  // questions to Claude
   modeloPadrao: "Modelo padrão",
   haikuRapido: "Haiku — rápido",
   opusCuidadoso: "Opus — mais cuidadoso",
@@ -219,7 +219,7 @@ imperativo, em português, sem título. Responda só com o comentário.`,
   pedirAlteracao: "Pedir alteração",
   perguntar: "Perguntar",
 
-  // barra lateral
+  // sidebar
   abaArquivos: "Arquivos",
   abaMarcadores: "Marcadores",
   mensagemDoCommit: "Mensagem do commit",
@@ -247,7 +247,7 @@ imperativo, em português, sem título. Responda só com o comentário.`,
   comentar: "Comentar",
   desatualizado: "desatualizado",
 
-  // o arquivo no diff
+  // the file in the diff
   arquivoBinario: "Arquivo binário — conteúdo não exibido.",
   arquivoRenomeado: "Arquivo renomeado, sem mudanças no conteúdo.",
   permissaoAlterada: (de: string, para: string) => `Permissão alterada: ${de} → ${para}`,
@@ -264,7 +264,7 @@ imperativo, em português, sem título. Responda só com o comentário.`,
   comentarSelecao: (trecho: string) => `Comentar o trecho selecionado (${trecho})`,
   perguntarSelecao: "Perguntar ao Claude sobre o trecho selecionado",
 
-  // o diff inteiro
+  // the whole diff
   marcadoresResolvidos: (feitos: number, total: number) =>
     `${feitos} de ${total} ${total === 1 ? "marcador resolvido" : "marcadores resolvidos"}`,
   semBranchesParaComparar: "O repositório não tem branches para comparar.",
@@ -322,7 +322,7 @@ imperativo, em português, sem título. Responda só com o comentário.`,
 };
 
 const en: typeof pt = {
-  // barra de cima
+  // top bar
   escopoDaRevisao: "Review scope",
   escopoBranchDica: "Everything the branch changed since it left the target branch",
   escopoBranch: "Whole branch",
@@ -348,13 +348,13 @@ const en: typeof pt = {
     "With every file reviewed, this commit's review is complete: Incremental starts from it on the next commit",
   revisados: (feitos, total) => `${feitos} of ${total} reviewed`,
 
-  // o repositório mudou
+  // the repository changed
   diffMudou: "The diff changed",
   diffMudouTexto: "The repository got new commits since this review was loaded.",
   nao: "No",
   simRecarregar: "Yes, reload",
 
-  // preferências
+  // preferences
   preferencias: "Preferences",
   fecharEsc: "Close (Esc)",
   branchPadrao: "Default branch",
@@ -388,7 +388,7 @@ const en: typeof pt = {
     " is sent on its own when the context reaches the limit and Claude is idle. The limit must be above red; below it, red plus one is used.",
   ],
 
-  // marcadores
+  // bookmarks
   trechoAlterado: "lines changed",
   trechoAlteradoDica: "These lines changed since the last complete review",
   trechoIntocado: "lines untouched",
@@ -417,14 +417,14 @@ const en: typeof pt = {
   salvar: "Save",
   adicionarMarcador: "Add bookmark",
 
-  // tabela do diff
+  // diff table
   adicionarMarcadorDica: "Add bookmark (drag to mark several lines)",
   semQuebraNoFim: "No newline at end of file",
   mostrarAbaixo: "Show lines below",
   mostrarAcima: "Show lines above",
   mostrarTodas: "Show all lines",
 
-  // estado do arquivo
+  // file status
   adicionado: "Added",
   modificado: "Modified",
   removido: "Deleted",
@@ -433,7 +433,7 @@ const en: typeof pt = {
   tipoAlterado: "Type changed",
   adicoesRemocoes: (a, r) => `${a} ${a === 1 ? "addition" : "additions"}, ${r} ${r === 1 ? "deletion" : "deletions"}`,
 
-  // diff de imagem
+  // image diff
   imagemLadoALado: "Side by side",
   imagemLadoALadoDica: "Before and after, next to each other",
   imagemAlternar: "Toggle",
@@ -454,7 +454,7 @@ const en: typeof pt = {
   pixelsDiferentes: (n, pct) => `${n} pixels differ (${pct}%)`,
   emRosa: "in pink over the faded new version",
 
-  // referências para colar num prompt
+  // references to paste into a prompt
   linha: (n) => `Line ${n}`,
   linhas: (de, ate) => `Lines ${de}–${ate}`,
   versaoAnterior: "previous version",
@@ -462,7 +462,7 @@ const en: typeof pt = {
   resolvido: "resolved",
   imagemIlegivel: "This image could not be displayed.",
 
-  // o contexto da pergunta ao Claude
+  // the context of the question to Claude
   versaoAnteriorAntes: "previous version (before the change)",
   versaoNova: "new version",
   arquivoVersao: (caminho, versao) => `File: ${caminho} — ${versao}`,
@@ -485,7 +485,7 @@ reopen the discussion, do not bring up alternatives the reviewer did not choose 
 conversation. Short text, in the imperative, in English, no title. Reply with the comment only.`,
   modeloSemTexto: "The model returned no text.",
 
-  // perguntas ao Claude
+  // questions to Claude
   modeloPadrao: "Default model",
   haikuRapido: "Haiku — fast",
   opusCuidadoso: "Opus — most careful",
@@ -534,7 +534,7 @@ conversation. Short text, in the imperative, in English, no title. Reply with th
   pedirAlteracao: "Request change",
   perguntar: "Ask",
 
-  // barra lateral
+  // sidebar
   abaArquivos: "Files",
   abaMarcadores: "Bookmarks",
   mensagemDoCommit: "Commit message",
@@ -562,7 +562,7 @@ conversation. Short text, in the imperative, in English, no title. Reply with th
   comentar: "Comment",
   desatualizado: "outdated",
 
-  // o arquivo no diff
+  // the file in the diff
   arquivoBinario: "Binary file — content not shown.",
   arquivoRenomeado: "File renamed, no content changes.",
   permissaoAlterada: (de, para) => `Mode changed: ${de} → ${para}`,
@@ -579,7 +579,7 @@ conversation. Short text, in the imperative, in English, no title. Reply with th
   comentarSelecao: (trecho) => `Comment on the selection (${trecho})`,
   perguntarSelecao: "Ask Claude about the selection",
 
-  // o diff inteiro
+  // the whole diff
   marcadoresResolvidos: (feitos, total) => `${feitos} of ${total} ${total === 1 ? "bookmark resolved" : "bookmarks resolved"}`,
   semBranchesParaComparar: "The repository has no branches to compare against.",
   noIndice: "Staged",

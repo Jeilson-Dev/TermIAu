@@ -1,18 +1,18 @@
-/// A ordem em que o app sobe, sem DOM nem Tauri — para ter teste, como o
-/// `uso.ts`. Quem faz cada passo é o `main.ts`; aqui fica só a sequência, que
-/// já quebrou uma vez: a rádio retomada antes das fontes deixava o app sem
-/// nenhuma aba (um stream carregando segura o `load` da página, e com ele o
+/// The order in which the app starts up, without DOM or Tauri — so it can be tested, like
+/// `uso.ts`. `main.ts` does each step; only the sequence lives here, which
+/// already broke once: resuming the radio before the fonts left the app with
+/// no tabs (a loading stream holds the page's `load`, and with it
 /// `document.fonts.ready`).
 export type Passos = {
-  /// Medir a célula antes da fonte carregar dá largura errada em toda a grade.
+  /// Measuring the cell before the font loads gives the wrong width across the whole grid.
   fontes(): Promise<unknown>;
-  /// Os eventos da janela, do menu e do socket.
+  /// The window, menu and socket events.
   ligar(): Promise<void>;
-  /// O menu, a aba presa e as abas da sessão anterior.
+  /// The menu, the pinned tab and the previous session's tabs.
   abrirAbas(): Promise<void>;
-  /// O que precisa das abas de pé.
+  /// What needs the tabs up.
   depois(): void;
-  /// Fechou tocando, abre tocando. Por último: é o passo que pode segurar a página.
+  /// Closed playing, opens playing. Last: it is the step that can hold the page.
   retomarRadio(): void;
 };
 

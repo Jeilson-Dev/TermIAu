@@ -1,10 +1,10 @@
-/// O que o visor precisa saber sem tocar no DOM: achar as referências a arquivo
-/// (`src/main.ts:848`) num texto. Fica num módulo à parte para ter teste, como
-/// o `conversa.ts`.
+/// What the viewer needs to know without touching the DOM: finding file references
+/// (`src/main.ts:848`) in a text. It lives in its own module so it can be tested, like
+/// `conversa.ts`.
 
-/// Uma referência achada num texto. `inicio` e `fim` são posições no texto
-/// (`fim` exclusivo), e `arquivo` ainda é como estava escrito: relativo ou não,
-/// quem sabe se ele existe é o Rust (`arquivos_existem`).
+/// A reference found in a text. `inicio` and `fim` are positions in the text
+/// (`fim` exclusive), and `arquivo` is still as it was written: relative or not,
+/// Rust is the one that knows whether it exists (`arquivos_existem`).
 export type Referencia = {
   inicio: number;
   fim: number;
@@ -13,10 +13,10 @@ export type Referencia = {
   ate?: number;
 };
 
-// Um caminho com extensão (`a/b/c.ts`, `./x.md`, `~/notas.md`), e depois dele,
-// opcional, `:linha`, `:linha-linha` ou `:linha:coluna`. Sem espaço no caminho:
-// na saída do terminal não há como saber onde um caminho com espaço começa.
-// O lookbehind impede começar no meio de outra coisa — de uma URL, sobretudo.
+// A path with an extension (`a/b/c.ts`, `./x.md`, `~/notes.md`), followed,
+// optionally, by `:line`, `:line-line` or `:line:column`. No spaces in the path:
+// in terminal output there is no way to know where a path with spaces starts.
+// The lookbehind prevents starting in the middle of something else — a URL, above all.
 const PADRAO =
   /(?<![\w/.~@+:-])((?:~\/|\.{1,2}\/|\/)?(?:[\w@.+-]+\/)*[\w@+-][\w@.+-]*\.[A-Za-z0-9]{1,10})(?::(\d+)(?:([-–:])(\d+))?)?(?![\w/])/g;
 
@@ -24,44 +24,44 @@ export function acharReferencias(texto: string): Referencia[] {
   const achadas: Referencia[] = [];
   for (const m of texto.matchAll(PADRAO)) {
     const [inteiro, arquivo, linha, sep, segundo] = m;
-    // Um número solto (`1.5`, `v2.0`) casa com o padrão, mas não é arquivo.
+    // A stray number (`1.5`, `v2.0`) matches the pattern, but isn't a file.
     if (/^[\d.]+$/.test(arquivo)) continue;
     const ref: Referencia = { inicio: m.index, fim: m.index + inteiro.length, arquivo };
     if (linha) ref.linha = Number(linha);
-    // `:10:5` é coluna, e o visor não usa coluna; `:10-20` é um trecho.
+    // `:10:5` is a column, and the viewer doesn't use columns; `:10-20` is a range.
     if (segundo && sep !== ":" && Number(segundo) >= Number(linha)) ref.ate = Number(segundo);
     achadas.push(ref);
   }
   return achadas;
 }
 
-/// O texto inteiro é uma referência? É o teste do `<code>` do chat: só um
-/// código que é só um caminho vira link, e não um trecho que cita um.
+/// Is the whole text a reference? It is the chat's `<code>` test: only
+/// code that is just a path becomes a link, not a snippet that quotes one.
 export function referenciaInteira(texto: string): Referencia | undefined {
   const t = texto.trim();
   const [ref] = acharReferencias(t);
   return ref && ref.inicio === 0 && ref.fim === t.length ? ref : undefined;
 }
 
-/// Uma linha da tela do terminal: o texto dela (com os espaços até a borda) e
-/// se o xterm a marcou como continuação da de cima (`isWrapped`).
+/// A line of the terminal screen: its text (with the spaces up to the edge) and
+/// whether xterm marked it as a continuation of the one above (`isWrapped`).
 export type LinhaDaTela = { texto: string; quebrada: boolean };
 
-/// Um texto montado de várias linhas da tela, com a posição de cada caractere
-/// nela — é o que leva uma referência achada no texto de volta para a tela.
+/// A text built from several screen lines, with each character's position
+/// on it — it is what takes a reference found in the text back to the screen.
 export type LinhaLogica = { texto: string; pos: { linha: number; col: number }[] };
 
-// Sem `.` e `:` na ponta: é onde as frases acabam, e um caminho partido bem ali
-// é raro.
+// No `.` or `:` at the end: that is where sentences end, and a path broken right there
+// is rare.
 const PONTA = /[\w/~@+-]$/;
 const COMECO = /^\s*[\w/.~@+-]/;
 
-/// A linha `i` continua na de baixo? Quando o xterm quebrou a linha, sempre.
-/// Com `juntar`, também quando quem quebrou foi o programa: o Claude Code quebra
-/// as linhas dele na largura da tela e indenta a continuação, e um caminho
-/// longo sai partido em dois. O palpite é estreito — a linha chegou perto da
-/// borda e termina, sem espaço, num caractere de caminho, e a de baixo começa
-/// com outro —, e quem confirma é o arquivo existir.
+/// Does line `i` continue on the next one? When xterm wrapped the line, always.
+/// With `juntar`, also when the program wrapped it: Claude Code wraps
+/// its lines at the screen width and indents the continuation, and a long
+/// path comes out split in two. The guess is narrow — the line got close to the
+/// edge and ends, without a space, on a path character, and the next one starts
+/// with another —, and the file existing is what confirms it.
 export function continua(linhas: LinhaDaTela[], i: number, cols: number, juntar: boolean): boolean {
   const prox = linhas[i + 1];
   if (!prox) return false;
@@ -71,10 +71,10 @@ export function continua(linhas: LinhaDaTela[], i: number, cols: number, juntar:
   return atual.length >= cols - 12 && PONTA.test(atual) && COMECO.test(prox.texto);
 }
 
-/// A linha lógica que passa pela linha `i` da tela. Uma continuação do
-/// programa entra sem a indentação dela; a do xterm, inteira. O palpite vale
-/// para cima e para baixo em separado: quem chama tenta as combinações, porque
-/// juntar a linha de baixo por engano estragaria o `:103` no fim desta.
+/// The logical line passing through screen line `i`. A program's
+/// continuation comes in without its indentation; xterm's, whole. The guess applies
+/// upward and downward separately: the caller tries the combinations, because
+/// joining the next line by mistake would spoil the `:103` at the end of this one.
 export function linhaLogica(
   linhas: LinhaDaTela[],
   i: number,
@@ -100,5 +100,5 @@ export function linhaLogica(
   return { texto, pos };
 }
 
-/// O arquivo é markdown: abre renderizado.
+/// The file is markdown: it opens rendered.
 export const ehMarkdown = (caminho: string) => /\.(md|markdown|mdx)$/i.test(caminho);

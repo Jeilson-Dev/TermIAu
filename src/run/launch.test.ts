@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { definirIdioma, idioma } from "../i18n";
 import { configsDe, lerJsonc, listaDoPlay, resolver, tarefaAntes, type Tarefa } from "./launch";
 
-// Os textos esperados aqui são os em português.
+// The texts expected here are the Portuguese ones.
 const inicial = idioma();
 beforeEach(() => definirIdioma("pt"));
 afterEach(() => definirIdioma(inicial));
@@ -12,7 +12,7 @@ const ctx = { pasta: "/w/app", home: "/Users/eu" };
 describe("lerJsonc", () => {
   it("accepts comments and trailing commas, leaving strings alone", () => {
     const json = lerJsonc(`{
-      // comentário
+      // comment
       "url": "http://x//y", /* bloco */
       "texto": "a, ]",
       "lista": [1, 2,],
