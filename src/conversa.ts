@@ -301,7 +301,10 @@ export function jsonLegivel(codigo: string): string {
 /// `rebaixar`: how many levels headings go down. In the chat bubble a `#` becomes
 /// h3, otherwise it would shout louder than the conversation; in the viewer the document is the whole
 /// page, and headings stay as they are.
-export function markdown(texto: string, rebaixar = 2): string {
+/// `caixas`: what a `- [ ]` / `- [x]` item becomes. Without it, text, as in the chat;
+/// with "ver", a checkbox you can't click (a file from git); with "marcar", a
+/// checkbox carrying the item's line in `data-linha`, for the viewer to write the click to disk.
+export function markdown(texto: string, rebaixar = 2, caixas?: "ver" | "marcar"): string {
   const linhas = texto.replace(/\r/g, "").split("\n");
   const html: string[] = [];
   let paragrafo: string[] = [];
@@ -318,7 +321,9 @@ export function markdown(texto: string, rebaixar = 2): string {
       fecharParagrafo();
       const codigo: string[] = [];
       for (i++; i < linhas.length && !/^\s*```\s*$/.test(linhas[i]); i++) codigo.push(linhas[i]);
-      html.push(`<pre><code>${escapar(jsonLegivel(codigo.join("\n")))}</code></pre>`);
+      // A mermaid diagram stays code here; the viewer swaps it for the drawing.
+      if (cerca[1].trim() === "mermaid") html.push(`<pre class="mermaid"><code>${escapar(codigo.join("\n"))}</code></pre>`);
+      else html.push(`<pre><code>${escapar(jsonLegivel(codigo.join("\n")))}</code></pre>`);
       continue;
     }
 
@@ -350,7 +355,7 @@ export function markdown(texto: string, rebaixar = 2): string {
       const itens: string[] = [];
       for (; i < linhas.length; i++) {
         const m = /^(\s*)([-*]|\d+[.)])\s+(.*)$/.exec(linhas[i]);
-        if (m) itens.push(emLinha(m[3]));
+        if (m) itens.push(caixas ? itemComCaixa(m[3], i, caixas) : emLinha(m[3]));
         // An indented line right below an item is its continuation.
         else if (itens.length && /^\s+\S/.test(linhas[i])) itens[itens.length - 1] += `<br>${emLinha(linhas[i].trim())}`;
         else break;
@@ -368,6 +373,14 @@ export function markdown(texto: string, rebaixar = 2): string {
   }
   fecharParagrafo();
   return html.join("");
+}
+
+function itemComCaixa(texto: string, linha: number, caixas: "ver" | "marcar"): string {
+  const m = /^\[([ xX])\]\s+(.*)$/.exec(texto);
+  if (!m) return emLinha(texto);
+  const marcada = m[1] === " " ? "" : " checked";
+  const clique = caixas === "marcar" ? ` data-linha="${linha}"` : " disabled";
+  return `<input type="checkbox" class="tarefa"${marcada}${clique}>${emLinha(m[2])}`;
 }
 
 // ---------- what you wrote, on the terminal screen ----------

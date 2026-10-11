@@ -2957,7 +2957,36 @@ function criarVisor(folha: Folha): Visor {
     e.preventDefault();
     abrirLink(e, a.href);
   });
+  corpo.addEventListener("change", (e) => {
+    const caixa = e.target as HTMLInputElement;
+    if (!caixa.matches("input.tarefa[data-linha]")) return;
+    if (caixa.checked) {
+      caixa.classList.add("marcou");
+      caixa.addEventListener("animationend", () => caixa.classList.remove("marcou"), { once: true });
+    }
+    void marcarTarefa(folha, caixa);
+  });
   return v;
+}
+
+/// A checkbox clicked in a rendered .md: `[ ]` ↔ `[x]` on that line of the file, on
+/// disk. The line changes in `v.linhas` before Rust answers, so a second quick click
+/// already starts from it.
+async function marcarTarefa(folha: Folha, caixa: HTMLInputElement) {
+  const v = folha.visor;
+  const linhas = v?.linhas;
+  const n = Number(caixa.dataset.linha);
+  const antes = linhas?.[n];
+  if (!v || !linhas || antes === undefined) return;
+  const depois = antes.replace(/^(\s*(?:[-*]|\d+[.)])\s+)\[[ xX]\]/, `$1[${caixa.checked ? "x" : " "}]`);
+  linhas[n] = depois;
+  try {
+    v.carimbo = await invoke<string>("arquivo_marcar", { caminho: v.historico[v.pos].caminho, linha: n, antes, depois });
+  } catch (e) {
+    linhas[n] = antes;
+    caixa.checked = !caixa.checked;
+    avisar(folha, T.naoDeuParaMarcar(String(e)));
+  }
 }
 
 const pastaDe = (caminho: string) => caminho.slice(0, caminho.lastIndexOf("/")) || "/";
@@ -3029,8 +3058,9 @@ function desenharVisor(folha: Folha, rolar: boolean) {
 
   if (md && v.renderizado) {
     const html = elemento("div", "visor-md chat-claude");
-    html.innerHTML = markdown(linhas.join("\n"), 0);
+    html.innerHTML = markdown(linhas.join("\n"), 0, p.ref ? "ver" : "marcar");
     v.corpo.replaceChildren(html);
+    void desenharMermaid(v, html);
     v.corpo.scrollTop = topo;
     if (rolar) v.rolagem = 0;
     return;
@@ -3057,6 +3087,125 @@ function desenharVisor(folha: Folha, rolar: boolean) {
   }
   if (rolar) v.rolagem = v.corpo.scrollTop;
   void colorirVisor(v, codigo, p.caminho, linhas);
+}
+
+let mermaidPronto: Promise<typeof import("mermaid").default> | null = null;
+let mermaidN = 0;
+
+/// The ```mermaid blocks of a rendered .md, as drawings. The import only happens when a
+/// file has one: mermaid weighs more than the rest of the viewer. A diagram that
+/// doesn't parse stays as code.
+async function desenharMermaid(v: Visor, html: HTMLElement) {
+  const blocos = [...html.querySelectorAll<HTMLElement>("pre.mermaid")];
+  if (!blocos.length) return;
+  const vez = v.vez;
+  mermaidPronto ??= import("mermaid").then(({ default: m }) => {
+    m.initialize({ startOnLoad: false, theme: "dark", securityLevel: "strict", fontFamily: "inherit" });
+    return m;
+  });
+  const mermaid = await mermaidPronto;
+  for (const bloco of blocos) {
+    try {
+      const { svg } = await mermaid.render(`mermaid-${++mermaidN}`, bloco.textContent ?? "");
+      if (vez !== v.vez || !bloco.isConnected) return;
+      const desenho = elemento("div", "visor-mermaid");
+      const area = elemento("div", "visor-mermaid-area");
+      area.innerHTML = svg;
+      desenho.append(area);
+      bloco.replaceWith(desenho);
+      const figura = area.querySelector("svg");
+      if (figura) zoomDoMermaid(desenho, area, figura);
+    } catch (e) {
+      jlog(`mermaid: ${e}`);
+    }
+  }
+}
+
+/// Zoom on a diagram: the buttons, a trackpad pinch (WebKit delivers it as
+/// `gesturechange`) or ⌘ + scroll, keeping the point under the pointer in place. It
+/// starts fitting the width; dragging moves it when it is larger than the box.
+function zoomDoMermaid(desenho: HTMLElement, area: HTMLElement, svg: SVGSVGElement) {
+  const caixa = svg.viewBox.baseVal;
+  const largura = caixa?.width || svg.getBoundingClientRect().width || 1;
+  const altura = caixa?.height || svg.getBoundingClientRect().height || 1;
+  svg.removeAttribute("width");
+  svg.removeAttribute("height");
+  svg.style.maxWidth = "none";
+  let escala = 1;
+  const pct = elemento("button", "visor-mermaid-pct");
+  const aplicar = (nova: number, x = area.clientWidth / 2, y = area.clientHeight / 2) => {
+    nova = Math.min(8, Math.max(0.1, nova));
+    const px = (area.scrollLeft + x) / escala;
+    const py = (area.scrollTop + y) / escala;
+    escala = nova;
+    svg.style.width = `${largura * escala}px`;
+    svg.style.height = `${altura * escala}px`;
+    area.scrollLeft = px * escala - x;
+    area.scrollTop = py * escala - y;
+    pct.textContent = `${Math.round(escala * 100)}%`;
+  };
+  // 24px: the area's padding, on both sides.
+  const ajustada = () => Math.min(1, (area.clientWidth - 24) / largura);
+  aplicar(ajustada());
+
+  const menos = elemento("button", "visor-mermaid-botao");
+  menos.textContent = "−";
+  menos.title = T.zoomMenos;
+  menos.addEventListener("click", () => aplicar(escala / 1.25));
+  pct.title = T.zoomAjustar;
+  pct.addEventListener("click", () => aplicar(ajustada()));
+  const mais = elemento("button", "visor-mermaid-botao");
+  mais.textContent = "+";
+  mais.title = T.zoomMais;
+  mais.addEventListener("click", () => aplicar(escala * 1.25));
+  const barra = elemento("div", "visor-mermaid-zoom");
+  barra.append(menos, pct, mais);
+  desenho.append(barra);
+
+  const ponto = (e: { clientX: number; clientY: number }) => {
+    const r = area.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top] as const;
+  };
+  area.addEventListener(
+    "wheel",
+    (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      aplicar(escala * Math.exp(-e.deltaY * 0.01), ...ponto(e));
+    },
+    { passive: false },
+  );
+  let antesDoGesto = 1;
+  area.addEventListener("gesturestart", (e) => {
+    e.preventDefault();
+    antesDoGesto = escala;
+  });
+  area.addEventListener("gesturechange", (e) => {
+    e.preventDefault();
+    const g = e as unknown as { scale: number; clientX: number; clientY: number };
+    aplicar(antesDoGesto * g.scale, ...ponto(g));
+  });
+
+  area.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    const esquerda = area.scrollLeft;
+    const topo = area.scrollTop;
+    area.setPointerCapture(e.pointerId);
+    area.classList.add("arrastando");
+    const mover = (m: PointerEvent) => {
+      area.scrollLeft = esquerda - (m.clientX - x0);
+      area.scrollTop = topo - (m.clientY - y0);
+    };
+    const soltar = () => {
+      area.removeEventListener("pointermove", mover);
+      area.classList.remove("arrastando");
+    };
+    area.addEventListener("pointermove", mover);
+    area.addEventListener("pointerup", soltar, { once: true });
+    area.addEventListener("pointercancel", soltar, { once: true });
+  });
 }
 
 /// Colors come later, from the same shiki as the differ: the file shows right away, and

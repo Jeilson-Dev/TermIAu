@@ -112,7 +112,11 @@ const pt = {
   voltarAoTerminal: "Voltar ao terminal (esc)",
   editorErro: (e: string) => `Editor: ${e}`,
   naoDeuParaAbrir: (e: string) => `Não deu para abrir: ${e}`,
+  naoDeuParaMarcar: (e: string) => `Não deu para marcar: ${e}`,
   verFonte: "Ver fonte",
+  zoomMenos: "Diminuir (⌘ + rolar, ou pinça)",
+  zoomAjustar: "Ajustar à largura",
+  zoomMais: "Aumentar (⌘ + rolar, ou pinça)",
   verRenderizado: "Ver renderizado",
   naoAchei: (arquivo: string) => `Não achei ${arquivo}`,
 
@@ -369,7 +373,11 @@ const en: typeof pt = {
   voltarAoTerminal: "Back to the terminal (esc)",
   editorErro: (e) => `Editor: ${e}`,
   naoDeuParaAbrir: (e) => `Could not open: ${e}`,
+  naoDeuParaMarcar: (e) => `Could not check it: ${e}`,
   verFonte: "Show source",
+  zoomMenos: "Zoom out (⌘ + scroll, or pinch)",
+  zoomAjustar: "Fit to width",
+  zoomMais: "Zoom in (⌘ + scroll, or pinch)",
   verRenderizado: "Show rendered",
   naoAchei: (arquivo) => `Could not find ${arquivo}`,
 

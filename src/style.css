@@ -2569,6 +2569,112 @@ body {
   font-size: 15px;
 }
 
+/* A mermaid diagram, in a box of its own: the zoom scrolls inside it, and the
+   buttons show on hover. */
+.visor-mermaid {
+  position: relative;
+  margin: 0 0 8px;
+  border: 1px solid var(--bg-lighter);
+  border-radius: 8px;
+}
+
+.visor-mermaid-area {
+  overflow: auto;
+  max-height: 80vh;
+  padding: 12px;
+  text-align: center;
+  cursor: grab;
+}
+
+.visor-mermaid-area.arrastando {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.visor-mermaid-zoom {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.visor-mermaid:hover .visor-mermaid-zoom {
+  opacity: 1;
+}
+
+.visor-mermaid-zoom button {
+  min-width: 26px;
+  padding: 2px 8px;
+  border: none;
+  border-radius: 5px;
+  background: var(--bg-light);
+  color: var(--fg);
+  font: 12px/1.6 inherit;
+  cursor: pointer;
+}
+
+.visor-mermaid-zoom button:hover {
+  background: var(--bg-lighter);
+}
+
+/* A `- [ ]` item: the checkbox takes the bullet's place. */
+.visor-md li:has(> .tarefa) {
+  list-style: none;
+}
+
+/* Round: an open circle, and when checked a thick ✓ that leaves through the opening.
+   Both are drawn in the same box, so checking doesn't move anything. */
+.visor-md .tarefa {
+  appearance: none;
+  width: 17px;
+  height: 17px;
+  margin: 0 7px 0 -22px;
+  vertical-align: -4px;
+  border: none;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='13' r='8.5' fill='none' stroke='%236272a4' stroke-width='2.2'/%3E%3C/svg%3E") center / 100% no-repeat;
+}
+
+.visor-md .tarefa:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23bd93f9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13.2 4.6A8.5 8.5 0 1 0 19.4 11.6' stroke-width='2.4'/%3E%3Cpath d='M7 12.3 10.6 16 21 4.5' stroke-width='3.4'/%3E%3C/svg%3E");
+}
+
+/* Checking by click jumps and lets out a purple glow. Only by click: the class comes
+   from the viewer, otherwise every redraw would animate the boxes already checked. */
+.visor-md .tarefa.marcou {
+  border-radius: 50%;
+  animation: tarefa-marcou 0.4s cubic-bezier(0.3, 1.6, 0.5, 1);
+}
+
+@keyframes tarefa-marcou {
+  0% {
+    transform: scale(0.4) rotate(-20deg);
+    box-shadow: 0 0 0 0 rgba(189, 147, 249, 0.6);
+  }
+  60% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: none;
+    box-shadow: 0 0 0 9px rgba(189, 147, 249, 0);
+  }
+}
+
+/* What is done steps back, so what is left stands out. */
+.visor-md li:has(> .tarefa:checked) {
+  color: var(--fg-dim);
+}
+
+.visor-md .tarefa:disabled {
+  opacity: 0.6;
+}
+
+.visor-md .tarefa[data-linha] {
+  cursor: pointer;
+}
+
 .visor-erro {
   padding: 24px;
   color: var(--red);

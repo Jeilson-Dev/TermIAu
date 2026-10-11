@@ -832,6 +832,42 @@ fn arquivo_carimbo(caminho: String) -> Option<String> {
     carimbo(std::path::Path::new(&caminho))
 }
 
+/// A checkbox clicked in a rendered .md: line `linha` (from 0) goes from `antes` to
+/// `depois` on disk, and returns the new stamp. Not async on purpose: two quick
+/// clicks are written in order.
+#[tauri::command]
+fn arquivo_marcar(caminho: String, linha: usize, antes: String, depois: String) -> Result<String, String> {
+    let p = std::path::Path::new(&caminho);
+    if !p.is_absolute() {
+        return Err(format!("{}: {caminho}", tr("caminho relativo", "relative path")));
+    }
+    let texto = std::fs::read_to_string(p).map_err(|e| e.to_string())?;
+    std::fs::write(p, trocar_linha(&texto, linha, &antes, &depois)?).map_err(|e| e.to_string())?;
+    Ok(carimbo(p).unwrap_or_default())
+}
+
+/// The rest of the file stays byte for byte, line endings included. If the line is no
+/// longer `antes`, the file changed under the viewer and nothing is replaced.
+fn trocar_linha(texto: &str, linha: usize, antes: &str, depois: &str) -> Result<String, String> {
+    let mudou = || tr("a linha mudou no disco", "the line changed on disk").to_string();
+    let mut saida = String::with_capacity(texto.len() + depois.len());
+    let mut achou = false;
+    for (i, parte) in texto.split_inclusive('\n').enumerate() {
+        if i != linha {
+            saida.push_str(parte);
+            continue;
+        }
+        let corpo = parte.trim_end_matches(['\n', '\r']);
+        if corpo != antes {
+            return Err(mudou());
+        }
+        saida.push_str(depois);
+        saida.push_str(&parte[corpo.len()..]);
+        achou = true;
+    }
+    if achou { Ok(saida) } else { Err(mudou()) }
+}
+
 /// Which of these paths (relative to `base`, absolute or with `~`) are files
 /// that exist, already absolute. It is what tells a real `user_repository.dart:103`
 /// apart from any `e.g.` in the terminal output.
@@ -1594,6 +1630,7 @@ pub fn run() {
             abrir_link,
             arquivo_ler,
             arquivo_carimbo,
+            arquivo_marcar,
             arquivos_existem,
             abrir_no_editor,
             pty_resize,
@@ -1711,7 +1748,15 @@ Binary files a/img.png and b/img.png differ\n";
 
 #[cfg(test)]
 mod testes_visor {
-    use super::{arquivo_ler, arquivos_existem, comando_do_editor, texto_do_visor};
+    use super::{arquivo_ler, arquivos_existem, comando_do_editor, texto_do_visor, trocar_linha};
+
+    #[test]
+    fn troca_so_a_linha_e_guarda_os_fins() {
+        assert_eq!(trocar_linha("a\r\n- [ ] b\r\nc", 1, "- [ ] b", "- [x] b").unwrap(), "a\r\n- [x] b\r\nc");
+        assert_eq!(trocar_linha("- [x] b", 0, "- [x] b", "- [ ] b").unwrap(), "- [ ] b");
+        assert!(trocar_linha("a\n- [x] b\n", 1, "- [ ] b", "- [x] b").is_err());
+        assert!(trocar_linha("a\n", 3, "a", "b").is_err());
+    }
 
     #[test]
     fn comando_do_editor_cita_o_caminho() {

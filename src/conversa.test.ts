@@ -75,6 +75,7 @@ describe("markdown", () => {
   it("doesn't format inside code", () => {
     expect(markdown("use `**x**` e **y**")).toBe("<p>use <code>**x**</code> e <strong>y</strong></p>");
     expect(markdown("```ts\na < b\n```")).toBe("<pre><code>a &lt; b</code></pre>");
+    expect(markdown("```mermaid\na --> b\n```")).toBe('<pre class="mermaid"><code>a --&gt; b</code></pre>');
   });
 
   it("closes bold that has code in the middle", () => {
@@ -88,6 +89,16 @@ describe("markdown", () => {
     expect(markdown("| a | b |\n|---|---|\n| 1 | 2 |")).toBe(
       "<table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table>",
     );
+  });
+
+  it("checkboxes only where asked, with the item's line to mark", () => {
+    const md = "# Plano\n- [ ] a\n- [x] **b**\n- c";
+    expect(markdown(md, 0)).toContain("<li>[ ] a</li>");
+    expect(markdown(md, 0, "marcar")).toBe(
+      '<h1>Plano</h1><ul><li><input type="checkbox" class="tarefa" data-linha="1">a</li>' +
+        '<li><input type="checkbox" class="tarefa" checked data-linha="2"><strong>b</strong></li><li>c</li></ul>',
+    );
+    expect(markdown("- [X] a", 0, "ver")).toBe('<ul><li><input type="checkbox" class="tarefa" checked disabled>a</li></ul>');
   });
 
   it("only links http", () => {
