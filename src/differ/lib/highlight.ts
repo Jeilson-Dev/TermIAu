@@ -51,6 +51,9 @@ export function tokenize(oid: string, lines: string[], lang: BundledLanguage): P
   return tokens;
 }
 
+/** Tokens sem o cache: o visor do terminal relê o arquivo a cada edição, e cada versão ficaria guardada. */
+export const tokenizeFresh = (lines: string[], lang: BundledLanguage) => run(lines, lang).catch(() => null);
+
 async function run(lines: string[], lang: BundledLanguage): Promise<Token[][] | null> {
   const size = lines.reduce((n, l) => n + l.length + 1, 0);
   if (lines.length > MAX_LINES || size > MAX_CHARS) return null;

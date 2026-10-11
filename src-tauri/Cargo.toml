@@ -27,7 +27,9 @@ ureq = "3.2"
 # O differ (a aba presa com o diff da branch). Ele fala com o `git` da linha de
 # comando, então não entra biblioteca de git nenhuma; o store é o JSON que
 # lembra a branch alvo de cada repositório e o que já foi revisado.
-serde_json = "1"
+# `preserve_order`: o app reescreve o settings.json do Claude Code ao instalar os
+# hooks, e sem isto as chaves do usuário voltariam em ordem alfabética.
+serde_json = { version = "1", features = ["preserve_order"] }
 tauri-plugin-store = "2"
 # Vigia do .git, para a aba do diff se refazer sozinha a cada commit.
 notify = "8"

@@ -893,6 +893,78 @@ code {
   color: var(--green);
 }
 
+/* O "copiado" do GitHub: o ícone vira ✓ com um pulinho, e um balão diz o que
+   aconteceu. O `key` do ícone no componente é o que faz o pulo rodar a cada
+   cópia, e não só na primeira. */
+.icon-btn.copied {
+  position: relative;
+}
+
+.icon-btn.copied svg {
+  animation: copiado-pulo 260ms cubic-bezier(0.3, 1.6, 0.5, 1);
+}
+
+.copiado-balao {
+  position: absolute;
+  /* Embaixo, não em cima: o cabeçalho gruda no topo da rolagem e cortaria o balão. */
+  top: calc(100% + 6px);
+  left: 50%;
+  z-index: 30;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--bg-lighter);
+  color: var(--fg);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: copiado-balao 1500ms ease forwards;
+}
+
+.copiado-balao::after {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  border: 4px solid transparent;
+  border-bottom-color: var(--bg-lighter);
+  transform: translateX(-50%);
+}
+
+@keyframes copiado-pulo {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes copiado-balao {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -4px);
+  }
+  12%,
+  80% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn.copied svg,
+  .copiado-balao {
+    animation: none;
+  }
+}
+
 .bookmark-item.resolved {
   border-left-color: var(--green);
   opacity: 0.6;
@@ -2086,6 +2158,9 @@ tr.gap {
 
 .prefs {
   width: min(460px, calc(100vw - 32px));
+  /* Mais alta que a janela, rola por dentro: o fundo começa a 14vh do topo. */
+  max-height: calc(86vh - 16px);
+  overflow-y: auto;
   padding: 16px 18px 18px;
   border: 1px solid var(--selection);
   border-radius: 10px;
@@ -2108,6 +2183,15 @@ tr.gap {
 
 .prefs-campo {
   display: block;
+}
+
+.prefs-campo + .prefs-campo {
+  margin-top: 18px;
+}
+
+.prefs-ajuda code {
+  font-family: var(--mono);
+  color: var(--fg-dim);
 }
 
 .prefs-nome {
@@ -2216,3 +2300,42 @@ tr.gap {
   font-size: 12px;
   color: var(--fg-dim);
 }
+
+/* Os dois limites do contexto lado a lado, cada um com a cor que acende. */
+.prefs-limites {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.prefs-limite {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.prefs-campo .prefs-limite input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+
+.prefs-campo .prefs-limite input:disabled {
+  opacity: 0.5;
+}
+
+.prefs-campo .prefs-limite input[type="number"] {
+  width: 56px;
+  padding: 4px 6px;
+  text-align: right;
+}
+
+.prefs-bolinha {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.prefs-bolinha.atencao { background: var(--yellow); }
+.prefs-bolinha.perigo { background: var(--red); }

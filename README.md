@@ -65,8 +65,10 @@ Os artefatos saem em `src-tauri/target/release/bundle/`.
 ## Ligando os avisos do Claude
 
 As abas mostram em que pé está cada sessão do Claude Code — trabalhando,
-esperando você —, e isso só chega pelo socket do app. Quem escreve ali é um
-hook, que precisa estar registrado no `settings.json` do Claude Code:
+esperando você —, a barra do painel mostra o contexto da sessão e o rodapé, o
+uso dos limites de 5h e de 7 dias. Tudo isso só chega pelo socket do app, e
+quem escreve ali é um hook, que precisa estar registrado no `settings.json` do
+Claude Code. Pelo app, é **TermIAu ▸ Ligar ao Claude Code…**; pelo repo:
 
 ```bash
 ./hooks/instalar.sh
@@ -74,12 +76,35 @@ hook, que precisa estar registrado no `settings.json` do Claude Code:
 
 O script copia o `termiau-evento.sh` para `~/.claude/hooks/` (e não aponta para
 o repo: ele pode estar num volume que não está montado quando o Claude roda),
-registra os quatro eventos que o app trata — `UserPromptSubmit`,
-`PermissionRequest`, `Notification`, `SessionEnd` — e guarda um backup do
+registra os eventos que o app trata — `SessionStart`, `UserPromptSubmit`,
+`PermissionRequest`, `Notification`, `Stop`, `SessionEnd` e os de ferramenta
+(`PreToolUse`, `PostToolUse`, `PostToolUseFailure`) — e guarda um backup do
 settings anterior. Rodar de novo é inofensivo.
 
+### O contexto e o uso
+
+O contexto e o uso não vêm dos eventos, e sim da status line: o Claude Code
+manda para ela, a cada atualização, um JSON com a janela de contexto e os
+limites. Por isso a `statusLine` do `settings.json` também tem que passar pelo
+hook, com o argumento `status`:
+
+```json
+"statusLine": {
+  "type": "command",
+  "command": "bash ~/.claude/hooks/termiau-evento.sh status",
+  "padding": 0
+}
+```
+
+O instalador só põe essa linha se ainda não houver uma status line sua — uma
+que já existe fica, e aí o contexto e o uso não chegam. Para trocar, edite o
+`settings.json` como acima. A sua antiga não se perde: se ela estiver em
+`~/.claude/statusline-command.sh`, o hook a usa fora do TermIAu (iTerm2, VS
+Code); dentro dele a linha fica vazia, porque o app já mostra tudo.
+
 Sem o hook instalado o app sobe normal, só calado: as abas não mostram estado
-do Claude e o badge do Dock fica vazio.
+do Claude, a barra não mostra o contexto, o rodapé não mostra o uso e o badge
+do Dock fica vazio.
 
 ## A rádio
 
@@ -209,12 +234,14 @@ avisa quando uma não abre.
 | `⌘D` / `⌘⇧D` | Divide o painel ao lado / abaixo |
 | `⌘W` | Fecha o painel em foco (o último fecha a aba) |
 | `⌘1`…`⌘9` | Vai para a aba *n* — `⌘9` vai para a última |
+| `` ⌘` `` | Vai para a aba do diff |
 | `⌘⇧[` / `⌘⇧]` | Aba anterior / próxima |
 | `⌘⌥←↑→↓` | Move o foco para o painel vizinho |
 | `⌘⇧A` | Vai para o painel onde o Claude espera resposta |
 | `⌘K` | Limpa a tela |
 | `⌘⇧V` | Cola o **caminho** do arquivo que está na área de transferência |
 | `⌘E` | Liga e desliga a escuta (falar em vez de digitar) |
+| `⌘⇧P` | Toca ou pausa a rádio |
 
 Todo o resto vai direto para o shell. `⌥` compõe caractere como no resto do
 macOS — `⌥C` dá `ç`, `⌥E`+`E` dá `é` —, então não serve de Meta: `⌥F` e `⌥B`

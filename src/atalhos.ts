@@ -18,5 +18,5 @@ export function nossoAtalho(e: Atalho): boolean {
   if (e.shiftKey) {
     return e.code === "BracketLeft" || e.code === "BracketRight" || e.code === "KeyA";
   }
-  return e.key === "k" || /^[1-9]$/.test(e.key);
+  return e.key === "k" || e.code === "Backquote" || /^[1-9]$/.test(e.key);
 }

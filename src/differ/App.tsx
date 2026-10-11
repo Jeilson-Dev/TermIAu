@@ -322,8 +322,22 @@ export default function App() {
     started.current = true;
     persist
       .loadSettings()
-      .catch(() => ({ viewMode: "unified" as const, defaultTarget: "", scope: "branch" as const }))
+      .catch(() => persist.DEFAULT_SETTINGS)
       .then(setSettings);
+  }, []);
+
+  // O modo de visualização é um só para o app: trocado no diff do chat, vale aqui também.
+  useEffect(() => {
+    let parar: (() => void) | undefined;
+    let vivo = true;
+    persist
+      .onSettings(({ viewMode }) => setSettings((s) => (s && s.viewMode !== viewMode ? { ...s, viewMode } : s)))
+      .then((u) => (vivo ? (parar = u) : u()))
+      .catch(() => {});
+    return () => {
+      vivo = false;
+      parar?.();
+    };
   }, []);
 
   // O painel de onde o botão de diff foi apertado manda o repositório dele por
@@ -847,12 +861,26 @@ export default function App() {
             doRefresh();
           }}
           onDismiss={() => setMudou(false)}
+          visivel={visivel}
         />
       )}
       {prefs && (
         <Prefs
           defaultTarget={settings?.defaultTarget ?? ""}
           onDefaultTarget={(branch) => setSettings((s) => s && { ...s, defaultTarget: branch })}
+          editor={settings?.editor ?? ""}
+          onEditor={(editor) => setSettings((s) => s && { ...s, editor })}
+          contexto={{
+            atencao: settings?.contextoAtencao ?? persist.DEFAULT_SETTINGS.contextoAtencao,
+            perigo: settings?.contextoPerigo ?? persist.DEFAULT_SETTINGS.contextoPerigo,
+            autoCompact: settings?.autoCompact ?? persist.DEFAULT_SETTINGS.autoCompact,
+            autoCompactEm: settings?.autoCompactEm ?? persist.DEFAULT_SETTINGS.autoCompactEm,
+          }}
+          onContexto={({ atencao, perigo, autoCompact, autoCompactEm }) =>
+            setSettings(
+              (s) => s && { ...s, contextoAtencao: atencao, contextoPerigo: perigo, autoCompact, autoCompactEm },
+            )
+          }
           onClose={() => setPrefs(false)}
         />
       )}

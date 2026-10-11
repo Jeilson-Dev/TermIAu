@@ -75,6 +75,27 @@ export function CopyReferenceButton({ reference, size }: { reference: string; si
   );
 }
 
+/** O caminho do arquivo, no cabeçalho do diff. O ✓ e o "Copiado!" são o aviso. */
+export function CopyPathButton({ path }: { path: string }) {
+  const [copied, copiar] = useCopiar(path);
+
+  return (
+    <button
+      className={copied ? "icon-btn subtle copied" : "icon-btn subtle"}
+      title={copied ? "Copiado!" : "Copiar caminho"}
+      aria-label={copied ? "Copiado!" : "Copiar caminho"}
+      onClick={copiar}
+    >
+      <Icon key={copied ? "check" : "copy"} name={copied ? "check" : "copy"} size={14} />
+      {copied && (
+        <span className="copiado-balao" role="status">
+          Copiado!
+        </span>
+      )}
+    </button>
+  );
+}
+
 /** O mesmo, para a revisão inteira: todos os comentários numa colada só. */
 export function CopyAllButton({ reference, count }: { reference: string; count: number }) {
   const [copied, copiar] = useCopiar(reference);

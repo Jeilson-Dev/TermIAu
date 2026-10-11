@@ -7,7 +7,10 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
-    watch: { ignored: ["**/src-tauri/**"] },
+    // Por consulta, e não pelos avisos do sistema: o projeto mora num volume
+    // externo, e lá os avisos de mudança param de chegar no meio da sessão — o
+    // Vite seguia servindo o arquivo de antes, sem erro nenhum.
+    watch: { ignored: ["**/src-tauri/**", "**/node_modules/**"], usePolling: true, interval: 300 },
   },
   build: {
     // Duas páginas: o terminal e o differ. São bundles separados porque a aba

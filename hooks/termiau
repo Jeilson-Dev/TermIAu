@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Mostra um arquivo no visor do painel do TermIAu de onde foi chamado.
+#
+#   termiau ver src/main.ts:848          o arquivo, rolado até a linha e com ela marcada
+#   termiau ver src/main.ts:848-870      o trecho todo marcado
+#   termiau ver docs/plano.md            .md abre renderizado
+#   termiau ver lib/x.dart:103 --ref main   como o arquivo está na main
+#
+# O app escreve este script em ~/.termiau/bin a cada abertura (ver
+# `instalar_cli` no lib.rs). Como o hook, ele só fala com o socket do app: quem
+# diz de qual painel é o pedido é o TERMIAU_PAINEL, que o shell do painel herda
+# — e o Claude, rodando nele, também.
+set -uo pipefail
+
+uso() {
+  echo "uso: termiau ver <arquivo>[:linha[-linha]] [--ref <branch|commit>]" >&2
+  exit 2
+}
+
+[ "${1:-}" = ver ] || uso
+shift
+
+alvo="" ref=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ref) ref="${2:-}"; [ -n "$ref" ] || uso; shift 2 ;;
+    --ref=*) ref="${1#--ref=}"; shift ;;
+    -*) uso ;;
+    *) [ -z "$alvo" ] || uso; alvo="$1"; shift ;;
+  esac
+done
+[ -n "$alvo" ] || uso
+
+if [ -z "${TERMIAU_SOCK:-}" ] || [ ! -S "$TERMIAU_SOCK" ]; then
+  echo "termiau: só funciona num painel do TermIAu" >&2
+  exit 1
+fi
+
+# `arquivo:10`, `arquivo:10-20`, `arquivo:10:5` (a coluna é ignorada) e o
+# `#L10-L20` dos links do GitHub.
+linha="" ate=""
+# Um formato por vez: o `(.+)` é guloso, e num `:10:5` só ele engoliria o `:10`.
+if [[ "$alvo" =~ ^(.+)#L([0-9]+)(-L([0-9]+))?$ ]] ||
+  [[ "$alvo" =~ ^(.+):([0-9]+):[0-9]+$ ]] ||
+  [[ "$alvo" =~ ^(.+):([0-9]+)(-([0-9]+))?$ ]]; then
+  alvo="${BASH_REMATCH[1]}"
+  linha="${BASH_REMATCH[2]}"
+  ate="${BASH_REMATCH[4]:-}"
+fi
+
+case "$alvo" in
+  /*) ;;
+  "~/"*) alvo="$HOME/${alvo#"~/"}" ;;
+  *) alvo="$PWD/$alvo" ;;
+esac
+
+if [ -z "$ref" ] && [ ! -f "$alvo" ]; then
+  echo "termiau: não existe: $alvo" >&2
+  exit 1
+fi
+if [ -n "$ref" ] && [ ! -d "$(dirname "$alvo")" ]; then
+  echo "termiau: pasta não existe: $(dirname "$alvo")" >&2
+  exit 1
+fi
+
+PAINEL="${TERMIAU_PAINEL:-0}"
+case "$PAINEL" in '' | *[!0-9]*) PAINEL=0 ;; esac
+
+# JSON sem `jq`: só aspas e barras precisam de escape num caminho.
+json() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
+num() { [ -n "$1" ] && printf '%s' "$1" || printf null; }
+txt() { [ -n "$1" ] && json "$1" || printf null; }
+
+printf '{"painel":%s,"ver":{"caminho":%s,"linha":%s,"ate":%s,"ref":%s}}\n' \
+  "$PAINEL" "$(json "$alvo")" "$(num "$linha")" "$(num "$ate")" "$(txt "$ref")" |
+  nc -U "$TERMIAU_SOCK" -w 1 >/dev/null 2>&1 || {
+  echo "termiau: o app não respondeu" >&2
+  exit 1
+}
+
+echo "aberto no visor do TermIAu: $alvo${linha:+:$linha}${ate:+-$ate}${ref:+ (em $ref)}"

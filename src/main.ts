@@ -1,4 +1,4 @@
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type IDecoration } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { invoke } from "@tauri-apps/api/core";
@@ -6,10 +6,44 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { nossoAtalho, type Atalho } from "./atalhos";
+import { iniciar } from "./inicio";
 import { configsDe, listaDoPlay, tarefaAntes, tarefasDe, type ConfigLaunch, type Tarefa } from "./run/launch";
 import { linhaDeComando, runnerPara, type Plano } from "./run/runners";
 import { citar, palavra } from "./run/shell";
 import { ESTACOES, type Estacao } from "./estacoes";
+import {
+  COMANDOS_DO_CLAUDE,
+  filtrarComandos,
+  lerFalas,
+  linhasDePrompt,
+  ladoALado,
+  linhasDoDiff,
+  markdown,
+  partesDoSeu,
+  provisoriosResolvidos,
+  questoesDe,
+  respostaDoHook,
+  resumoDe,
+  textoDaEscolha,
+  type Comando,
+  type Escolha,
+  type ArquivoDiff,
+  type Fala,
+  type LinhaDiff,
+  type Questao,
+  escapar,
+} from "./conversa";
+import {
+  acharReferencias,
+  ehMarkdown,
+  linhaLogica,
+  referenciaInteira,
+  type LinhaDaTela,
+  type Referencia,
+} from "./visor";
+import { SEMANA_MIN, SESSAO_MIN, faltaPara, janelaAgora, usoDaStatusLine, type LimitesDaStatusLine, fracaoRestante, limiteDoAutoCompact, nivelDoContexto, nivelDoRitmo, nivelDoUso, type Janela, type LimitesDoContexto, type Nivel, type Uso } from "./uso";
+import { loadSettings, onSettings, saveViewMode, type Settings } from "./differ/lib/persist";
+import type { ViewMode } from "./differ/types";
 import "@xterm/xterm/css/xterm.css";
 import "./style.css";
 
@@ -37,6 +71,9 @@ const OPCOES_TERM = {
   // pelo caminho de composição.
   macOptionIsMeta: false,
   scrollback: 10_000,
+  // Os links OSC 8 (o Claude Code escreve os dele assim), com a mesma regra
+  // dos que o addon acha no texto.
+  linkHandler: { activate: (e: MouseEvent, uri: string) => abrirLink(e, uri) },
   // Dracula, do spec oficial (https://draculatheme.com/spec) e da paleta ANSI
   // que os terminais dele usam. Sem os 16 do ANSI o tema ficaria pela metade: o
   // fundo seria Dracula e o `ls` continuaria saindo nas cores padrão do xterm.
@@ -94,6 +131,21 @@ type Folha = {
   dono?: Folha;
   /// O app que o play deste painel mandou rodar, na gaveta dele.
   execucao?: Execucao;
+  /// O que você mandou pro Claude neste painel: é por aqui que o terminal acha,
+  /// na tela, as linhas suas para destacar (ver `marcar`).
+  prompts?: string[];
+  /// O destaque de cada prompt achado, pela linha em que está.
+  marcas?: Map<string, IDecoration>;
+  /// Como a tela estava na última busca: o que já tinha saído para a rolagem
+  /// não muda mais, e não precisa ser lido de novo (ver `marcar`).
+  vistas?: { base: number; cols: number; prompts: number };
+  esperaMarcas?: ReturnType<typeof setTimeout>;
+  /// A conversa em balões, por cima do terminal. Existe depois da primeira vez
+  /// que o painel entra no modo chat.
+  chat?: Chat;
+  /// O arquivo mostrado no painel, por cima do terminal e do chat. Existe
+  /// depois do primeiro `termiau ver` ou ⌘-clique numa referência.
+  visor?: Visor;
 };
 
 type SessaoClaude = {
@@ -101,7 +153,44 @@ type SessaoClaude = {
   /// "o MOBILE precisa da sua permissão" diz onde ir; um número, não.
   nome: string;
   estado: "ocioso" | "trabalhando" | "esperando";
+  /// O id da sessão, como o hook o informa. É o que o `claude --resume` pede
+  /// para retomá-la quando a aba volta (ver `retomar`).
+  sessao?: string;
+  /// A pasta em que a sessão nasceu: o `--resume` só a acha a partir dela.
+  pasta?: string;
+  /// O JSONL em que o Claude Code grava a conversa. É dele que o modo chat lê.
+  transcricao?: string;
+  /// Por que o Claude parou para esperar, quando o hook disse.
+  aviso?: string;
+  /// O que a espera pede. `permissao`: um sim ou não, que o chat responde por
+  /// botões. `terminal`: um menu que só o terminal mostra (as opções de uma
+  /// pergunta, o plano a aprovar). Sem nada, ele só espera a próxima mensagem —
+  /// e essa o campo do chat manda tão bem quanto o terminal.
+  pede?: "permissao" | "terminal";
+  /// Uma pergunta do Claude (`AskUserQuestion`) que o modo chat pode
+  /// responder: o hook está esperando por ela (ver `Pendentes` no lib.rs). O
+  /// terminal mostra a mesma pergunta ao mesmo tempo, e quem responder primeiro
+  /// vale.
+  pergunta?: { id: string; questoes: Questao[] };
+  /// Quanto do contexto a sessão já usou (0 a 100), pela status line.
+  contexto?: number;
+  /// O modelo da sessão (o `display_name`, "Opus 5.5") e o nível de esforço
+  /// ("high"), também pela status line. Um modelo sem esforço não manda o nível.
+  modelo?: string;
+  esforco?: string;
+  /// O auto-compact já mandou o `/compact` desta vez. Só volta a valer quando o
+  /// contexto descer do limite — senão cada status line mandaria outro.
+  compactou?: boolean;
 };
+
+/// As ferramentas cuja espera é um menu de opções, e não um sim ou não: o
+/// Enter do "Permitir" escolheria a primeira opção sem você tê-la lido.
+const PEDEM_TERMINAL = new Set(["AskUserQuestion", "ExitPlanMode"]);
+
+/// A espera se resolve sem sair do chat: é só uma mensagem que falta, ou uma
+/// pergunta que o cartão do chat responde.
+const atendivelNoChat = (folha: Folha) =>
+  folha.chat?.aberto && (!folha.claude?.pede || folha.claude.pergunta !== undefined);
 
 /// Um corte: dois filhos e a fatia que cabe ao primeiro. Aninhando estes nós
 /// saem os layouts que o iTerm2 faz — dividir um painel já dividido.
@@ -222,7 +311,12 @@ function aplicarFracao(d: Divisao) {
 /// Refaz a grade de cada painel visível da aba a partir do tamanho na tela.
 /// Só o desenho local: não fala com o kernel.
 function medir(aba: Aba) {
-  for (const f of visiveis(aba)) f.fit.fit();
+  for (const f of visiveis(aba)) {
+    f.fit.fit();
+    // Dividir, fechar e trocar de aba tiram o painel do lugar (ou da tela), e o
+    // navegador zera a rolagem de quem passa por isso.
+    if (f.chat?.aberto) reporRolagem(f.chat);
+  }
 }
 
 /// Avisa o kernel das grades que realmente mudaram, pro TUI se redesenhar certo.
@@ -260,10 +354,14 @@ function focar(folha: Folha) {
   aba.foco.el.classList.remove("focada");
   aba.foco = folha;
   folha.el.classList.add("focada");
-  folha.term.focus();
+  teclado(folha);
   rotular(aba);
-  // Olhar pro painel é atender: o aviso já cumpriu o papel dele.
-  if (folha.claude?.estado === "esperando") folha.claude.estado = "ocioso";
+  // Olhar pro painel é atender: o aviso já cumpriu o papel dele. No modo chat
+  // também, se o que falta é uma mensagem; um pedido de permissão ou um menu
+  // fica aceso até ser respondido (pelos botões do aviso ou no terminal).
+  if (folha.claude?.estado === "esperando" && (!folha.chat?.aberto || atendivelNoChat(folha))) {
+    folha.claude.estado = "ocioso";
+  }
   pintar();
 }
 
@@ -288,8 +386,9 @@ function ativar(aba: Aba) {
   sincronizar(aba);
   // A branch que chegou com a aba escondida mediu zero e não saiu andando.
   for (const f of visiveis(aba)) if (f.barra) repassear(f.barra.ramo);
-  aba.foco.term.focus();
+  teclado(aba.foco);
   rotular(aba);
+  agendarSalvar();
 }
 
 // ---------- criação ----------
@@ -309,8 +408,11 @@ async function criarFolha(
   el.className = "folha";
   const barra = comBarra ? criarBarra() : undefined;
   // O terminal mora num elemento só dele: o painel ainda leva a barra em cima e,
-  // quando o play roda algo, a gaveta embaixo.
+  // quando o play roda algo, a gaveta embaixo. Dentro dele, a `folha-tela` tem
+  // o terminal e o chat; o visor dividido fica ao lado dela, e não por cima.
   const host = elemento("div", "folha-termo");
+  const tela = elemento("div", "folha-tela");
+  host.append(tela);
   if (barra) el.append(barra.el);
   el.append(host);
   inserir(el);
@@ -318,9 +420,17 @@ async function criarFolha(
   const term = new Terminal(OPCOES_TERM);
   const fit = new FitAddon();
   term.loadAddon(fit);
-  term.loadAddon(new WebLinksAddon());
-  term.attachCustomKeyEventHandler((e) => !nossoAtalho(e));
-  term.open(host);
+  term.loadAddon(new WebLinksAddon((e, uri) => abrirLink(e, uri)));
+  term.attachCustomKeyEventHandler((e) => {
+    // ⇧↩ quebra linha em vez de enviar: o xterm manda o mesmo `\r` do Enter,
+    // então vai `ESC ↩`, que o Claude lê como nova linha (e o zsh também).
+    if (e.key === "Enter" && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing) {
+      if (e.type === "keydown") term.input("\x1b\r");
+      return false;
+    }
+    return !nossoAtalho(e);
+  });
+  term.open(tela);
   fit.fit();
 
   let id: number;
@@ -349,9 +459,12 @@ async function criarFolha(
   // fica dentro do painel, mas o clique nela é dela: ela tem o próprio foco.
   el.addEventListener("mousedown", (e) => {
     if (folha.gaveta?.el.contains(e.target as Node)) return;
+    // Com o visor dividido, o teclado fica do lado que você clicou.
+    if (folha.visor) folha.visor.comTeclado = folha.visor.el.contains(e.target as Node);
     focar(folha);
   });
   ligarBarra(folha);
+  ligarLinksDeArquivo(folha);
 
   // PTY -> tela. O Rust manda base64 pra não quebrar UTF-8 no meio de um chunk.
   folha.desligar.push(
@@ -359,7 +472,9 @@ async function criarFolha(
       const bin = atob(e.payload);
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      term.write(bytes);
+      // O Claude redesenha a tela quando quer, e o destaque dos seus prompts
+      // tem de ir atrás das linhas: refaz depois de cada leva de saída.
+      term.write(bytes, () => agendarMarcas(folha));
     }),
   );
   // Shell terminou por conta própria — ⌃D, `exit`, crash: o painel vai junto.
@@ -375,6 +490,18 @@ async function criarFolha(
   // direto e não passa por aqui, então digitar é distinguível de falar.
   term.onData((data) => {
     cancelarEnvio();
+    // Mexer no painel é atender, tanto quanto clicar nele: o aviso de
+    // "esperando" para de piscar na primeira tecla. O `focar` só cobre quem
+    // chega no painel; quem já estava nele digita direto.
+    if (folha.claude?.estado === "esperando" && !RESPOSTA_DO_TERMINAL.test(data)) {
+      folha.claude.estado = "ocioso";
+      pintar();
+    }
+    // Esc sozinho interrompe o Claude, e interrompido ele não manda o `Stop`.
+    if (data === "\x1b" && folha.claude?.estado === "trabalhando") {
+      folha.claude.estado = "ocioso";
+      pintar();
+    }
     invoke("pty_write", { id, data }).catch((e) => jlog(`pty_write: ${e}`));
   });
   // O prompt (p10k, zsh) publica o diretório por OSC; é o título da aba.
@@ -393,6 +520,13 @@ async function criarFolha(
   return folha;
 }
 
+/// O `onData` do xterm não traz só o que você digita: o próprio terminal
+/// responde por ali ao programa — foco que entrou ou saiu, posição do cursor,
+/// atributos do terminal, o mouse, cores. Nada disso é você mexendo no painel.
+/// O foco é o que mais importa: trocar de aba manda um "saí", e sem este filtro
+/// sair de perto de um painel que espera apagaria o aviso dele.
+const RESPOSTA_DO_TERMINAL = /^\x1b(?:\[[IO]$|\[[?>=]?[\d;]*[Rcnty]$|\[<|\[M|[\]P_])/;
+
 /// Quanto tempo o ✕ fica armado esperando o segundo clique. Curto de propósito:
 /// é uma confirmação, não um modo — passou disso, a aba volta a ser uma aba.
 const CONFIRMA_FECHAR = 1000;
@@ -402,13 +536,16 @@ const CONFIRMA_FECHAR = 1000;
 /// uma desarma a outra.
 let desarmarFechar: (() => void) | undefined;
 
-async function novaAba() {
+/// `em`: a pasta em que a aba abre, para quem já sabe qual é — uma aba que
+/// está voltando (ver `reabrir`). Sem ele, vale a do painel em foco.
+async function novaAba(em?: string | null): Promise<Aba | undefined> {
   if (ocupado) return;
   ocupado = true;
   try {
     // Aba nova abre onde o painel em foco está, como nos outros terminais. O Rust
     // cai no HOME sozinho se não conseguir descobrir (pasta apagada, por exemplo).
-    const cwd = ativa ? await invoke<string | null>("pty_cwd", { id: ativa.foco.id }) : null;
+    const cwd =
+      em !== undefined ? em : ativa ? await invoke<string | null>("pty_cwd", { id: ativa.foco.id }) : null;
 
     const corpo = document.createElement("div");
     corpo.className = "aba";
@@ -490,6 +627,7 @@ async function novaAba() {
     ligarArrasto(aba);
     sincronizarBarra();
     ativar(aba);
+    return aba;
   } finally {
     ocupado = false;
   }
@@ -560,6 +698,8 @@ function ligarArrasto(aba: Aba) {
       window.removeEventListener("pointermove", mover);
       chip.classList.remove("arrastando");
       chip.style.transform = "";
+      // A ordem da barra é a ordem em que as abas voltam.
+      agendarSalvar();
     };
 
     window.addEventListener("pointermove", mover);
@@ -670,7 +810,7 @@ function abrirPreferencias() {
 
 function abrirPresa(forcar = false) {
   if (!presa || noDiff) return;
-  // Apagada: o clique no chip, o ⌘1 e o ciclo das abas passam por aqui e param.
+  // Apagada: o clique no chip, o ⌘` e o ciclo das abas passam por aqui e param.
   if (!presa.repoAberto && !forcar) return;
   if (ativa) {
     ativa.corpo.hidden = true;
@@ -726,6 +866,7 @@ function criarDivisor(d: Divisao): HTMLDivElement {
     const soltar = () => {
       divisor.removeEventListener("pointermove", mover);
       divisor.removeEventListener("pointerup", soltar);
+      agendarSalvar();
     };
     divisor.addEventListener("pointermove", mover);
     divisor.addEventListener("pointerup", soltar);
@@ -744,53 +885,68 @@ async function dividir(eixo: Eixo) {
   const alvo = aba.foco;
   try {
     const cwd = await invoke<string | null>("pty_cwd", { id: alvo.id });
-
-    // Tirar do documento um elemento que contém o textarea focado rouba o foco
-    // sem disparar `blur`. O xterm continuaria achando que tem o teclado: marca
-    // `.xterm-focus` de pé e cursor piscando num painel que já não recebe tecla.
-    // Enquanto o foco ainda é real, avisamos.
-    alvo.term.blur();
-
-    // O lugar do painel na página é reservado antes de mexer nele: montar a
-    // divisão move `alvo.el` pra dentro dela e a posição original se perderia.
-    const marca = document.createComment("divisao");
-    alvo.el.replaceWith(marca);
-
-    const d: Divisao = {
-      tipo: "divisao",
-      eixo,
-      fracao: 0.5,
-      filhos: [alvo, alvo], // o segundo é substituído assim que o shell abrir
-      el: document.createElement("div"),
-      pai: alvo.pai,
-    };
-    d.el.className = "divisao";
-    aplicarFracao(d);
-    d.el.append(alvo.el, criarDivisor(d));
-    marca.replaceWith(d.el);
-
-    const nova = await criarFolha(cwd, (el) => d.el.appendChild(el));
-    if (!nova) {
-      // Desfaz o corte e devolve o painel ao lugar — com o teclado de volta nele.
-      d.el.replaceWith(alvo.el);
-      alvo.term.focus();
-      return;
-    }
-
-    d.filhos = [alvo, nova];
-    alvo.pai = d;
-    nova.pai = d;
-    if (d.pai) trocarFilho(d.pai, alvo, d);
-    else aba.raiz = d;
-    aba.corpo.classList.add("dividida");
-    marcarMaximizada(aba);
-
-    medir(aba);
-    sincronizar(aba);
-    focar(nova);
+    const nova = await dividirFolha(aba, alvo, eixo, cwd);
+    if (nova) focar(nova);
   } finally {
     ocupado = false;
   }
+}
+
+/// Corta `alvo` em dois e devolve o painel novo, que fica com o segundo lugar.
+/// Não mexe no foco nem no `ocupado`: isso é de quem chama — o ⌘D, ou uma aba
+/// que está voltando e remonta o layout corte a corte (ver `montar`). A aba tem
+/// de estar na tela: o painel novo é medido no lugar.
+async function dividirFolha(
+  aba: Aba,
+  alvo: Folha,
+  eixo: Eixo,
+  cwd: string | null,
+  fracao = 0.5,
+): Promise<Folha | undefined> {
+  // Tirar do documento um elemento que contém o textarea focado rouba o foco
+  // sem disparar `blur`. O xterm continuaria achando que tem o teclado: marca
+  // `.xterm-focus` de pé e cursor piscando num painel que já não recebe tecla.
+  // Enquanto o foco ainda é real, avisamos.
+  alvo.term.blur();
+
+  // O lugar do painel na página é reservado antes de mexer nele: montar a
+  // divisão move `alvo.el` pra dentro dela e a posição original se perderia.
+  const marca = document.createComment("divisao");
+  alvo.el.replaceWith(marca);
+
+  const d: Divisao = {
+    tipo: "divisao",
+    eixo,
+    fracao,
+    filhos: [alvo, alvo], // o segundo é substituído assim que o shell abrir
+    el: document.createElement("div"),
+    pai: alvo.pai,
+  };
+  d.el.className = "divisao";
+  aplicarFracao(d);
+  d.el.append(alvo.el, criarDivisor(d));
+  marca.replaceWith(d.el);
+
+  const nova = await criarFolha(cwd, (el) => d.el.appendChild(el));
+  if (!nova) {
+    // Desfaz o corte e devolve o painel ao lugar — com o teclado de volta nele.
+    d.el.replaceWith(alvo.el);
+    alvo.term.focus();
+    return;
+  }
+
+  d.filhos = [alvo, nova];
+  alvo.pai = d;
+  nova.pai = d;
+  if (d.pai) trocarFilho(d.pai, alvo, d);
+  else aba.raiz = d;
+  aba.corpo.classList.add("dividida");
+  marcarMaximizada(aba);
+
+  medir(aba);
+  sincronizar(aba);
+  agendarSalvar();
+  return nova;
 }
 
 // ---------- fechamento ----------
@@ -801,6 +957,10 @@ function destruirFolha(folha: Folha, jaMorto: boolean) {
   // A gaveta mora dentro do painel: vai junto, e o app que rodava nela também.
   if (folha.gaveta) destruirFolha(folha.gaveta.folha, false);
   folha.execucao = undefined;
+  clearTimeout(folha.esperaMarcas);
+  clearInterval(folha.chat?.pulso);
+  clearInterval(folha.visor?.pulso);
+  largarPergunta(folha);
   for (const off of folha.desligar) off();
   folha.desligar = [];
   if (!jaMorto) invoke("pty_close", { id: folha.id }).catch((e) => jlog(`pty_close: ${e}`));
@@ -846,12 +1006,16 @@ function fecharFolha(folha: Folha, opts: { jaMorto?: boolean } = {}) {
   if (aba.foco === folha) focar(folhas(irmao).next().value as Folha);
   // Sobreviveu, mas a promoção moveu o elemento dele no DOM e o textarea ficou
   // sem o foco de verdade — sem `blur`, o xterm nem soube. Reencosta.
-  else aba.foco.term.focus();
+  else teclado(aba.foco);
 }
 
 function fecharAba(aba: Aba) {
   const i = abas.indexOf(aba);
   if (i < 0) return;
+
+  // Antes de destruir: é desta foto que o ⌘⇧T traz a aba de volta.
+  fechadas.push(fotografarAba(aba));
+  if (fechadas.length > MAX_FECHADAS) fechadas.shift();
 
   abas.splice(i, 1);
   for (const f of folhas(aba.raiz)) destruirFolha(f, false);
@@ -859,7 +1023,9 @@ function fecharAba(aba: Aba) {
   aba.chip.remove();
 
   if (abas.length === 0) {
-    janela.close().catch((e) => jlog(`close: ${e}`));
+    // Fechar a última aba é sair, e quem fechou já disse o que queria: sem
+    // pergunta. A sessão fica salva vazia — a próxima abertura começa limpa.
+    void sair();
     return;
   }
   sincronizarBarra();
@@ -1058,7 +1224,71 @@ type EventoClaude = {
   painel: number;
   hook_event_name: string;
   cwd?: string;
+  session_id?: string;
+  transcript_path?: string;
+  /// No `UserPromptSubmit`: o que você escreveu.
+  prompt?: string;
+  /// No `Notification`: o que o Claude quer de você.
+  message?: string;
+  /// No `Notification`, nas versões que o mandam: `permission_prompt`,
+  /// `idle_prompt`, `elicitation_dialog`...
+  notification_type?: string;
+  /// No `PermissionRequest`: a ferramenta que pede permissão, e com o quê.
+  tool_name?: string;
+  tool_input?: Record<string, unknown>;
+  /// Nos eventos de ferramenta (menos o `PermissionRequest`): qual chamada.
+  tool_use_id?: string;
 };
+
+/// O que a status line do Claude Code manda, pelo hook (`termiau-evento.sh
+/// status`). Só os campos que o app usa.
+type StatusDoSocket = {
+  painel: number;
+  status: {
+    context_window?: { used_percentage?: number | null } | null;
+    rate_limits?: LimitesDaStatusLine | null;
+    model?: { display_name?: string | null } | null;
+    effort?: { level?: string | null } | null;
+  };
+};
+
+/// O contexto, o modelo e o esforço vão para a barra do painel da sessão; o
+/// uso, para o rodapé.
+function receberStatus(bruto: StatusDoSocket) {
+  const st = bruto.status ?? {};
+  const u = usoDaStatusLine(st.rate_limits);
+  if (u) receberUso(u);
+  const folha = folhaPorPainel(bruto.painel);
+  const c = folha?.claude;
+  if (!folha || !c) return;
+  const usado = st.context_window?.used_percentage;
+  const contexto = typeof usado === "number" ? usado : c.contexto;
+  const modelo = st.model?.display_name ?? c.modelo;
+  // O nível some de verdade quando o modelo novo não tem esforço.
+  const esforco = st.model ? (st.effort?.level ?? undefined) : c.esforco;
+  const mudou = c.contexto !== contexto || c.modelo !== modelo || c.esforco !== esforco;
+  Object.assign(c, { contexto, modelo, esforco });
+  if (mudou) desenharBarra(folha);
+  autoCompactar(folha);
+}
+
+/// O `/compact` sozinho, quando o contexto chega no limite das Preferências.
+/// Só com o Claude parado: trabalhando, o comando entraria na fila; esperando,
+/// responderia a pergunta dele. O `Stop` chama de novo, para o caso de o limite
+/// ter sido passado no meio do turno.
+function autoCompactar(folha: Folha) {
+  const c = folha.claude;
+  const limite = limiteDoAutoCompact(limitesDoContexto);
+  if (!c || c.contexto === undefined || limite === null) return;
+  if (c.contexto < limite) {
+    c.compactou = false;
+    return;
+  }
+  if (c.compactou || c.estado !== "ocioso") return;
+  c.compactou = true;
+  avisar(folha, `Contexto em ${Math.round(c.contexto)}%: compactando sozinho.`);
+  compactar(folha);
+}
 
 function folhaPorPainel(id: number): Folha | undefined {
   for (const a of abas) for (const f of folhas(a.raiz)) if (f.id === id) return f;
@@ -1075,6 +1305,7 @@ function pintar() {
     for (const f of folhas(aba.raiz)) {
       const estado = f.claude?.estado;
       f.el.classList.toggle("esperando", estado === "esperando");
+      desenharAviso(f);
       if (estado === "esperando") {
         esperando++;
         sinal = "esperando";
@@ -1087,29 +1318,122 @@ function pintar() {
     mostrarRamos(aba);
   }
   janela.setBadgeCount(esperando || undefined).catch(() => {});
+  // Tudo o que muda as abas, os painéis ou as sessões do Claude passa por aqui.
+  agendarSalvar();
 }
 
-function receber(ev: EventoClaude) {
+function receber(
+  bruto:
+    | EventoClaude
+    | { painel: number; evento: Omit<EventoClaude, "painel">; espera?: boolean; pergunta_id?: string },
+) {
+  // O hook embrulha o payload do Claude com o número do painel por fora. O de
+  // antes punha o `painel` dentro dele — e pode ser esse o que ainda está
+  // instalado.
+  const ev: EventoClaude = "evento" in bruto ? { ...bruto.evento, painel: bruto.painel } : bruto;
+  // Uma pergunta do Claude cujo hook ficou esperando a resposta do chat, com
+  // o número que o Rust deu a ela.
+  const perguntaId = "pergunta_id" in bruto ? bruto.pergunta_id : undefined;
   const folha = folhaPorPainel(ev.painel);
-  if (!folha) return; // o painel fechou antes do evento chegar
+  if (!folha) {
+    // O painel fechou antes do evento chegar: o hook não espera por ninguém.
+    if (perguntaId) void invoke("pergunta_largar", { id: perguntaId });
+    return;
+  }
 
   // O nome da pasta é o que aparece na aba.
   const nome = ev.cwd?.split("/").filter(Boolean).pop() || `painel ${ev.painel}`;
-  folha.claude = { nome, estado: folha.claude?.estado ?? "ocioso" };
+  // A sessão muda sem o Claude sair (um `/clear`, um `/resume`): vale sempre a
+  // do último evento. A pasta é a do primeiro evento de cada sessão — depois o
+  // Claude pode ter andado, e o `--resume` procura a sessão onde ela nasceu.
+  const antes = folha.claude;
+  const sessao = ev.session_id ?? antes?.sessao;
+  const pasta = (antes?.sessao === sessao && antes?.pasta) || ev.cwd;
+  const transcricao = ev.transcript_path ?? (antes?.sessao === sessao ? antes?.transcricao : undefined);
+  // A pergunta pendente atravessa os eventos até ser respondida.
+  const pergunta = antes?.sessao === sessao ? antes?.pergunta : undefined;
+  // O contexto também: ele só chega pela status line, e um evento do hook que o
+  // esquecesse apagaria a pílula até o Claude rodar de novo.
+  const contexto = antes?.sessao === sessao ? antes?.contexto : undefined;
+  const compactou = antes?.sessao === sessao ? antes?.compactou : undefined;
+  // O modelo e o esforço atravessam um `/clear`: são do Claude que está rodando.
+  const { modelo, esforco } = antes ?? {};
+  folha.claude = { nome, estado: antes?.estado ?? "ocioso", sessao, pasta, transcricao, pergunta, contexto, modelo, esforco, compactou };
 
   switch (ev.hook_event_name) {
     case "UserPromptSubmit":
       folha.claude.estado = "trabalhando";
+      if (ev.prompt) lembrarPrompts(folha, [ev.prompt]);
+      // Um prompt novo: a pergunta que estava aberta foi deixada para trás.
+      largarPergunta(folha);
       break;
-    case "PermissionRequest":
+    case "Stop":
+      // O turno acabou. Uma espera que chegou antes (uma pergunta, uma
+      // permissão) continua de pé.
+      if (folha.claude.estado === "trabalhando") folha.claude.estado = "ocioso";
+      autoCompactar(folha);
+      break;
+    case "PostToolUse":
+    case "PostToolUseFailure":
+      // A pergunta foi respondida — no chat, ou no terminal antes dele. O hook
+      // que ainda esperava sai calado, e o cartão some. Uma sessão só tem uma
+      // pergunta aberta por vez, então o nome da ferramenta basta.
+      if (pergunta && ev.tool_name === "AskUserQuestion") {
+        largarPergunta(folha);
+        if (folha.claude.estado === "esperando") folha.claude.estado = "trabalhando";
+        folha.claude.pede = undefined;
+        folha.claude.aviso = undefined;
+      }
+      break;
+    case "PermissionRequest": {
+      folha.claude.estado = "esperando";
+      // Uma pergunta nova no lugar de outra: a de antes não volta mais.
+      if (perguntaId) largarPergunta(folha);
+      const questoes = ev.tool_name === "AskUserQuestion" ? questoesDe(ev.tool_input) : undefined;
+      if (perguntaId && questoes) {
+        folha.claude.pergunta = { id: perguntaId, questoes };
+        folha.claude.pede = "terminal";
+        folha.claude.aviso = "O Claude tem uma pergunta para você.";
+        break;
+      }
+      const tool = ev.tool_name ?? "uma ferramenta";
+      const oque = resumoDe(ev.tool_input);
+      folha.claude.aviso = `O Claude pede permissão para usar ${tool}${oque ? `: ${oque}` : "."}`;
+      folha.claude.pede = ev.tool_name && PEDEM_TERMINAL.has(ev.tool_name) ? "terminal" : "permissao";
+      break;
+    }
     case "Notification":
       folha.claude.estado = "esperando";
+      // A notificação de permissão chega logo depois do `PermissionRequest`, e
+      // diz menos que ele: o pedido e o texto que já estavam ficam.
+      if (ev.notification_type === "permission_prompt" || /permission/i.test(ev.message ?? "")) {
+        folha.claude.pede = antes?.pede ?? "permissao";
+        folha.claude.aviso = (antes?.pede && antes.aviso) || ev.message;
+      } else {
+        folha.claude.pede = ev.notification_type === "elicitation_dialog" ? "terminal" : undefined;
+        folha.claude.aviso = ev.message;
+      }
       break;
     case "SessionEnd":
+      largarPergunta(folha);
       folha.claude = undefined;
       break;
   }
   pintar();
+  // O botão do chat só existe onde há conversa para mostrar.
+  desenharBarra(folha);
+  // A sessão pode ter mudado por baixo de um chat aberto (`/clear`, `/resume`),
+  // e um prompt novo já está no transcript: lê agora, sem esperar o pulso.
+  if (folha.chat?.aberto) void lerChat(folha);
+}
+
+/// Desiste da pergunta pendente do painel: o hook dela sai sem resposta, e se
+/// ela ainda estiver aberta, o terminal é quem responde.
+function largarPergunta(folha: Folha) {
+  const id = folha.claude?.pergunta?.id;
+  if (!id) return;
+  folha.claude!.pergunta = undefined;
+  invoke("pergunta_largar", { id }).catch((e) => jlog(`pergunta_largar: ${e}`));
 }
 
 /// Pula pro próximo painel que está esperando, em qualquer aba. Repetir o
@@ -1127,6 +1451,1725 @@ function irParaEsperando() {
   const alvo = fila[(atual + 1) % fila.length];
   if (alvo.aba !== ativa) ativar(alvo.aba);
   focar(alvo.folha);
+}
+
+// ---------- os seus prompts, destacados no terminal ----------
+
+/// Quantos prompts o painel lembra. Os mais antigos já saíram da rolagem.
+const MAX_PROMPTS = 300;
+/// De quanto em quanto o destaque se refaz enquanto a tela muda. É um teto de
+/// frequência, não uma espera pelo silêncio: o Claude trabalhando escreve sem
+/// parar (o contador, a animação), e esperar ele calar seria nunca destacar.
+const MARCAS_MS = 400;
+/// Quantas linhas antes do começo da tela ainda são relidas: um prompt pode
+/// ter começado lá e continuar dentro dela.
+const MARCA_FOLGA = 16;
+
+function lembrarPrompts(folha: Folha, novos: string[]) {
+  const lista = (folha.prompts ??= []);
+  for (const p of novos) if (p.trim() && !lista.includes(p)) lista.push(p);
+  if (lista.length > MAX_PROMPTS) lista.splice(0, lista.length - MAX_PROMPTS);
+  agendarMarcas(folha);
+}
+
+function agendarMarcas(folha: Folha) {
+  if (!folha.prompts?.length || folha.esperaMarcas !== undefined) return;
+  folha.esperaMarcas = setTimeout(() => {
+    folha.esperaMarcas = undefined;
+    marcar(folha);
+  }, MARCAS_MS);
+}
+
+/// Põe um destaque em cada linha da tela que é um prompt seu. Procura de novo a
+/// cada vez em vez de marcar na hora do envio: o Claude Code reescreve a
+/// conversa inteira num redimensionamento, e a marca posta antes iria embora
+/// com as linhas velhas.
+function marcar(folha: Folha) {
+  if (folha.morta || !folha.prompts?.length) return;
+  const { term } = folha;
+  const buf = term.buffer.active;
+  // Na tela alternativa (o modo de tela cheia do Claude) o xterm não desenha
+  // decoração nenhuma; lá o destaque fica por conta do modo chat.
+  if (buf.type !== "normal") return;
+
+  // A rolagem tem milhares de linhas, e o Claude trabalhando reescreve a tela
+  // várias vezes por segundo. Mas o que já subiu para a rolagem é imutável:
+  // enquanto ela só crescer, basta reler de onde a tela começava na última vez.
+  // Encolheu (um clear, o redesenho de um resize), mudou de largura ou chegou
+  // prompt novo: aí relê tudo.
+  const v = folha.vistas;
+  const inteira = !v || buf.baseY < v.base || v.cols !== term.cols || v.prompts !== folha.prompts.length;
+  const de = inteira ? 0 : Math.max(0, v.base - MARCA_FOLGA);
+  folha.vistas = { base: buf.baseY, cols: term.cols, prompts: folha.prompts.length };
+
+  const tela: string[] = [];
+  for (let i = de; i < buf.length; i++) tela.push(buf.getLine(i)?.translateToString(true) ?? "");
+  const querem = new Map<string, { linha: number; altura: number }>();
+  for (const a of linhasDePrompt(tela, folha.prompts)) {
+    querem.set(`${a.linha + de}:${a.altura}:${term.cols}`, { linha: a.linha + de, altura: a.altura });
+  }
+
+  // A chave guarda a linha de quando a marca nasceu, e a rolagem anda com ela:
+  // o mapa é refeito com a linha em que cada marca está agora.
+  const antigas = folha.marcas ?? new Map<string, IDecoration>();
+  const marcas = (folha.marcas = new Map<string, IDecoration>());
+  for (const [chave, d] of antigas) {
+    const atual = `${d.marker.line}:${chave.slice(chave.indexOf(":") + 1)}`;
+    // Acima de onde a leitura começou ninguém foi conferido: a marca fica.
+    if (!d.isDisposed && d.marker.line < de) marcas.set(atual, d);
+    else if (d.isDisposed || !querem.has(atual) || marcas.has(atual)) d.dispose();
+    else marcas.set(atual, d);
+  }
+  for (const [chave, a] of querem) {
+    if (marcas.has(chave)) continue;
+    const marker = term.registerMarker(a.linha - (buf.baseY + buf.cursorY));
+    const d = marker && term.registerDecoration({ marker, x: 0, width: term.cols, height: a.altura });
+    if (!d) continue;
+    d.onRender((el) => el.classList.add("prompt-marca"));
+    marcas.set(chave, d);
+  }
+}
+
+/// Pula para o seu prompt anterior ou seguinte: na rolagem do terminal ou, no
+/// modo chat, entre os seus balões.
+function irParaMensagem(folha: Folha, delta: number) {
+  const chat = folha.chat;
+  if (chat?.aberto) {
+    const topo = chat.lista.scrollTop;
+    const seus = [...chat.lista.querySelectorAll<HTMLElement>(".chat-voce")].map((el) => el.offsetTop - 12);
+    const alvo = delta < 0 ? seus.filter((y) => y < topo - 1).pop() : seus.find((y) => y > topo + 1);
+    chat.lista.scrollTo({ top: alvo ?? (delta < 0 ? 0 : chat.lista.scrollHeight) });
+    return;
+  }
+  marcar(folha);
+  const linhas = [...(folha.marcas?.values() ?? [])].map((d) => d.marker.line).sort((a, b) => a - b);
+  const topo = folha.term.buffer.active.viewportY;
+  const alvo = delta < 0 ? linhas.filter((l) => l < topo).pop() : linhas.find((l) => l > topo);
+  if (alvo !== undefined) folha.term.scrollToLine(alvo);
+  else if (delta > 0) folha.term.scrollToBottom();
+}
+
+// ---------- modo chat: a conversa em balões ----------
+
+/// A conversa do Claude de um painel, lida do transcript e desenhada por cima
+/// do terminal. O terminal continua vivo embaixo, com a sessão rodando: o chat
+/// é outro jeito de ver a mesma conversa, e o que se escreve no campo dele vai
+/// para o Claude pelo mesmo caminho do teclado.
+type Chat = {
+  el: HTMLDivElement;
+  lista: HTMLDivElement;
+  aviso: HTMLDivElement;
+  avisoTexto: HTMLSpanElement;
+  /// O cartão da pergunta do Claude, e de qual pergunta é o que está desenhado:
+  /// redesenhar a cada `pintar` apagaria o que você já marcou.
+  pergunta: HTMLDivElement;
+  perguntaDe?: string;
+  /// A linha "trabalhando…" entre a conversa e o campo, e desde quando.
+  pensando: HTMLDivElement;
+  pensandoDesde?: number;
+  /// Os seus balões que já estão na tela mas ainda não no transcript: o Claude
+  /// só grava o prompt quando o recebe, e esperar por ele deixava o envio com
+  /// cara de travado. Saem, na ordem, quando os de verdade chegam.
+  pendentes: { el: HTMLElement; texto: string }[];
+  /// Os botões que respondem um pedido de permissão sem sair do chat.
+  permitir: HTMLButtonElement;
+  negar: HTMLButtonElement;
+  campo: HTMLTextAreaElement;
+  /// A lista de `/comandos`, acima do campo enquanto se digita um.
+  menu: HTMLDivElement;
+  /// Os comandos do disco (seus, do projeto, dos plugins) e os que casam com o
+  /// que está digitado, com o escolhido.
+  comandos: Comando[];
+  achados: Comando[];
+  escolhido: number;
+  /// As sessões a retomar, enquanto a lista do `/resume` está aberta: aí o
+  /// menu mostra estas, e o que se digita no campo as filtra.
+  sessoes?: SessaoSalva[];
+  sessoesAchadas: SessaoSalva[];
+  /// "Mostrar anteriores": as falas que ficaram de fora da tela (ver `CHAT_JANELA`).
+  mais: HTMLButtonElement;
+  /// A conversa inteira, e a partir de qual fala ela está desenhada.
+  falas: Fala[];
+  desde: number;
+  /// Onde a rolagem estava, para devolvê-la quando o navegador a zerar.
+  topo: number;
+  noFim: boolean;
+  /// Presente enquanto a lista está sendo levada ao fim (ver `reporRolagem`).
+  grude?: number;
+  /// Um aviso do próprio chat, na mesma faixa do "o Claude espera por você".
+  recado?: string;
+  aberto: boolean;
+  /// O transcript que está na tela, e até que byte dele já foi lido.
+  caminho?: string;
+  fim: number;
+  lendo?: boolean;
+  pulso?: ReturnType<typeof setInterval>;
+  /// As miniaturas das imagens já coladas no prompt do Claude, à espera do Enter.
+  anexos: HTMLDivElement;
+  /// A entrada ou saída em curso: alternar no meio dela parte de onde parou.
+  transicao?: Animation;
+};
+
+/// De quanto em quanto o chat aberto confere se o transcript cresceu. O Claude
+/// só grava uma fala quando ela termina, então não há o que ganhar lendo mais
+/// depressa — e fechado, o chat não lê nada.
+const CHAT_MS = 700;
+/// Quantas falas entram na tela de cada vez. Uma sessão longa tem milhares, e
+/// todas desenhadas são um documento enorme que o navegador refaz inteiro a
+/// cada mudança de largura do painel — dividir, maximizar e trocar de modo
+/// ficavam pesados na proporção da conversa.
+const CHAT_JANELA = 80;
+
+/// A faixa acima do campo: o Claude parou para esperar por você, ou o chat tem
+/// algo a dizer. Sem nenhum dos dois ela não existe.
+function desenharAviso(folha: Folha) {
+  const chat = folha.chat;
+  if (!chat) return;
+  const pergunta = folha.claude?.pergunta;
+  chat.pergunta.hidden = !pergunta;
+  if (!pergunta) chat.perguntaDe = undefined;
+  else if (chat.perguntaDe !== pergunta.id) desenharPergunta(folha, chat, pergunta);
+  // Com o cartão na tela, a faixa só diria o mesmo que ele.
+  const esperando = folha.claude?.estado === "esperando" && !pergunta;
+  chat.aviso.hidden = !esperando && !chat.recado;
+  chat.avisoTexto.textContent = esperando
+    ? (folha.claude?.aviso ?? "O Claude está esperando por você.")
+    : (chat.recado ?? "");
+  chat.avisoTexto.title = chat.avisoTexto.textContent;
+  const permissao = esperando && folha.claude?.pede === "permissao";
+  chat.permitir.hidden = chat.negar.hidden = !permissao;
+  desenharPensando(folha);
+}
+
+/// "Trabalhando… 12s": o Claude recebeu e ainda não terminou o turno. É o que
+/// o terminal mostra com o asterisco girando; sem isto, o chat ficava parado
+/// e não dava para saber se a mensagem tinha chegado.
+function desenharPensando(folha: Folha) {
+  const chat = folha.chat;
+  if (!chat) return;
+  const trabalhando = folha.claude?.estado === "trabalhando";
+  chat.pensando.hidden = !trabalhando;
+  if (!trabalhando) {
+    chat.pensandoDesde = undefined;
+    return;
+  }
+  chat.pensandoDesde ??= Date.now();
+  const s = Math.floor((Date.now() - chat.pensandoDesde) / 1000);
+  const tempo = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+  chat.pensando.textContent = `Trabalhando… ${tempo} · esc interrompe`;
+}
+
+/// O cartão de uma pergunta do Claude, em passos: uma pergunta por vez, com as
+/// abas de todas em cima para ir e voltar. Numa pergunta de uma escolha só, o
+/// clique já responde e passa para a próxima — e, na última, manda tudo —, como
+/// no terminal. Múltipla escolha, "Outra…" e opções com prévia pedem o botão.
+function desenharPergunta(folha: Folha, chat: Chat, pergunta: { id: string; questoes: Questao[] }) {
+  chat.perguntaDe = pergunta.id;
+  const { questoes } = pergunta;
+  const escolhas: Escolha[] = questoes.map(() => ({ labels: [] }));
+  let passo = 0;
+  const respondida = (i: number) => textoDaEscolha(escolhas[i]) !== undefined;
+
+  const enviar = () => {
+    const resposta = respostaDoHook(questoes, escolhas);
+    if (!resposta || folha.claude?.pergunta?.id !== pergunta.id) return;
+    folha.claude.pergunta = undefined;
+    folha.claude.pede = undefined;
+    folha.claude.aviso = undefined;
+    folha.claude.estado = "trabalhando";
+    invoke("pergunta_responder", { id: pergunta.id, resposta }).catch((e) => {
+      // O terminal respondeu antes, ou o Claude desistiu da pergunta.
+      chat.recado = "A pergunta já tinha sido respondida no terminal.";
+      jlog(`pergunta_responder: ${e}`);
+      pintar();
+    });
+    pintar();
+    teclado(folha);
+  };
+  /// Vai para a próxima sem resposta; sem nenhuma faltando, manda.
+  const avancar = () => {
+    const falta = questoes.findIndex((_, i) => i > passo && !respondida(i));
+    const antes = questoes.findIndex((_, i) => !respondida(i));
+    const proxima = falta >= 0 ? falta : antes;
+    if (proxima < 0) return enviar();
+    passo = proxima;
+    desenhar();
+  };
+
+  const desenhar = () => {
+    const q = questoes[passo];
+    const e = escolhas[passo];
+    const elementos: HTMLElement[] = [];
+
+    // As abas: com uma pergunta só não há para onde ir.
+    if (questoes.length > 1) {
+      const abas = elemento("div", "chat-pergunta-abas");
+      for (const [i, outra] of questoes.entries()) {
+        const aba = elemento("button", "chat-pergunta-aba");
+        aba.textContent = `${respondida(i) ? "✓" : "○"} ${outra.header || `Pergunta ${i + 1}`}`;
+        aba.setAttribute("aria-current", String(i === passo));
+        aba.addEventListener("click", () => {
+          passo = i;
+          desenhar();
+        });
+        abas.append(aba);
+      }
+      elementos.push(abas);
+    } else if (q.header) {
+      const etiqueta = elemento("span", "chat-pergunta-etiqueta");
+      etiqueta.textContent = q.header;
+      elementos.push(etiqueta);
+    }
+
+    const texto = elemento("div", "chat-pergunta-texto");
+    texto.textContent = q.question;
+    if (q.multiSelect) {
+      const dica = elemento("span", "chat-pergunta-dica");
+      dica.textContent = " · marque quantas quiser";
+      texto.append(dica);
+    }
+    const temPrevia = q.options.some((o) => o.preview);
+    const direto = !q.multiSelect && !temPrevia;
+    const opcoes = elemento("div", "chat-pergunta-opcoes");
+    const previa = elemento("pre", "chat-pergunta-previa");
+    const escolhida = q.options.find((o) => e.labels.includes(o.label) && o.preview);
+    previa.hidden = !escolhida;
+    previa.textContent = escolhida?.preview ?? "";
+    const outra = elemento("input", "chat-pergunta-outra");
+    outra.placeholder = "Escreva a sua resposta e tecle ↩";
+    outra.value = e.outra ?? "";
+    outra.hidden = e.outra === undefined;
+
+    for (const o of q.options) {
+      const b = elemento("button", "chat-opcao");
+      b.setAttribute("aria-pressed", String(e.labels.includes(o.label)));
+      const rotulo = elemento("span", "chat-opcao-rotulo");
+      rotulo.textContent = o.label;
+      b.append(rotulo);
+      if (o.description) {
+        const d = elemento("span", "chat-opcao-descricao");
+        d.textContent = o.description;
+        b.append(d);
+      }
+      b.addEventListener("click", () => {
+        if (q.multiSelect) {
+          e.labels = e.labels.includes(o.label) ? e.labels.filter((l) => l !== o.label) : [...e.labels, o.label];
+        } else {
+          e.labels = [o.label];
+          e.outra = undefined;
+        }
+        if (direto) return avancar();
+        desenhar();
+      });
+      opcoes.append(b);
+    }
+    const outraBotao = elemento("button", "chat-opcao");
+    outraBotao.textContent = "Outra…";
+    outraBotao.setAttribute("aria-pressed", String(e.outra !== undefined));
+    outraBotao.addEventListener("click", () => {
+      // Numa escolha só, escrever a sua tira a marcada.
+      if (!q.multiSelect) e.labels = [];
+      e.outra ??= "";
+      desenhar();
+      chat.pergunta.querySelector<HTMLInputElement>(".chat-pergunta-outra")?.focus();
+    });
+    opcoes.append(outraBotao);
+    outra.addEventListener("input", () => {
+      e.outra = outra.value;
+      seguir.disabled = !respondida(passo);
+    });
+    outra.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" || ev.isComposing) return;
+      ev.preventDefault();
+      if (respondida(passo)) avancar();
+    });
+
+    const acoes = elemento("div", "chat-pergunta-acoes");
+    const terminal = elemento("button", "chat-pergunta-terminal");
+    terminal.textContent = "Ver no terminal";
+    terminal.addEventListener("click", () => alternarChat(folha));
+    const voltar = elemento("button", "chat-pergunta-terminal");
+    voltar.textContent = "Voltar";
+    voltar.addEventListener("click", () => {
+      passo--;
+      desenhar();
+    });
+    // Na última sem resposta o botão já manda; antes dela, segue.
+    const ultima = questoes.every((_, i) => i === passo || respondida(i));
+    const seguir = elemento("button", "chat-pergunta-responder");
+    seguir.textContent = ultima ? "Responder" : "Próxima";
+    seguir.disabled = !respondida(passo);
+    seguir.addEventListener("click", avancar);
+    acoes.append(terminal);
+    if (passo > 0) acoes.append(voltar);
+    acoes.append(seguir);
+
+    elementos.push(texto, opcoes, outra, previa, acoes);
+    chat.pergunta.replaceChildren(...elementos);
+  };
+  desenhar();
+}
+
+/// Responde o pedido de permissão que está no terminal, pelo teclado dele: o
+/// Enter aceita a opção de cima ("Yes"), o esc recusa. É o que se apertaria lá.
+function responderPermissao(folha: Folha, sim: boolean) {
+  const claude = folha.claude;
+  if (claude?.estado !== "esperando" || claude.pede !== "permissao") return;
+  invoke("pty_write", { id: folha.id, data: sim ? "\r" : "\x1b" }).catch((e) => jlog(`permissão: ${e}`));
+  // Aceito, o Claude segue trabalhando; recusado, ele para e espera você dizer
+  // o que fazer em vez disso — e isso o campo do chat manda.
+  claude.estado = sim ? "trabalhando" : "ocioso";
+  claude.pede = undefined;
+  claude.aviso = undefined;
+  pintar();
+  teclado(folha);
+}
+
+/// Devolve a rolagem do chat para onde você a deixou.
+function reporRolagem(chat: Chat) {
+  const { lista } = chat;
+  if (!chat.noFim) {
+    if (lista.scrollTop !== chat.topo) lista.scrollTop = chat.topo;
+    return;
+  }
+  lista.scrollTop = lista.scrollHeight;
+  // Uma vez só não chega ao fim: as falas de fora da tela têm altura de palpite
+  // (o `content-visibility` do style.css), e só ganham a de verdade quando a
+  // rolagem as alcança — aí a lista cresce e o fim já é outro. Insiste por
+  // alguns quadros, até a altura parar de mudar.
+  if (chat.grude !== undefined) return;
+  let quadros = 0;
+  let iguais = 0;
+  let antes = -1;
+  const passo = () => {
+    chat.grude = undefined;
+    if (!chat.aberto || !chat.noFim) return;
+    const altura = lista.scrollHeight;
+    lista.scrollTop = altura;
+    iguais = altura === antes ? iguais + 1 : 0;
+    antes = altura;
+    if (++quadros < 30 && iguais < 2) chat.grude = requestAnimationFrame(passo);
+  };
+  chat.grude = requestAnimationFrame(passo);
+}
+
+/// Desenha mais uma leva das falas antigas, acima das que já estão na tela,
+/// sem tirar do lugar o que você está lendo.
+function mostrarAnteriores(chat: Chat) {
+  const ate = chat.desde;
+  chat.desde = Math.max(0, ate - CHAT_JANELA);
+  const altura = chat.lista.scrollHeight;
+  chat.mais.after(...chat.falas.slice(chat.desde, ate).map(desenharFala));
+  chat.mais.hidden = chat.desde === 0;
+  chat.lista.scrollTop += chat.lista.scrollHeight - altura;
+}
+
+/// As miniaturas saem junto com a mensagem que as levou.
+function limparAnexos(chat: Chat) {
+  for (const img of chat.anexos.querySelectorAll("img")) URL.revokeObjectURL(img.src);
+  chat.anexos.replaceChildren();
+  chat.anexos.hidden = true;
+}
+
+/// Quem recebe o teclado do painel: o campo do chat, se é ele que está na tela.
+function teclado(folha: Folha) {
+  const v = folha.visor;
+  if (v?.aberto && (arranjoVisor === "sobre" || v.comTeclado)) v.corpo.focus({ preventScroll: true });
+  else if (folha.chat?.aberto) folha.chat.campo.focus();
+  else folha.term.focus();
+}
+
+function criarChat(folha: Folha): Chat {
+  const el = elemento("div", "chat");
+  const lista = elemento("div", "chat-lista");
+  const pergunta = elemento("div", "chat-pergunta");
+  pergunta.hidden = true;
+  const pensando = elemento("div", "chat-pensando");
+  pensando.hidden = true;
+  const aviso = elemento("div", "chat-aviso");
+  const avisoTexto = elemento("span", "chat-aviso-texto");
+  const permitir = elemento("button", "chat-aviso-sim");
+  permitir.textContent = "Permitir";
+  permitir.addEventListener("click", () => responderPermissao(folha, true));
+  const negar = elemento("button", "chat-aviso-nao");
+  negar.textContent = "Negar";
+  negar.addEventListener("click", () => responderPermissao(folha, false));
+  const ver = elemento("button", "chat-aviso-ver");
+  ver.textContent = "Ver no terminal";
+  ver.addEventListener("click", () => alternarChat(folha));
+  aviso.append(avisoTexto, permitir, negar, ver);
+  const mais = elemento("button", "chat-mais");
+  mais.textContent = "Mostrar mensagens anteriores";
+  mais.hidden = true;
+  const campo = elemento("textarea", "chat-campo");
+  campo.rows = 1;
+  campo.placeholder = "Mensagem para o Claude — ↩ envia, ⇧↩ quebra a linha, / comandos, esc interrompe";
+  const menu = elemento("div", "chat-comandos");
+  menu.hidden = true;
+  const anexos = elemento("div", "chat-anexos");
+  anexos.hidden = true;
+  el.append(lista, pensando, pergunta, aviso, menu, anexos, campo);
+  // Dentro do elemento do terminal, e não ao lado: escondê-lo tiraria a medida
+  // de onde o FitAddon calcula a grade, e o Claude receberia um SIGWINCH a cada
+  // troca de modo.
+  folha.el.querySelector(".folha-tela")?.append(el);
+
+  const crescer = () => {
+    campo.style.height = "auto";
+    campo.style.height = `${Math.min(campo.scrollHeight, 160)}px`;
+  };
+  /// Manda o texto para o Claude. Um `/comando` vai digitado, e não colado: é
+  /// digitado que o Claude Code o reconhece como comando em qualquer caso. O
+  /// resto vai pelo caminho de colagem, como o ⌘V — várias linhas chegam como
+  /// um bloco só, e não como um Enter a cada quebra. O Enter vai depois, à
+  /// parte: junto da colagem o Claude o tomaria por mais uma linha dela.
+  const enviar = (texto: string) => {
+    // O `/resume` sozinho abriria a lista de sessões no terminal, onde o chat
+    // não a vê. A lista é montada aqui, e o que vai para o Claude é o
+    // `/resume` já com a sessão escolhida.
+    if (texto === "/resume") return void abrirSessoes(folha);
+    chat.sessoes = undefined;
+    limparAnexos(chat);
+    campo.value = "";
+    crescer();
+    desenharComandos(chat);
+    const comando = /^\/([\w:.-]+)/.exec(texto);
+    // A mensagem vai para a tela já, apagada até o transcript a confirmar. Um
+    // `/comando` não: muitos nem viram fala, e o balão ficaria lá pendurado.
+    if (!comando) {
+      const balao = desenharFala({ quem: "voce", texto });
+      balao.classList.add("pendente");
+      chat.lista.append(balao);
+      chat.pendentes.push({ el: balao, texto });
+      chat.noFim = true;
+      reporRolagem(chat);
+      if (folha.claude) folha.claude.estado = "trabalhando";
+    }
+    if (comando && !texto.includes("\n")) {
+      invoke("pty_write", { id: folha.id, data: texto }).catch((err) => jlog(`chat comando: ${err}`));
+    } else colar(folha, texto);
+    setTimeout(() => {
+      invoke("pty_write", { id: folha.id, data: "\r" }).catch((err) => jlog(`chat envio: ${err}`));
+    }, 80);
+    // O que o comando abre (a lista de modelos, as sessões a retomar) aparece
+    // no terminal, e é lá que se responde. O chat não sai da frente sozinho:
+    // avisa, e o botão do aviso leva até lá.
+    const nome = comando?.[1];
+    // Com argumento o comando já diz o que quer, e não abre tela nenhuma.
+    const abreTela = texto === `/${nome}` && COMANDOS_DO_CLAUDE.some((c) => c.interativo && c.nome === nome);
+    chat.recado = abreTela ? `O /${nome} abriu uma tela no terminal.` : undefined;
+    pintar();
+  };
+  const completar = (c: Comando) => {
+    campo.value = `/${c.nome} `;
+    crescer();
+    desenharComandos(chat);
+  };
+
+  campo.addEventListener("input", () => {
+    crescer();
+    // Escrever a resposta é atender, como a primeira tecla no terminal.
+    if (folha.claude?.estado === "esperando" && atendivelNoChat(folha)) {
+      folha.claude.estado = "ocioso";
+      pintar();
+    }
+    // Abriu a lista agora: os comandos do disco podem ter mudado desde a
+    // última vez (uma skill nova, outro projeto).
+    if (campo.value === "/") void carregarComandos(folha);
+    chat.escolhido = 0;
+    desenharComandos(chat);
+  });
+  const retomarSessao = (s: SessaoSalva) => enviar(`/resume ${s.id}`);
+  const fecharSessoes = () => {
+    chat.sessoes = undefined;
+    campo.value = "";
+    crescer();
+    desenharComandos(chat);
+  };
+  menu.addEventListener("mousedown", (e) => {
+    // O clique não tira o teclado do campo.
+    e.preventDefault();
+    const item = (e.target as HTMLElement).closest<HTMLElement>(".chat-comando");
+    if (!item) return;
+    if (chat.sessoes) {
+      const s = chat.sessoesAchadas[Number(item.dataset.i)];
+      if (s) retomarSessao(s);
+      return;
+    }
+    const c = chat.achados[Number(item.dataset.i)];
+    if (c) completar(c);
+  });
+  campo.addEventListener("keydown", (e) => {
+    if (nossoAtalho(e)) return;
+    if (chat.sessoes) {
+      const n = chat.sessoesAchadas.length;
+      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && n) {
+        e.preventDefault();
+        chat.escolhido = (chat.escolhido + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
+        return desenharComandos(chat);
+      }
+      if (e.key === "Enter" && !e.isComposing) {
+        e.preventDefault();
+        const s = chat.sessoesAchadas[chat.escolhido];
+        if (s) retomarSessao(s);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        return fecharSessoes();
+      }
+      return;
+    }
+    if (!menu.hidden && chat.achados.length) {
+      const n = chat.achados.length;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        chat.escolhido = (chat.escolhido + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
+        return desenharComandos(chat);
+      }
+      // Tab completa, para quem vai escrever os argumentos; Enter já manda.
+      if (e.key === "Tab") {
+        e.preventDefault();
+        return completar(chat.achados[chat.escolhido]);
+      }
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        return enviar(`/${chat.achados[chat.escolhido].nome}`);
+      }
+      // Esc fecha a lista; só sem ela é que ele interrompe o Claude.
+      if (e.key === "Escape") {
+        e.preventDefault();
+        menu.hidden = true;
+        return;
+      }
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      // Com um pedido de permissão aberto, o esc lá é o "não": o aviso vai junto.
+      if (folha.claude?.estado === "esperando" && folha.claude.pede === "permissao") {
+        return responderPermissao(folha, false);
+      }
+      invoke("pty_write", { id: folha.id, data: "\x1b" }).catch((err) => jlog(`chat esc: ${err}`));
+      // Interrompido, o Claude não manda o `Stop`: o "trabalhando" sai aqui.
+      if (folha.claude?.estado === "trabalhando") {
+        folha.claude.estado = "ocioso";
+        pintar();
+      }
+      return;
+    }
+    // Enter no meio de uma composição (acento, IME) confirma a letra, não envia.
+    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+    e.preventDefault();
+    // A marca no campo é só para você ver onde a imagem está: no prompt do
+    // Claude ela já entrou com o ⌃V, e mandada de novo viraria texto.
+    const texto = campo.value.replace(/\[Image #\d+\] ?/g, "").trim();
+    if (texto) enviar(texto);
+    else if (!chat.anexos.hidden) {
+      campo.value = "";
+      crescer();
+      invoke("pty_write", { id: folha.id, data: "\r" }).catch((err) => jlog(`chat envio: ${err}`));
+      limparAnexos(chat);
+    }
+  });
+  // Clicar em qualquer lugar do chat é como clicar no terminal: o teclado vai
+  // para o campo, e dá para sair digitando. Menos quando o clique foi para
+  // outra coisa — um botão, um link, outro campo — ou para selecionar texto.
+  el.addEventListener("mouseup", (e) => {
+    const alvo = e.target as HTMLElement;
+    if (alvo.closest("button, a, input, textarea, select, summary")) return;
+    if (!(getSelection()?.isCollapsed ?? true)) return;
+    campo.focus({ preventScroll: true });
+  });
+  // Um link da resposta abre fora, como os do terminal: dentro, ele trocaria a
+  // página do app inteiro pela do link.
+  lista.addEventListener("click", (e) => {
+    // ⌘-clique num `caminho:linha` da resposta abre o arquivo no visor.
+    if (cliqueEmReferencia(folha, e)) return;
+    const a = (e.target as HTMLElement).closest("a");
+    if (!a) return;
+    e.preventDefault();
+    abrirLink(e, a.href);
+  });
+  // Imagem colada vai para o Claude como no terminal: o ⌃V é o que faz o Claude
+  // Code ler a área de transferência e anexá-la ao prompt que está montando. O
+  // texto do campo vai depois, junto do Enter.
+  campo.addEventListener("paste", (e) => {
+    const arquivo = [...(e.clipboardData?.items ?? [])]
+      .find((i) => i.kind === "file" && i.type.startsWith("image/"))
+      ?.getAsFile();
+    if (!arquivo) return;
+    e.preventDefault();
+    invoke("pty_write", { id: folha.id, data: "\x16" }).catch((err) => jlog(`chat imagem: ${err}`));
+    const img = elemento("img", "chat-anexo");
+    img.src = URL.createObjectURL(arquivo);
+    img.alt = "imagem anexada";
+    img.addEventListener("click", () => ampliarImagem(img.src));
+    anexos.append(img);
+    anexos.hidden = false;
+    // O número que o Claude Code vai dar a ela: ele conta na sessão inteira.
+    const vistas = chat.falas.flatMap((f) =>
+      f.quem === "voce" ? [...f.texto.matchAll(/\[Image #(\d+)\]/g)].map((m) => Number(m[1])) : [],
+    );
+    const n = Math.max(0, ...vistas) + anexos.childElementCount;
+    campo.setRangeText(`[Image #${n}] `, campo.selectionStart, campo.selectionEnd, "end");
+    crescer();
+  });
+
+  const chat: Chat = {
+    el,
+    lista,
+    aviso,
+    avisoTexto,
+    pergunta,
+    pensando,
+    pendentes: [],
+    permitir,
+    negar,
+    campo,
+    menu,
+    comandos: [],
+    achados: [],
+    escolhido: 0,
+    anexos,
+    sessoesAchadas: [],
+    mais,
+    falas: [],
+    desde: 0,
+    topo: 0,
+    noFim: true,
+    aberto: false,
+    fim: 0,
+  };
+  mais.addEventListener("click", () => mostrarAnteriores(chat));
+  lista.addEventListener(
+    "scroll",
+    () => {
+      // Fora da tela a lista não tem altura, e o que ela diz da rolagem é zero.
+      // E a caminho do fim, as posições de passagem não são escolha sua.
+      if (!lista.clientHeight || chat.grude !== undefined) return;
+      chat.topo = lista.scrollTop;
+      chat.noFim = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 40;
+    },
+    { passive: true },
+  );
+  // Rolou com a mão no meio do caminho: quem manda é você.
+  lista.addEventListener(
+    "wheel",
+    () => {
+      if (chat.grude === undefined) return;
+      cancelAnimationFrame(chat.grude);
+      chat.grude = undefined;
+    },
+    { passive: true },
+  );
+  return chat;
+}
+
+/// Os comandos e as skills do disco, para a lista do `/`. A pasta é a da
+/// sessão: é dela que o Claude Code enxerga o `.claude` do projeto.
+async function carregarComandos(folha: Folha) {
+  const chat = folha.chat;
+  if (!chat) return;
+  try {
+    const doDisco = await invoke<Comando[]>("comandos_listar", { pasta: folha.claude?.pasta ?? null });
+    chat.comandos = doDisco;
+    desenharComandos(chat);
+  } catch (e) {
+    jlog(`comandos: ${e}`);
+  }
+}
+
+/// A lista aparece enquanto o campo é só uma barra e um nome ainda sem espaço;
+/// depois do espaço já são os argumentos, e ela sai do caminho.
+function desenharComandos(chat: Chat) {
+  if (chat.sessoes) return desenharSessoes(chat);
+  const digitado = /^\/([\w:.-]*)$/.exec(chat.campo.value);
+  chat.achados = digitado ? filtrarComandos([...chat.comandos, ...COMANDOS_DO_CLAUDE], digitado[1]) : [];
+  chat.menu.hidden = !chat.achados.length;
+  if (chat.menu.hidden) return;
+  chat.escolhido = Math.min(chat.escolhido, chat.achados.length - 1);
+  chat.menu.replaceChildren(
+    ...chat.achados.map((c, i) => {
+      const item = elemento("div", "chat-comando");
+      item.dataset.i = String(i);
+      item.classList.toggle("escolhido", i === chat.escolhido);
+      const nome = elemento("span", "chat-comando-nome");
+      nome.textContent = `/${c.nome}`;
+      const descricao = elemento("span", "chat-comando-descricao");
+      descricao.textContent = c.descricao;
+      item.append(nome, descricao);
+      return item;
+    }),
+  );
+  chat.menu.querySelector(".escolhido")?.scrollIntoView({ block: "nearest" });
+}
+
+/// Uma sessão do Claude Code guardada no disco, como o `claude_sessions` a lista.
+type SessaoSalva = { id: string; title: string; modified: number };
+
+/// "há 5 min", "há 3 h", "há 2 d": o bastante para achar a conversa de ontem.
+function haQuanto(ms: number): string {
+  const min = Math.max(0, Math.round((Date.now() - ms) / 60_000));
+  if (min < 1) return "agora";
+  if (min < 60) return `há ${min} min`;
+  if (min < 60 * 24) return `há ${Math.round(min / 60)} h`;
+  return `há ${Math.round(min / (60 * 24))} d`;
+}
+
+/// A lista do `/resume`, dentro do chat: as sessões guardadas da pasta em que
+/// esta nasceu, que é onde o Claude Code as procura.
+async function abrirSessoes(folha: Folha) {
+  const chat = folha.chat;
+  if (!chat) return;
+  chat.campo.value = "";
+  chat.campo.style.height = "auto";
+  const pasta = folha.claude?.pasta ?? (await invoke<string | null>("pty_cwd", { id: folha.id }).catch(() => null));
+  const todas = pasta ? await invoke<SessaoSalva[]>("claude_sessions", { path: pasta }).catch(() => []) : [];
+  // A sessão em que já se está não é uma a retomar.
+  const outras = todas.filter((s) => s.id !== folha.claude?.sessao);
+  if (!outras.length) {
+    chat.recado = "Não há outra sessão guardada nesta pasta.";
+    return desenharAviso(folha);
+  }
+  chat.recado = undefined;
+  desenharAviso(folha);
+  chat.sessoes = outras;
+  chat.escolhido = 0;
+  desenharComandos(chat);
+  chat.campo.focus();
+}
+
+/// O menu, no lugar dos comandos: as sessões cujo título tem o que está no
+/// campo. Com o campo vazio, todas.
+function desenharSessoes(chat: Chat) {
+  const q = chat.campo.value.trim().toLowerCase();
+  chat.sessoesAchadas = (chat.sessoes ?? []).filter((s) => s.title.toLowerCase().includes(q));
+  chat.escolhido = Math.max(0, Math.min(chat.escolhido, chat.sessoesAchadas.length - 1));
+  const cabeca = elemento("div", "chat-comandos-cabeca");
+  cabeca.textContent = chat.sessoesAchadas.length
+    ? "Retomar uma sessão — ↑↓ escolhe, ↩ retoma, esc cancela, digite para filtrar"
+    : "Nenhuma sessão com esse texto — esc cancela";
+  chat.menu.hidden = false;
+  chat.menu.replaceChildren(
+    cabeca,
+    ...chat.sessoesAchadas.map((s, i) => {
+      const item = elemento("div", "chat-comando chat-sessao");
+      item.dataset.i = String(i);
+      item.classList.toggle("escolhido", i === chat.escolhido);
+      const titulo = elemento("span", "chat-sessao-titulo");
+      titulo.textContent = s.title;
+      const quando = elemento("span", "chat-sessao-quando");
+      quando.textContent = haQuanto(s.modified);
+      item.append(titulo, quando);
+      return item;
+    }),
+  );
+  chat.menu.querySelector(".escolhido")?.scrollIntoView({ block: "nearest" });
+}
+
+function desenharFala(f: Fala): HTMLElement {
+  if (f.quem === "ferramenta") {
+    const el = elemento("div", "chat-ferramenta");
+    const nome = elemento("span", "chat-ferramenta-nome");
+    nome.textContent = f.nome;
+    const resumo = elemento("span", "chat-ferramenta-resumo");
+    resumo.textContent = f.resumo;
+    el.append(nome, resumo);
+    return el;
+  }
+  if (f.quem === "diff") {
+    const el = elemento("div", "chat-diffs");
+    el.append(...f.arquivos.map(desenharDiff));
+    return el;
+  }
+  const el = elemento("div", `chat-fala chat-${f.quem}`);
+  // O seu texto vai como foi escrito; só a resposta do Claude é markdown.
+  if (f.quem === "voce") desenharSeu(el, f.texto, f.imagens ?? []);
+  else el.innerHTML = markdown(f.texto);
+  return el;
+}
+
+/// Quantas linhas de diff entram na tela. Um `Write` de um arquivo inteiro
+/// teria milhares; o resto está no arquivo.
+const DIFF_MAXIMO = 400;
+
+/// Unificado ou lado a lado: o mesmo modo do differ, guardado nas preferências
+/// dele. Trocar aqui troca lá, e o contrário também.
+let modoDiff: ViewMode = "unified";
+
+/// O arquivo de cada diff na tela, para redesenhá-lo quando o modo muda.
+const arquivoDoDiff = new WeakMap<HTMLElement, ArquivoDiff>();
+
+const ICONE_UNIFICADO = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M4.5 6h7M4.5 10h7"/></svg>`;
+const ICONE_LADO_A_LADO = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M8 2.5v11"/></svg>`;
+
+/// Os limites da pílula do contexto, das Preferências (⌘,).
+let limitesDoContexto: Partial<LimitesDoContexto> = {};
+
+async function ligarLimitesDoContexto() {
+  const aplicar = (s: Pick<Settings, "contextoAtencao" | "contextoPerigo" | "autoCompact" | "autoCompactEm">) => {
+    limitesDoContexto = {
+      atencao: s.contextoAtencao,
+      perigo: s.contextoPerigo,
+      autoCompact: s.autoCompact,
+      autoCompactEm: s.autoCompactEm,
+    };
+    for (const a of abas)
+      for (const f of folhas(a.raiz)) {
+        desenharBarra(f);
+        autoCompactar(f);
+      }
+  };
+  try {
+    aplicar(await loadSettings());
+    await onSettings(aplicar);
+  } catch (e) {
+    jlog(`limites do contexto: ${e}`);
+  }
+}
+
+async function ligarModoDiff() {
+  try {
+    trocarModoDiff((await loadSettings()).viewMode);
+    await onSettings(({ viewMode }) => trocarModoDiff(viewMode));
+  } catch (e) {
+    jlog(`preferências do diff: ${e}`);
+  }
+}
+
+/// Redesenha os diffs do chat no modo novo. O que estava aberto continua aberto.
+function trocarModoDiff(modo: ViewMode) {
+  if (modo === modoDiff) return;
+  modoDiff = modo;
+  for (const el of document.querySelectorAll<HTMLElement>(".chat-diff")) {
+    const arquivo = arquivoDoDiff.get(el);
+    if (!arquivo) continue;
+    const aberto = el.querySelector(".chat-recolhivel-botao") && !el.querySelector(".recolhida");
+    const novo = desenharDiff(arquivo);
+    if (aberto) novo.querySelector<HTMLButtonElement>(".chat-recolhivel-botao")?.click();
+    el.replaceWith(novo);
+  }
+}
+
+/// O que uma ferramenta mudou num arquivo, como o terminal mostra: o nome, a
+/// contagem, as linhas numeradas. Em prévia como as mensagens longas — as
+/// primeiras linhas, e o resto a um clique.
+function desenharDiff(arquivo: ArquivoDiff): HTMLElement {
+  const { linhas, mais, menos } = linhasDoDiff(arquivo);
+  const el = elemento("div", "chat-diff");
+  arquivoDoDiff.set(el, arquivo);
+  const resumo = elemento("div", "chat-diff-resumo");
+  const nome = elemento("span", "chat-diff-arquivo");
+  nome.textContent = arquivo.caminho.split("/").pop() ?? arquivo.caminho;
+  nome.title = arquivo.caminho;
+  const partes = [mais && `+${mais}`, menos && `−${menos}`].filter(Boolean).join(" ");
+  const lado = modoDiff === "split";
+  // O ícone é o do modo para onde o clique leva.
+  const modo = elemento("button", "chat-diff-modo");
+  modo.innerHTML = lado ? ICONE_UNIFICADO : ICONE_LADO_A_LADO;
+  modo.title = lado ? "Ver unificado (vale para todos os diffs)" : "Ver lado a lado (vale para todos os diffs)";
+  modo.addEventListener("mousedown", (e) => e.preventDefault());
+  modo.addEventListener("click", () => {
+    const novo: ViewMode = lado ? "unified" : "split";
+    trocarModoDiff(novo);
+    saveViewMode(novo).catch((e) => jlog(`salvar modo do diff: ${e}`));
+  });
+  resumo.append(nome, ` ${partes}`, modo);
+  // A coluna dos números tem a largura do maior deles.
+  const largura = String(Math.max(0, ...linhas.map((l) => l.numero ?? 0))).length;
+  const classe = (l?: LinhaDiff) =>
+    !l ? "vazia" : l.tipo === "+" ? "mais" : l.tipo === "-" ? "menos" : l.tipo === "…" ? "pulo" : "";
+  const pre = elemento("pre", lado ? "chat-diff-linhas lado-a-lado" : "chat-diff-linhas");
+  let total: number;
+  if (lado) {
+    const pares = ladoALado(linhas);
+    total = pares.length;
+    const metade = (l?: LinhaDiff) => {
+      const c = elemento("div", `chat-diff-linha ${classe(l)}`);
+      c.textContent = l ? `${String(l.numero ?? "").padStart(largura)} ${l.texto}` : "";
+      return c;
+    };
+    for (const p of pares.slice(0, DIFF_MAXIMO)) {
+      if (p.pulo) {
+        const linha = elemento("div", "chat-diff-linha pulo inteira");
+        linha.textContent = "⋯";
+        pre.append(linha);
+      } else pre.append(metade(p.antes), metade(p.depois));
+    }
+  } else {
+    total = linhas.length;
+    for (const l of linhas.slice(0, DIFF_MAXIMO)) {
+      const linha = elemento("div", `chat-diff-linha ${classe(l)}`);
+      linha.textContent =
+        l.tipo === "…" ? "⋯" : `${String(l.numero ?? "").padStart(largura)} ${l.tipo} ${l.texto}`;
+      pre.append(linha);
+    }
+  }
+  const mostradas = Math.min(total, DIFF_MAXIMO);
+  el.append(resumo, emPrevia(pre, mostradas, mostradas > LONGA_LINHAS));
+  if (total > DIFF_MAXIMO) {
+    const nota = elemento("div", "chat-diff-resumo");
+    nota.textContent = `… mais ${total - DIFF_MAXIMO} linhas`;
+    el.append(nota);
+  }
+  return el;
+}
+
+/// A partir de quantas linhas (ou caracteres, para quem cola uma linha só
+/// enorme) um texto nasce recolhido. Um log colado ocupava a tela inteira e
+/// empurrava a resposta para longe.
+const LONGA_LINHAS = 10;
+const LONGA_CHARS = 900;
+
+/// O seu balão: o que você digitou, o que colou (sem as tags `<pasted_content>`
+/// que o Claude Code põe em volta) e as imagens, cada uma onde o texto a cita.
+function desenharSeu(el: HTMLElement, texto: string, imagens: string[]) {
+  for (const p of partesDoSeu(texto, imagens.length)) {
+    if (p.tipo === "imagem") {
+      const img = elemento("img", "chat-imagem");
+      img.src = imagens[p.indice];
+      img.alt = `imagem ${p.indice + 1}`;
+      img.addEventListener("click", () => ampliarImagem(img.src));
+      el.append(img);
+    } else if (p.tipo === "colado") {
+      const caixa = elemento("div", "chat-colado");
+      const linhas = p.texto.split("\n").length;
+      const titulo = elemento("div", "chat-colado-titulo");
+      titulo.textContent = `Texto colado · ${linhas} ${linhas === 1 ? "linha" : "linhas"}`;
+      caixa.append(titulo, recolhivel(p.texto));
+      el.append(caixa);
+    } else el.append(recolhivel(p.texto));
+  }
+}
+
+/// Um texto que, longo, nasce recolhido em poucas linhas com um botão para
+/// abrir. Curto, é só o texto.
+function recolhivel(texto: string): HTMLElement {
+  const corpo = elemento("div", "");
+  corpo.textContent = texto;
+  const linhas = texto.split("\n").length;
+  return emPrevia(corpo, linhas, linhas > LONGA_LINHAS || texto.length > LONGA_CHARS);
+}
+
+/// O mesmo para qualquer conteúdo (o diff de uma edição): `longo` diz se ele
+/// nasce recolhido com o botão, e `linhas` é o que o botão conta.
+function emPrevia(corpo: HTMLElement, linhas: number, longo: boolean): HTMLElement {
+  const el = elemento("div", "chat-recolhivel");
+  corpo.classList.add("chat-recolhivel-corpo");
+  el.append(corpo);
+  if (!longo) return el;
+  const botao = elemento("button", "chat-recolhivel-botao");
+  const rotulo = () => {
+    botao.textContent = el.classList.contains("recolhida") ? `Mostrar tudo · ${linhas} linhas` : "Recolher";
+  };
+  botao.addEventListener("click", () => {
+    el.classList.toggle("recolhida");
+    rotulo();
+    // Recolhido do meio (o botão flutua), o começo do texto ficaria lá em
+    // cima, fora da tela: traz ele de volta para não perder o lugar.
+    if (el.classList.contains("recolhida")) el.scrollIntoView({ block: "nearest" });
+  });
+  el.classList.add("recolhida");
+  el.append(botao);
+  rotulo();
+  return el;
+}
+
+/// A imagem em tamanho de tela, por cima de tudo. Clique ou esc fecham.
+function ampliarImagem(src: string) {
+  const fundo = elemento("div", "chat-imagem-ampliada");
+  const img = elemento("img", "");
+  img.src = src;
+  fundo.append(img);
+  const fechar = () => {
+    fundo.remove();
+    removeEventListener("keydown", esc, true);
+  };
+  const esc = (e: KeyboardEvent) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    fechar();
+  };
+  fundo.addEventListener("click", fechar);
+  addEventListener("keydown", esc, true);
+  document.body.append(fundo);
+}
+
+type Trecho = { texto: string; fim: number; do_zero: boolean; cortado: boolean };
+
+/// Lê o que o transcript ganhou e põe no fim da conversa.
+async function lerChat(folha: Folha) {
+  const chat = folha.chat;
+  if (!chat || chat.lendo || folha.morta) return;
+  // A sessão acabou: a última conversa continua na tela, só não cresce mais.
+  const caminho = folha.claude?.transcricao ?? chat.caminho;
+  if (!caminho) return;
+  const outra = caminho !== chat.caminho;
+  chat.lendo = true;
+  try {
+    const t = await invoke<Trecho>("transcricao_ler", { caminho, desde: outra ? 0 : chat.fim });
+    const falas = lerFalas(t.texto);
+    const doZero = outra || t.do_zero;
+    if (doZero) {
+      chat.lista.replaceChildren(chat.mais);
+      chat.pendentes = [];
+      if (t.cortado) {
+        const nota = elemento("div", "chat-nota");
+        nota.textContent = "O começo desta conversa ficou no terminal: aqui está só a parte mais recente.";
+        chat.lista.prepend(nota);
+      }
+      chat.falas = [];
+      // Da conversa que já existia, só o fim vai para a tela.
+      chat.desde = Math.max(0, falas.length - CHAT_JANELA);
+      chat.mais.hidden = chat.desde === 0;
+      chat.noFim = true;
+    }
+    chat.caminho = caminho;
+    chat.fim = t.fim;
+    if (!falas.length) return;
+    const primeira = Math.max(chat.desde - chat.falas.length, 0);
+    chat.falas.push(...falas);
+    // Cada fala sua que chega toma o lugar do balão provisório dela.
+    for (const f of falas) {
+      if (f.quem !== "voce") continue;
+      const n = provisoriosResolvidos(
+        chat.pendentes.map((p) => p.texto),
+        f.texto,
+      );
+      for (const p of chat.pendentes.splice(0, n)) p.el.remove();
+    }
+    chat.lista.append(...falas.slice(primeira).map(desenharFala));
+    // Só acompanha o fim quem já estava nele: quem subiu para reler não é
+    // puxado de volta a cada fala nova.
+    if (chat.aberto) reporRolagem(chat);
+    // A conversa retomada traz prompts que o hook não viu passar.
+    lembrarPrompts(folha, falas.flatMap((f) => (f.quem === "voce" ? [f.texto] : [])));
+  } catch (e) {
+    // O Claude só cria o arquivo na primeira fala: até lá, não há o que ler.
+    if (!String(e).includes("No such file")) jlog(`chat: ${e}`);
+  } finally {
+    chat.lendo = false;
+  }
+}
+
+/// Troca o painel entre o terminal e a conversa em balões. É por painel: com a
+/// tela dividida, um pode estar no chat e o vizinho no terminal.
+/// ⌘ ou ⌃ clique abre o link no navegador; o clique sozinho fica para
+/// selecionar e posicionar, como no iTerm.
+function abrirLink(e: MouseEvent, url: string) {
+  if (!e.metaKey && !e.ctrlKey) return;
+  invoke("abrir_link", { url }).catch((err) => jlog(`abrir link: ${err}`));
+}
+
+/// Mais curta que a do maximizar: é uma camada que aparece, não o layout andando.
+const DURACAO_CHAT = 180;
+
+/// Entra ou sai o chat de cima do terminal: esmaece com um leve deslize. Na
+/// saída ele só some de vez no fim, e enquanto isso não segura os cliques — o
+/// terminal embaixo já é o painel.
+function transicionarChat(chat: { el: HTMLElement; aberto: boolean; transicao?: Animation }) {
+  const { el, aberto } = chat;
+  const meio = chat.transicao?.playState === "running" ? chat.transicao.currentTime : null;
+  chat.transicao?.cancel();
+  chat.transicao = undefined;
+  el.style.pointerEvents = aberto ? "" : "none";
+  if (aberto) el.hidden = false;
+  if (movimentoReduzido.matches) {
+    el.hidden = !aberto;
+    return;
+  }
+  const quadros = [
+    { opacity: 0, transform: "translateY(8px)" },
+    { opacity: 1, transform: "none" },
+  ];
+  const t = el.animate(aberto ? quadros : quadros.reverse(), {
+    duration: DURACAO_CHAT,
+    easing: aberto ? "cubic-bezier(0.2, 0.7, 0.3, 1)" : "ease-in",
+  });
+  // Virar no meio do caminho começa do ponto espelhado, sem pulo.
+  if (typeof meio === "number") t.currentTime = Math.max(0, DURACAO_CHAT - meio);
+  chat.transicao = t;
+  t.onfinish = () => {
+    if (chat.transicao !== t) return;
+    chat.transicao = undefined;
+    if (!chat.aberto) el.hidden = true;
+  };
+}
+
+function alternarChat(folha: Folha) {
+  if (folha.chat?.aberto) {
+    const chat = folha.chat;
+    chat.aberto = false;
+    transicionarChat(chat);
+    chat.recado = undefined;
+    chat.sessoes = undefined;
+    desenharComandos(chat);
+    clearInterval(chat.pulso);
+    chat.pulso = undefined;
+  } else {
+    // Sem sessão do Claude no painel, o botão a abre: o chat é o jeito de
+    // começar uma conversa naquela pasta, e não só de ver uma que já existe.
+    if (!folha.claude) return void abrirClaudeNoChat(folha);
+    const chat = (folha.chat ??= criarChat(folha));
+    chat.aberto = true;
+    transicionarChat(chat);
+    void carregarComandos(folha);
+    // Escondida, a lista perdeu a rolagem.
+    reporRolagem(chat);
+    void lerChat(folha);
+    chat.pulso = setInterval(() => {
+      void lerChat(folha);
+      desenharPensando(folha);
+    }, CHAT_MS);
+  }
+  desenharBarra(folha);
+  desenharAviso(folha);
+  if (abaDe(folha)?.foco === folha) teclado(folha);
+}
+
+/// Abre o Claude Code no shell do painel, na pasta em que ele está, e já entra
+/// no modo chat. A conversa aparece quando o hook do `SessionStart` disser qual
+/// é o transcript dela.
+async function abrirClaudeNoChat(folha: Folha) {
+  // Com outro programa na frente do shell, o `claude` seria digitado dentro
+  // dele — num vim, num servidor rodando.
+  if (await invoke<boolean>("pty_ocupado", { id: folha.id }).catch(() => false)) {
+    return avisar(folha, "Há um programa rodando neste painel: o Claude não foi aberto");
+  }
+  // O clique repetido enquanto a pergunta acima ia e voltava.
+  if (folha.morta || folha.claude || folha.chat?.aberto) return;
+  await invoke("pty_write", { id: folha.id, data: "claude\r" }).catch((e) => jlog(`abrir claude: ${e}`));
+  // Marcada desde já: é o que faz o segundo clique fechar o chat em vez de
+  // digitar `claude` de novo. O resto chega com o primeiro evento da sessão.
+  folha.claude = { nome: folha.titulo, estado: "ocioso" };
+  alternarChat(folha);
+}
+
+// ---------- o visor: um arquivo dentro do painel ----------
+
+/// O que mostrar: um arquivo, a linha (ou o trecho) a marcar e, com `ref`, a
+/// versão dele naquele ponto do git em vez da do disco.
+type PedidoVer = { caminho: string; linha?: number; ate?: number; ref?: string };
+
+/// O que chega pelo socket quando alguém roda `termiau ver` (ver hooks/termiau).
+type PedidoDoSocket = {
+  painel: number;
+  ver: { caminho?: string; linha?: number | null; ate?: number | null; ref?: string | null };
+};
+
+/// O arquivo ao lado do terminal (ou do chat), ou por cima dele: o terminal
+/// segue vivo, com o Claude rodando, e o botão da barra mostra e esconde o
+/// arquivo. Como ele se arruma no painel é o `arranjoVisor`.
+type Visor = {
+  el: HTMLDivElement;
+  /// A borda entre o arquivo e o terminal, que se arrasta. Só no dividido.
+  alca: HTMLDivElement;
+  corpo: HTMLDivElement;
+  caminho: HTMLSpanElement;
+  ref: HTMLSpanElement;
+  voltar: HTMLButtonElement;
+  avancar: HTMLButtonElement;
+  modo: HTMLButtonElement;
+  arranjo: HTMLButtonElement;
+  aberto: boolean;
+  transicao?: Animation;
+  /// No dividido, quem fica com o teclado: o arquivo ou o terminal/chat. É o
+  /// lado em que você clicou por último.
+  comTeclado: boolean;
+  /// Onde você deixou a rolagem. Não se lê do `scrollTop` na hora de redesenhar:
+  /// pego no meio de uma gravação, o arquivo chega curto (ou vazio), a rolagem
+  /// encolhe junto, e a releitura seguinte voltaria para o topo.
+  rolagem: number;
+  /// Os eventos de rolagem que o próprio redesenho provoca não são você rolando.
+  segurando: number;
+  /// Os arquivos abertos neste painel, para ‹ e › andarem entre eles.
+  historico: PedidoVer[];
+  pos: number;
+  /// Um .md mostrado renderizado, e não como fonte.
+  renderizado: boolean;
+  /// O carimbo do arquivo mostrado: mudou no disco, o visor relê.
+  carimbo?: string;
+  linhas?: string[];
+  pulso?: ReturnType<typeof setInterval>;
+  /// Respostas chegando fora de ordem (‹ › apertados depressa) não desenham
+  /// por cima da mais nova.
+  vez: number;
+};
+
+/// Quantos arquivos o ‹ alcança.
+const VISOR_HISTORICO = 30;
+/// De quanto em quanto o visor aberto confere se o arquivo mudou no disco.
+const VISOR_MS = 1000;
+
+/// Como o visor se arruma no painel: ao lado do terminal, em cima dele, ou por
+/// cima, cobrindo-o. Vale para todos os painéis, e a fatia (do visor) também.
+type Arranjo = "lado" | "abaixo" | "sobre";
+const ARRANJOS: Arranjo[] = ["lado", "abaixo", "sobre"];
+const ROTULO_ARRANJO: Record<Arranjo, string> = {
+  lado: "Lado a lado",
+  abaixo: "Arquivo em cima, terminal embaixo",
+  sobre: "Por cima do terminal",
+};
+const CHAVE_VISOR = "termiau:visor";
+
+let { arranjo: arranjoVisor, fatia: fatiaVisor } = lerPrefVisor();
+
+function lerPrefVisor(): { arranjo: Arranjo; fatia: number } {
+  try {
+    const salvo = JSON.parse(localStorage.getItem(CHAVE_VISOR) ?? "{}");
+    return {
+      arranjo: ARRANJOS.includes(salvo.arranjo) ? salvo.arranjo : "lado",
+      fatia: typeof salvo.fatia === "number" ? Math.min(0.85, Math.max(0.15, salvo.fatia)) : 0.5,
+    };
+  } catch {
+    return { arranjo: "lado", fatia: 0.5 };
+  }
+}
+
+function lembrarPrefVisor() {
+  try {
+    localStorage.setItem(CHAVE_VISOR, JSON.stringify({ arranjo: arranjoVisor, fatia: fatiaVisor }));
+  } catch {
+    // Só uma conveniência.
+  }
+}
+
+function receberVer(bruto: PedidoDoSocket) {
+  const folha = folhaPorPainel(bruto.painel);
+  const { caminho, linha, ate, ref } = bruto.ver ?? {};
+  if (!folha || typeof caminho !== "string" || !caminho.startsWith("/")) return;
+  abrirArquivo(folha, {
+    caminho,
+    linha: typeof linha === "number" && linha > 0 ? linha : undefined,
+    ate: typeof ate === "number" && ate > 0 ? ate : undefined,
+    ref: typeof ref === "string" && ref ? ref : undefined,
+  });
+}
+
+/// Mostra o arquivo no visor do painel, abrindo-o se estava fechado. Num
+/// terminal de gaveta, quem mostra é o painel dono dela.
+function abrirArquivo(folha: Folha, pedido: PedidoVer) {
+  const dono = folha.dono ?? folha;
+  if (dono.morta) return;
+  const v = (dono.visor ??= criarVisor(dono));
+  const atual = v.historico[v.pos];
+  // O mesmo arquivo de novo, sem linha: é só mostrá-lo, sem perder onde você estava.
+  if (atual && atual.caminho === pedido.caminho && atual.ref === pedido.ref && !pedido.linha && !atual.linha) {
+    if (v.aberto) void carregarVisor(dono, false);
+    else alternarVisor(dono);
+    return;
+  }
+  v.historico = [...v.historico.slice(0, v.pos + 1), pedido].slice(-VISOR_HISTORICO);
+  v.pos = v.historico.length - 1;
+  // Com uma linha pedida, o .md abre na fonte: é lá que a linha existe.
+  v.renderizado = ehMarkdown(pedido.caminho) && !pedido.linha;
+  if (v.aberto) void carregarVisor(dono, true);
+  else alternarVisor(dono, true);
+}
+
+/// Mostra ou esconde o visor. Esconder e mostrar de novo volta para onde você
+/// estava; `rolar` é para um arquivo recém-pedido, que abre no topo (ou na linha).
+function alternarVisor(folha: Folha, rolar = false) {
+  const v = folha.visor;
+  if (!v?.historico.length) return;
+  v.aberto = !v.aberto;
+  // Ao abrir dividido, o teclado fica onde estava: no chat, no terminal.
+  if (v.aberto) v.comTeclado = false;
+  if (arranjoVisor === "sobre") transicionarChat(v);
+  else {
+    // Dividido o terminal muda de tamanho junto: sem animação, que o faria
+    // ser medido no meio dela.
+    v.transicao?.cancel();
+    v.transicao = undefined;
+    v.el.style.pointerEvents = "";
+    v.el.hidden = !v.aberto;
+  }
+  arrumarVisor(folha);
+  clearInterval(v.pulso);
+  v.pulso = undefined;
+  if (v.aberto) {
+    void carregarVisor(folha, rolar);
+    v.pulso = setInterval(() => void conferirVisor(folha), VISOR_MS);
+  }
+  desenharBarra(folha);
+  if (abaDe(folha)?.foco === folha) teclado(folha);
+}
+
+/// Põe o visor no lugar do arranjo: divide o espaço do terminal com ele, ou o
+/// deixa por cima. O terminal que mudou de tamanho é medido de novo.
+function arrumarVisor(folha: Folha) {
+  const v = folha.visor;
+  const host = v?.el.parentElement;
+  if (!v || !host) return;
+  const dividido = v.aberto && arranjoVisor !== "sobre";
+  const antes = host.className;
+  host.classList.toggle("visor-lado", dividido && arranjoVisor === "lado");
+  host.classList.toggle("visor-abaixo", dividido && arranjoVisor === "abaixo");
+  host.style.setProperty("--visor-fatia", `${(fatiaVisor * 100).toFixed(2)}%`);
+  v.arranjo.innerHTML = ICONE_ARRANJO[arranjoVisor];
+  v.arranjo.title = `${ROTULO_ARRANJO[arranjoVisor]} — clique para trocar`;
+  if (host.className === antes) return;
+  const aba = abaDe(folha);
+  if (aba && aba === ativa && !noDiff) {
+    medir(aba);
+    agendarSync(aba);
+  }
+}
+
+/// Arrastar a borda muda quanto do painel é do arquivo; dois cliques, meio a meio.
+function ligarAlcaVisor(folha: Folha, v: Visor) {
+  const host = () => v.el.parentElement;
+  const aplicar = (fatia: number) => {
+    fatiaVisor = Math.min(0.85, Math.max(0.15, fatia));
+    host()?.style.setProperty("--visor-fatia", `${(fatiaVisor * 100).toFixed(2)}%`);
+    const aba = abaDe(folha);
+    if (!aba) return;
+    medir(aba);
+    agendarSync(aba);
+  };
+  v.alca.addEventListener("pointerdown", (e) => {
+    const h = host();
+    if (!h) return;
+    e.preventDefault();
+    e.stopPropagation();
+    v.alca.setPointerCapture(e.pointerId);
+    v.alca.classList.add("arrastando");
+    const mover = (ev: PointerEvent) => {
+      const r = h.getBoundingClientRect();
+      aplicar(arranjoVisor === "lado" ? (r.right - ev.clientX) / r.width : (ev.clientY - r.top) / r.height);
+    };
+    const soltar = () => {
+      v.alca.removeEventListener("pointermove", mover);
+      v.alca.removeEventListener("pointerup", soltar);
+      v.alca.removeEventListener("pointercancel", soltar);
+      v.alca.classList.remove("arrastando");
+      lembrarPrefVisor();
+    };
+    v.alca.addEventListener("pointermove", mover);
+    v.alca.addEventListener("pointerup", soltar);
+    v.alca.addEventListener("pointercancel", soltar);
+  });
+  v.alca.addEventListener("dblclick", () => {
+    aplicar(0.5);
+    lembrarPrefVisor();
+  });
+}
+
+function criarVisor(folha: Folha): Visor {
+  const el = elemento("div", "visor");
+  el.hidden = true;
+  const cabeca = elemento("div", "visor-cabeca");
+  const voltar = elemento("button", "visor-btn");
+  voltar.textContent = "‹";
+  voltar.title = "Arquivo anterior";
+  const avancar = elemento("button", "visor-btn");
+  avancar.textContent = "›";
+  avancar.title = "Próximo arquivo";
+  const caminho = elemento("span", "visor-caminho");
+  const ref = elemento("span", "visor-ref");
+  const modo = elemento("button", "visor-btn visor-btn-texto");
+  const arranjo = elemento("button", "visor-btn visor-btn-icone");
+  const editor = elemento("button", "visor-btn visor-btn-texto");
+  editor.textContent = "Abrir no editor";
+  editor.title = "O editor se escolhe nas Preferências (⌘,)";
+  const fechar = elemento("button", "visor-btn");
+  fechar.textContent = "✕";
+  fechar.title = "Voltar ao terminal (esc)";
+  cabeca.append(voltar, avancar, caminho, ref, modo, arranjo, editor, fechar);
+  const corpo = elemento("div", "visor-corpo");
+  corpo.tabIndex = 0;
+  el.append(cabeca, corpo);
+  const alca = elemento("div", "visor-alca");
+  // Dentro do elemento do terminal, ao lado da tela dele: dividido, o visor
+  // toma uma fatia dela; por cima, a cobre inteira.
+  folha.el.querySelector(".folha-termo")?.append(alca, el);
+
+  const v: Visor = {
+    el,
+    alca,
+    corpo,
+    caminho,
+    ref,
+    voltar,
+    avancar,
+    modo,
+    arranjo,
+    aberto: false,
+    comTeclado: false,
+    rolagem: 0,
+    segurando: 0,
+    historico: [],
+    pos: 0,
+    renderizado: false,
+    vez: 0,
+  };
+  ligarAlcaVisor(folha, v);
+  corpo.addEventListener("scroll", () => {
+    if (!v.segurando) v.rolagem = corpo.scrollTop;
+  });
+  // Os botões não tiram o teclado do corpo: o esc continua fechando.
+  for (const b of [voltar, avancar, modo, arranjo, editor, fechar]) b.addEventListener("mousedown", (e) => e.preventDefault());
+  arranjo.addEventListener("click", () => {
+    arranjoVisor = ARRANJOS[(ARRANJOS.indexOf(arranjoVisor) + 1) % ARRANJOS.length];
+    lembrarPrefVisor();
+    v.transicao?.cancel();
+    v.transicao = undefined;
+    arrumarVisor(folha);
+    if (abaDe(folha)?.foco === folha) teclado(folha);
+  });
+  const andar = (passo: number) => {
+    const pos = v.pos + passo;
+    if (pos < 0 || pos >= v.historico.length) return;
+    v.pos = pos;
+    const p = v.historico[pos];
+    v.renderizado = ehMarkdown(p.caminho) && !p.linha;
+    void carregarVisor(folha, true);
+  };
+  voltar.addEventListener("click", () => andar(-1));
+  avancar.addEventListener("click", () => andar(1));
+  modo.addEventListener("click", () => {
+    v.renderizado = !v.renderizado;
+    desenharVisor(folha, true);
+  });
+  editor.addEventListener("click", () => {
+    const p = v.historico[v.pos];
+    void (async () => {
+      const comando = (await loadSettings().catch(() => undefined))?.editor.trim() || null;
+      await invoke("abrir_no_editor", { caminho: p.caminho, linha: p.linha ?? null, comando });
+    })().catch((e) => avisar(folha, `Editor: ${e}`));
+  });
+  fechar.addEventListener("click", () => alternarVisor(folha));
+  corpo.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    alternarVisor(folha);
+  });
+  corpo.addEventListener("click", (e) => {
+    if (cliqueEmReferencia(folha, e, pastaDe(v.historico[v.pos].caminho))) return;
+    const a = (e.target as HTMLElement).closest("a");
+    if (!a) return;
+    e.preventDefault();
+    abrirLink(e, a.href);
+  });
+  return v;
+}
+
+const pastaDe = (caminho: string) => caminho.slice(0, caminho.lastIndexOf("/")) || "/";
+
+/// O caminho como se lê na barra: a partir da pasta do painel, ou com `~`.
+function caminhoCurto(folha: Folha, caminho: string): string {
+  const base = folha.barra?.repo ?? folha.barra?.pasta;
+  if (base && caminho.startsWith(`${base}/`)) return caminho.slice(base.length + 1);
+  const home = caminho.match(/^\/Users\/[^/]+\//)?.[0];
+  return home ? `~/${caminho.slice(home.length)}` : caminho;
+}
+
+async function carregarVisor(folha: Folha, rolar: boolean) {
+  const v = folha.visor;
+  if (!v) return;
+  const p = v.historico[v.pos];
+  const vez = ++v.vez;
+  v.caminho.textContent = caminhoCurto(folha, p.caminho) + (p.linha ? `:${p.linha}${p.ate ? `-${p.ate}` : ""}` : "");
+  v.caminho.title = p.caminho;
+  v.ref.textContent = p.ref ?? "";
+  v.ref.hidden = !p.ref;
+  v.voltar.disabled = v.pos === 0;
+  v.avancar.disabled = v.pos === v.historico.length - 1;
+  try {
+    const arq = await invoke<{ linhas: string[]; carimbo: string }>("arquivo_ler", { caminho: p.caminho, rf: p.ref ?? null });
+    if (vez !== v.vez) return;
+    v.linhas = arq.linhas;
+    v.carimbo = arq.carimbo;
+  } catch (e) {
+    if (vez !== v.vez) return;
+    v.linhas = undefined;
+    v.carimbo = undefined;
+    const erro = elemento("div", "visor-erro");
+    erro.textContent = `Não deu para abrir: ${e}`;
+    v.corpo.replaceChildren(erro);
+    v.modo.hidden = true;
+    return;
+  }
+  desenharVisor(folha, rolar);
+}
+
+/// O Claude editou o arquivo aberto: o visor acompanha, sem perder a rolagem.
+async function conferirVisor(folha: Folha) {
+  const v = folha.visor;
+  if (!v?.aberto || !v.carimbo) return;
+  const p = v.historico[v.pos];
+  if (p.ref) return;
+  const agora = await invoke<string | null>("arquivo_carimbo", { caminho: p.caminho }).catch(() => null);
+  if (agora && agora !== v.carimbo && v.historico[v.pos] === p) void carregarVisor(folha, false);
+}
+
+function desenharVisor(folha: Folha, rolar: boolean) {
+  const v = folha.visor;
+  const linhas = v?.linhas;
+  if (!v || !linhas) return;
+  const p = v.historico[v.pos];
+  const md = ehMarkdown(p.caminho);
+  v.modo.hidden = !md;
+  v.modo.textContent = v.renderizado ? "Ver fonte" : "Ver renderizado";
+  // A rolagem que o redesenho mexe (o conteúdo some e volta) não é sua: só a
+  // que você fizer depois de dois quadros conta.
+  const segurando = ++v.segurando;
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      if (v.segurando === segurando) v.segurando = 0;
+    }),
+  );
+  const topo = rolar ? 0 : v.rolagem;
+
+  if (md && v.renderizado) {
+    const html = elemento("div", "visor-md chat-claude");
+    html.innerHTML = markdown(linhas.join("\n"), 0);
+    v.corpo.replaceChildren(html);
+    v.corpo.scrollTop = topo;
+    if (rolar) v.rolagem = 0;
+    return;
+  }
+
+  const de = p.linha ?? 0;
+  const ate = Math.max(de, p.ate ?? de);
+  const codigo = elemento("div", "visor-codigo");
+  codigo.style.setProperty("--digitos", String(String(linhas.length).length));
+  codigo.innerHTML = linhas
+    .map((l, i) => {
+      const n = i + 1;
+      const marcada = n >= de && n <= ate ? " marcada" : "";
+      return `<div class="visor-linha${marcada}"><span class="visor-num">${n}</span><span class="visor-texto">${escapar(l) || " "}</span></div>`;
+    })
+    .join("");
+  v.corpo.replaceChildren(codigo);
+  if (rolar && de) {
+    const alvo = codigo.children[de - 1] as HTMLElement | undefined;
+    // Um terço abaixo do topo: dá para ver o que vem antes da linha.
+    if (alvo) v.corpo.scrollTop = alvo.offsetTop - v.corpo.clientHeight / 3;
+  } else {
+    v.corpo.scrollTop = topo;
+  }
+  if (rolar) v.rolagem = v.corpo.scrollTop;
+  void colorirVisor(v, codigo, p.caminho, linhas);
+}
+
+/// As cores vêm depois, do mesmo shiki do differ: o arquivo aparece na hora, e
+/// o import só pesa na primeira vez que o visor abre.
+async function colorirVisor(v: Visor, codigo: HTMLDivElement, caminho: string, linhas: string[]) {
+  const vez = v.vez;
+  const { langFor, tokenizeFresh } = await import("./differ/lib/highlight");
+  const lang = langFor(caminho);
+  if (!lang) return;
+  const tokens = await tokenizeFresh(linhas, lang);
+  if (!tokens || vez !== v.vez || !codigo.isConnected) return;
+  const textos = codigo.querySelectorAll<HTMLElement>(".visor-texto");
+  tokens.forEach((linha, i) => {
+    const alvo = textos[i];
+    if (!alvo || !linha.length) return;
+    alvo.innerHTML = linha
+      .map((t) => {
+        const estilo = [t.color ? `color:${t.color}` : "", t.fontStyle === 1 ? "font-style:italic" : ""].filter(Boolean).join(";");
+        return estilo ? `<span style="${estilo}">${escapar(t.content)}</span>` : escapar(t.content);
+      })
+      .join("");
+  });
+}
+
+// ---------- referências a arquivo: ⌘-clique ----------
+
+/// A pasta de onde os caminhos relativos do painel partem: a do processo na
+/// frente do shell, que com o Claude rodando é a pasta dele. Guardada por uns
+/// segundos, porque o xterm pergunta a cada linha por onde o mouse passa.
+const pastas = new WeakMap<Folha, { em: number; pasta: Promise<string | null> }>();
+function pastaDoPainel(folha: Folha): Promise<string | null> {
+  const guardada = pastas.get(folha);
+  if (guardada && Date.now() - guardada.em < 3000) return guardada.pasta;
+  const pasta = invoke<string | null>("pty_cwd", { id: folha.id })
+    .catch(() => null)
+    .then((p) => p ?? folha.claude?.pasta ?? folha.barra?.pasta ?? null);
+  pastas.set(folha, { em: Date.now(), pasta });
+  return pasta;
+}
+
+/// As referências que existem de verdade, já com o caminho absoluto.
+async function resolver(base: string | null, refs: Referencia[]): Promise<(string | null)[]> {
+  if (!base || !refs.length) return refs.map(() => null);
+  return invoke<(string | null)[]>("arquivos_existem", { base, candidatos: refs.map((r) => r.arquivo) }).catch(() =>
+    refs.map(() => null),
+  );
+}
+
+/// Um `caminho:linha` na saída do terminal vira link: ⌘-clique abre no visor.
+/// Só os que existem — a pasta do painel é que diz de onde o relativo parte.
+function ligarLinksDeArquivo(folha: Folha) {
+  const term = folha.term;
+  term.registerLinkProvider({
+    provideLinks(y, devolver) {
+      const buf = term.buffer.active;
+      const cols = term.cols;
+      // Uma janela de linhas em volta: nenhum caminho atravessa mais que isso.
+      const base = Math.max(0, y - 1 - 10);
+      const linhas: LinhaDaTela[] = [];
+      for (let i = base; i < Math.min(buf.length, y + 10); i++) {
+        const l = buf.getLine(i);
+        linhas.push({ texto: l?.translateToString(false) ?? "", quebrada: l?.isWrapped ?? false });
+      }
+      const aqui = y - 1 - base;
+      // Com e sem o palpite de continuação, para cima e para baixo: juntar duas
+      // linhas que não eram uma só estragaria a referência inteira numa delas.
+      type Achado = { ref: Referencia; de: { linha: number; col: number }; ate: { linha: number; col: number }; texto: string };
+      const achados: Achado[] = [];
+      const combinacoes: [boolean, boolean][] = [[false, false], [true, false], [false, true], [true, true]];
+      for (const [acima, abaixo] of combinacoes) {
+        const { texto, pos } = linhaLogica(linhas, aqui, cols, acima, abaixo);
+        for (const ref of acharReferencias(texto)) {
+          const trecho = pos.slice(ref.inicio, ref.fim);
+          if (!trecho.some((p) => p.linha === aqui)) continue;
+          const de = trecho[0];
+          const ate = trecho[trecho.length - 1];
+          if (achados.some((a) => a.de.linha === de.linha && a.de.col === de.col && a.ate.linha === ate.linha && a.ate.col === ate.col)) continue;
+          achados.push({ ref, de, ate, texto: texto.slice(ref.inicio, ref.fim) });
+        }
+      }
+      if (!achados.length) return devolver(undefined);
+      void (async () => {
+        const caminhos = await resolver(await pastaDoPainel(folha), achados.map((a) => a.ref));
+        const vivos = achados.flatMap((a, i) => (caminhos[i] ? [{ ...a, caminho: caminhos[i] }] : []));
+        const ponto = (p: { linha: number; col: number }) => p.linha * cols + p.col;
+        // Um pedaço que existe dentro de um caminho maior que também existe
+        // (`lib/x.dart` dentro de `apps/lib/x.dart`): fica o maior.
+        const links = vivos
+          .filter((a) => !vivos.some((b) => b !== a && ponto(b.de) <= ponto(a.de) && ponto(b.ate) >= ponto(a.ate) && b.texto.length > a.texto.length))
+          .map((a) => ({
+            range: { start: { x: a.de.col + 1, y: base + a.de.linha + 1 }, end: { x: a.ate.col + 1, y: base + a.ate.linha + 1 } },
+            text: a.texto,
+            decorations: { pointerCursor: true, underline: true },
+            activate: (e: MouseEvent) => {
+              if (!e.metaKey && !e.ctrlKey) return;
+              abrirArquivo(folha, { caminho: a.caminho, linha: a.ref.linha, ate: a.ref.ate });
+            },
+          }));
+        devolver(links.length ? links : undefined);
+      })();
+    },
+  });
+}
+
+/// ⌘-clique num `<code>` que é só um caminho (no chat, num .md do visor).
+/// Devolve se o clique era isso, para quem chamou não tratar de novo.
+function cliqueEmReferencia(folha: Folha, e: MouseEvent, base?: string): boolean {
+  if (!e.metaKey && !e.ctrlKey) return false;
+  const code = (e.target as HTMLElement).closest("code");
+  const ref = code && referenciaInteira(code.textContent ?? "");
+  if (!ref) return false;
+  e.preventDefault();
+  void (async () => {
+    const [caminho] = await resolver(base ?? (await pastaDoPainel(folha)), [ref]);
+    if (caminho) abrirArquivo(folha, { caminho, linha: ref.linha, ate: ref.ate });
+    else avisar(folha.dono ?? folha, `Não achei ${ref.arquivo}`);
+  })();
+  return true;
 }
 
 // ---------- envio automático ----------
@@ -1471,6 +3514,15 @@ type Execucao = {
 type Barra = {
   el: HTMLDivElement;
   titulo: HTMLSpanElement;
+  /// O contexto da sessão do Claude: uma pílula só, a barra enchendo com o que
+  /// já foi usado e o número por cima dela. O clique compacta a conversa.
+  contexto: HTMLButtonElement;
+  contextoCheio: HTMLSpanElement;
+  contextoNum: HTMLSpanElement;
+  /// O modelo e o esforço da sessão, ao lado do contexto. O clique abre a
+  /// lista para trocar.
+  modelo: HTMLButtonElement;
+  esforco: HTMLButtonElement;
   aviso: HTMLSpanElement;
   acoes: HTMLSpanElement;
   gaveta: HTMLButtonElement;
@@ -1483,6 +3535,8 @@ type Barra = {
   nome: HTMLSpanElement;
   escolher: HTMLButtonElement;
   diff: HTMLButtonElement;
+  chat: HTMLButtonElement;
+  visor: HTMLButtonElement;
   maximizar: HTMLButtonElement;
   projeto: Projeto | null;
   /// A raiz do repositório git em que o shell deste painel está, ou `null` se
@@ -1512,6 +3566,14 @@ const ICONE_REINICIAR = traco("M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3");
 const ICONE_ESCOLHER = traco("M4.5 6.5 8 10l3.5-3.5");
 const ICONE_MAXIMIZAR = traco("M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9");
 const ICONE_RECOLHER = traco("M13.5 2.5 9 7M9 3.5V7h3.5M2.5 13.5 7 9M7 12.5V9H3.5");
+const ICONE_CHAT = traco("M3 3.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5v-2.5H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z");
+const ICONE_ARQUIVO = traco("M4 1.5h5.5L13 5v9a.5.5 0 0 1-.5.5h-8.5a.5.5 0 0 1-.5-.5v-12a.5.5 0 0 1 .5-.5ZM9.5 1.5V5H13M6 8.5h4M6 11h4");
+/// O botão de arranjo do visor (ver `Arranjo`).
+const ICONE_ARRANJO: Record<Arranjo, string> = {
+  lado: traco("M3 2.5h10a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1ZM8 2.5v11"),
+  abaixo: traco("M3 2.5h10a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1ZM2 8h12"),
+  sobre: traco("M3 2.5h10a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1ZM5 5.5h6v5H5Z"),
+};
 const ICONE_GAVETA = traco("M3.5 2.5h9a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12V4a1.5 1.5 0 0 1 1.5-1.5ZM2 9.5h12");
 
 function elemento<K extends keyof HTMLElementTagNameMap>(tag: K, classe: string): HTMLElementTagNameMap[K] {
@@ -1554,15 +3616,32 @@ function criarBarra(): Barra {
   grupoPlay.append(play, escolher);
   const diff = botaoTarefa("tarefa-diff", ICONE_DIFF);
   diff.title = "Diff da branch deste painel";
+  const chat = botaoTarefa("tarefa-chat", ICONE_CHAT);
+  // Só aparece depois do primeiro arquivo aberto: antes não há o que mostrar.
+  const visor = botaoTarefa("tarefa-visor", ICONE_ARQUIVO);
+  visor.hidden = true;
   const maximizar = botaoTarefa("tarefa-maximizar", ICONE_MAXIMIZAR);
   // Quem decide se aparece é `desenharMaximizar`, quando a folha já tem aba.
   maximizar.hidden = true;
-  controles.append(acoes, gaveta, parar, grupoPlay, diff, maximizar);
+  controles.append(acoes, gaveta, parar, grupoPlay, diff, chat, visor, maximizar);
   const ramo = criarRamo("tarefa-ramo");
-  el.append(titulo, ramo.el, aviso, controles);
+  const contexto = botaoTarefa("tarefa-contexto", "");
+  contexto.hidden = true;
+  const contextoCheio = elemento("span", "tarefa-contexto-cheio");
+  const contextoNum = elemento("span", "tarefa-contexto-num");
+  contexto.append(contextoCheio, contextoNum);
+  const modelo = botaoTarefa("tarefa-claude-opcao tarefa-modelo", "");
+  const esforco = botaoTarefa("tarefa-claude-opcao tarefa-esforco", "");
+  modelo.hidden = esforco.hidden = true;
+  el.append(titulo, ramo.el, contexto, modelo, esforco, aviso, controles);
   return {
     el,
     titulo,
+    contexto,
+    contextoCheio,
+    contextoNum,
+    modelo,
+    esforco,
     pasta: null,
     branch: null,
     ramo,
@@ -1576,6 +3655,8 @@ function criarBarra(): Barra {
     nome,
     escolher,
     diff,
+    chat,
+    visor,
     maximizar,
     projeto: null,
     repo: null,
@@ -1586,6 +3667,9 @@ function criarBarra(): Barra {
 function ligarBarra(folha: Folha) {
   const b = folha.barra;
   if (!b) return;
+  b.contexto.addEventListener("click", () => compactar(folha));
+  b.modelo.addEventListener("click", () => alternarOpcoesDoClaude(folha, "modelo"));
+  b.esforco.addEventListener("click", () => alternarOpcoesDoClaude(folha, "esforco"));
   b.play.addEventListener("click", () => {
     const cfg = configEscolhida(b.projeto);
     if (cfg) void executar(folha, cfg);
@@ -1598,6 +3682,8 @@ function ligarBarra(folha: Folha) {
   // O diff é de um repositório, e quem sabe qual é o painel: cada um tem o seu
   // diretório — com a tela dividida em três projetos, cada painel diz o seu.
   b.diff.addEventListener("click", () => void abrirDiff(folha));
+  b.chat.addEventListener("click", () => alternarChat(folha));
+  b.visor.addEventListener("click", () => alternarVisor(folha));
   b.maximizar.addEventListener("click", () => alternarMaximizar(folha));
   // Duplo clique na barra faz o mesmo — o alvo grande, como a barra de título
   // de uma janela. Nos botões dela, não: dois cliques no play são dois plays.
@@ -1624,6 +3710,39 @@ function desenharBarra(folha: Folha) {
   if (!b) return;
   b.titulo.textContent = folha.titulo;
   b.titulo.title = folha.titulo;
+
+  // O contexto enche conforme a conversa cresce: amarelo e vermelho pelos
+  // limites das Preferências. A pílula fica enquanto houver sessão, ociosa ou
+  // não — é com o Claude parado que dá para compactar. Antes da primeira
+  // status line ela existe, só sem número.
+  const usado = folha.claude?.contexto;
+  b.contexto.hidden = !folha.claude;
+  let nivel: Nivel = "";
+  if (usado === undefined) {
+    b.contextoCheio.style.width = "0%";
+    b.contextoNum.textContent = "Contexto —";
+    b.contexto.title = "Contexto da sessão: chega quando o Claude responder — clique para compactar (⌘⇧K)";
+  } else {
+    const pct = Math.round(Math.min(100, Math.max(0, usado)));
+    nivel = nivelDoContexto(pct, limitesDoContexto);
+    b.contextoCheio.style.width = `${pct}%`;
+    b.contextoNum.textContent = `Contexto ${pct}%`;
+    b.contexto.title = `Contexto da sessão: ${pct}% usado, ${100 - pct}% livre — clique para compactar (⌘⇧K)`;
+  }
+  b.contexto.dataset.nivel = nivel;
+  // No vermelho, o painel inteiro avisa: a pílula sozinha some no canto do olho.
+  folha.el.classList.toggle("contexto-cheio", nivel === "perigo");
+
+  // O modelo chega com a primeira status line; o esforço só existe nos modelos
+  // que o têm.
+  const c = folha.claude;
+  b.modelo.hidden = !c;
+  b.modelo.textContent = c?.modelo ?? "Modelo —";
+  b.modelo.title = c?.modelo ? `Modelo da sessão: ${c.modelo} — clique para trocar` : "Modelo da sessão: chega quando o Claude responder";
+  b.esforco.hidden = !c?.esforco;
+  const esf = ESFORCOS.find((e) => e.nivel === c?.esforco);
+  b.esforco.textContent = `Esforço ${esf?.rotulo ?? c?.esforco ?? ""}`;
+  b.esforco.title = "Nível de esforço do Claude — clique para trocar";
 
   const g = folha.gaveta;
   b.gaveta.hidden = !g;
@@ -1657,6 +3776,22 @@ function desenharBarra(folha: Folha) {
   b.diff.title = noDiffAgora
     ? "Este projeto está aberto na aba do diff"
     : "Diff da branch deste painel";
+
+  // Sempre à mão: com sessão do Claude ele troca de modo; sem ela, abre uma
+  // nesta pasta, já no chat.
+  const noChat = folha.chat?.aberto === true;
+  b.chat.hidden = false;
+  b.chat.classList.toggle("ligado", noChat);
+  b.chat.title = noChat
+    ? "Voltar ao terminal (⌘⇧C)"
+    : folha.claude
+      ? "Ver a conversa em modo chat (⌘⇧C)"
+      : "Abrir o Claude nesta pasta, em modo chat (⌘⇧C)";
+
+  const visor = folha.visor;
+  b.visor.hidden = !visor?.historico.length;
+  b.visor.classList.toggle("ligado", visor?.aberto === true);
+  b.visor.title = visor?.aberto ? "Esconder o arquivo (⌘⇧O)" : "Mostrar o arquivo (⌘⇧O)";
 
   // Sem launch.json não há play: um botão apagado em todo shell seria ruído.
   const proj = b.projeto;
@@ -1727,6 +3862,8 @@ async function carregarProjeto(folha: Folha) {
   const aba = abaDe(folha);
   if (aba) mostrarRamos(aba);
   desenharBarra(folha);
+  // Um `cd` muda a pasta em que o painel volta.
+  agendarSalvar();
 }
 
 /// A configuração que o play roda: a última escolhida neste projeto, ou a primeira.
@@ -1758,6 +3895,9 @@ const VAO_MENU = 4;
 /// mesmo quando cabe inteira.
 const MARGEM_MENU = 24;
 let menuDe: Folha | undefined;
+/// O botão que abriu a lista: o mesmo painel tem três (configurações, modelo e
+/// esforço), e clicar em outro troca a lista em vez de fechar.
+let menuAncora: HTMLElement | undefined;
 
 function montarMenu() {
   menuEl.hidden = true;
@@ -1766,17 +3906,18 @@ function montarMenu() {
   // fora: ele mesmo alterna.
   document.addEventListener("mousedown", (e) => {
     const alvo = e.target as Element;
-    if (!menuEl.hidden && !menuEl.contains(alvo) && !alvo.closest?.(".tarefa-escolher")) fecharMenu();
+    if (!menuEl.hidden && !menuEl.contains(alvo) && !alvo.closest?.(".tarefa-escolher, .tarefa-claude-opcao")) fecharMenu();
   });
 }
 
 function fecharMenu() {
   menuEl.hidden = true;
   menuDe = undefined;
+  menuAncora = undefined;
 }
 
 function alternarMenu(folha: Folha) {
-  if (!menuEl.hidden && menuDe === folha) return fecharMenu();
+  if (!menuEl.hidden && menuDe === folha && menuAncora === folha.barra?.escolher) return fecharMenu();
   const b = folha.barra;
   const proj = b?.projeto;
   if (!b || !proj?.configs.length) return;
@@ -1806,6 +3947,11 @@ function alternarMenu(folha: Folha) {
       return item;
     }),
   );
+  abrirMenu(folha, b.escolher);
+}
+
+/// Mostra a lista já montada junto do botão que a abriu.
+function abrirMenu(folha: Folha, ancora: HTMLElement) {
   // Mede a lista na altura natural antes de decidir onde ela vai: é essa altura
   // que diz se cabe embaixo. Tudo no mesmo quadro, então nada pisca.
   menuEl.style.maxHeight = "";
@@ -1814,7 +3960,7 @@ function alternarMenu(folha: Folha) {
   menuEl.hidden = false;
   const altura = menuEl.offsetHeight;
 
-  const r = b.escolher.getBoundingClientRect();
+  const r = ancora.getBoundingClientRect();
   menuEl.style.right = `${window.innerWidth - r.right}px`;
   const embaixo = window.innerHeight - r.bottom - VAO_MENU - MARGEM_MENU;
   const emCima = r.top - VAO_MENU - MARGEM_MENU;
@@ -1834,9 +3980,85 @@ function alternarMenu(folha: Folha) {
   }
   menuEl.querySelector(".escolhida")?.scrollIntoView({ block: "nearest" });
   menuDe = folha;
+  menuAncora = ancora;
+}
+
+/// Os modelos que o `/model` aceita pelo apelido. O "padrão" é o da conta.
+const MODELOS = [
+  { apelido: "fable", rotulo: "Fable" },
+  { apelido: "opus", rotulo: "Opus" },
+  { apelido: "sonnet", rotulo: "Sonnet" },
+  { apelido: "haiku", rotulo: "Haiku" },
+  { apelido: "default", rotulo: "Padrão da conta" },
+];
+
+/// Os níveis do `/effort`. Nem todo modelo tem todos: o Claude recusa o que
+/// não houver, e o recado aparece no terminal.
+const ESFORCOS = [
+  { nivel: "low", rotulo: "baixo" },
+  { nivel: "medium", rotulo: "médio" },
+  { nivel: "high", rotulo: "alto" },
+  { nivel: "xhigh", rotulo: "extra alto" },
+  { nivel: "max", rotulo: "máximo" },
+  { nivel: "auto", rotulo: "automático" },
+];
+
+function alternarOpcoesDoClaude(folha: Folha, qual: "modelo" | "esforco") {
+  const b = folha.barra;
+  const c = folha.claude;
+  if (!b || !c) return;
+  const ancora = b[qual];
+  if (!menuEl.hidden && menuAncora === ancora) return fecharMenu();
+  const opcoes =
+    qual === "modelo"
+      ? MODELOS.map((m) => ({
+          rotulo: m.rotulo,
+          dica: m.apelido,
+          comando: `/model ${m.apelido}`,
+          atual: m.apelido !== "default" && c.modelo?.toLowerCase().startsWith(m.apelido) === true,
+        }))
+      : ESFORCOS.map((e) => ({ rotulo: e.rotulo, dica: e.nivel, comando: `/effort ${e.nivel}`, atual: e.nivel === c.esforco }));
+  menuEl.replaceChildren(
+    ...opcoes.map((o) => {
+      const item = elemento("button", o.atual ? "escolhida" : "");
+      item.textContent = o.rotulo;
+      const dica = elemento("span", "tarefa-menu-tipo");
+      dica.textContent = o.dica;
+      item.append(dica);
+      item.addEventListener("mousedown", (e) => e.preventDefault());
+      item.addEventListener("click", () => {
+        fecharMenu();
+        mandarAoClaude(folha, o.comando, "troque");
+      });
+      return item;
+    }),
+  );
+  abrirMenu(folha, ancora);
 }
 
 /// Recado curto na barra, ao lado do título: o play que não pôde rodar diz por quê.
+/// Manda o `/compact` para o Claude do painel, como se você o digitasse — o
+/// mesmo caminho do campo do chat. Com ele trabalhando o comando entraria na
+/// fila, ou no meio do que você estiver digitando: só compacta parado.
+function compactar(folha: Folha) {
+  mandarAoClaude(folha, "/compact", "compacte");
+}
+
+/// Digita um comando no Claude do painel e dá Enter. O verbo vai no aviso de
+/// quando ele está trabalhando.
+function mandarAoClaude(folha: Folha, comando: string, verbo: string) {
+  const dono = folha.dono ?? folha;
+  if (!dono.claude) return;
+  if (dono.claude.estado === "trabalhando") {
+    avisar(dono, `O Claude está trabalhando: ${verbo} quando ele parar.`);
+    return;
+  }
+  invoke("pty_write", { id: dono.id, data: comando }).catch((e) => jlog(`${comando}: ${e}`));
+  setTimeout(() => {
+    invoke("pty_write", { id: dono.id, data: "\r" }).catch((e) => jlog(`${comando}: ${e}`));
+  }, 80);
+}
+
 function avisar(folha: Folha, texto: string) {
   const b = folha.barra;
   if (!b) return;
@@ -2072,6 +4294,249 @@ async function parar(ex: Execucao) {
   }
 }
 
+// ---------- o uso do Claude no rodapé ----------
+
+/// O círculo do Claude Usage Monitor, no canto esquerdo do rodapé: o círculo é
+/// o tempo que falta na sessão de 5h, e o número, quanto do uso dela ainda
+/// resta. Tudo conta para baixo. A cor é a do ritmo — acende quando você gasta
+/// mais depressa do que o tempo passa. Com o mouse em cima, abrem para a
+/// direita duas colunas, sessão e semana, cada uma com o tempo e o uso.
+const usoEl = document.getElementById("uso") as HTMLDivElement;
+
+/// O mesmo raio do volume (5,5 no viewBox de 16): o perímetro é o traço inteiro.
+const USO_CIRCULO = 2 * Math.PI * 5.5;
+/// O brilho que corre pelo círculo e pelas barras, no sentido em que esvaziam.
+const USO_BRILHO = 2.2;
+/// Uma passada do brilho do círculo e das barrinhas, da ponta ao começo.
+const USO_ESCOAR_MS = 2400;
+
+type BarraDeUso = { linha: HTMLSpanElement; cheio: HTMLSpanElement; ponteiro: HTMLSpanElement; num: HTMLSpanElement };
+
+function barraDeUso(rotulo: string, classe: string): BarraDeUso {
+  const linha = elemento("span", `uso-linha ${classe}`);
+  const nome = elemento("span", "uso-rotulo");
+  nome.textContent = rotulo;
+  const trilho = elemento("span", "uso-trilho");
+  const cheio = elemento("span", "uso-cheio");
+  const ponteiro = elemento("span", "uso-ponteiro");
+  cheio.append(ponteiro);
+  trilho.append(cheio);
+  const num = elemento("span", "uso-num");
+  linha.append(nome, trilho, num);
+  return { linha, cheio, ponteiro, num };
+}
+
+/// Uma coluna: o nome e, à direita dele, as duas linhas — o tempo que falta e
+/// o uso que resta.
+function colunaDeUso(nome: string) {
+  const coluna = elemento("span", "uso-coluna");
+  const titulo = elemento("span", "uso-titulo");
+  titulo.textContent = nome;
+  const linhas = elemento("span", "uso-linhas");
+  const tempo = barraDeUso("Tempo restante", "uso-tempo");
+  const uso = barraDeUso("Tokens disponíveis", "uso-uso");
+  linhas.append(tempo.linha, uso.linha);
+  coluna.append(titulo, linhas);
+  return { coluna, tempo, uso };
+}
+
+const usoSessao = colunaDeUso("Sessão");
+const usoSemana = colunaDeUso("Semana");
+/// `vertical`: a barra dos tokens ao lado do relógio, que esvazia de cima
+/// para baixo; as do hover esvaziam da direita para a esquerda.
+const usoBarras: { cheio: HTMLSpanElement; ponteiro: HTMLSpanElement; vertical?: boolean }[] = [
+  usoSessao.tempo,
+  usoSessao.uso,
+  usoSemana.tempo,
+  usoSemana.uso,
+];
+const usoDetalhe = elemento("span", "uso-detalhe");
+usoDetalhe.append(usoSessao.coluna, usoSemana.coluna);
+const usoIcone = elemento("span", "uso-icone");
+usoIcone.innerHTML = `<svg viewBox="0 0 16 16" width="26" height="26" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.6" opacity=".26"/><circle class="circulo" cx="8" cy="8" r="5.5" stroke-width="1.6" stroke-linecap="round" transform="rotate(-90 8 8)" stroke-dasharray="${USO_CIRCULO}" stroke-dashoffset="0"/><circle class="circulo-brilho" cx="8" cy="8" r="5.5" stroke-width="1.6" stroke-linecap="round" transform="rotate(-90 8 8)" stroke-dasharray="${USO_BRILHO} ${USO_CIRCULO}" stroke-dashoffset="0"/><g class="ponteiros" stroke="currentColor" stroke-linecap="round"><line class="ponteiro-hora" x1="8" y1="8" x2="8" y2="5.6" stroke-width="1.2"/><line class="ponteiro-minuto" x1="8" y1="8" x2="8" y2="4.4" stroke-width="0.9"/><circle cx="8" cy="8" r="0.7" fill="currentColor" stroke="none"/></g></svg>`;
+const usoCirculo = usoIcone.querySelector(".circulo") as SVGCircleElement;
+const usoBrilho = usoIcone.querySelector(".circulo-brilho") as SVGCircleElement;
+/// Os ponteiros dentro do círculo: o pequeno aponta para a ponta do trecho
+/// aceso (quanto falta da sessão), e o grande dá uma volta no hover.
+const usoHora = usoIcone.querySelector(".ponteiro-hora") as SVGLineElement;
+const usoMinuto = usoIcone.querySelector(".ponteiro-minuto") as SVGLineElement;
+/// Ao lado do relógio: os tokens disponíveis da sessão, uma barra em pé que
+/// esvazia de cima para baixo, como uma bateria, e o número ao lado dela.
+const usoResumo = elemento("span", "uso-resumo");
+const usoPct = elemento("span", "uso-pct");
+const usoMiniTrilho = elemento("span", "uso-trilho uso-mini");
+const usoMini = { cheio: elemento("span", "uso-cheio"), ponteiro: elemento("span", "uso-ponteiro"), vertical: true };
+usoMini.cheio.append(usoMini.ponteiro);
+usoMiniTrilho.append(usoMini.cheio);
+usoResumo.append(usoMiniTrilho, usoPct);
+usoBarras.push(usoMini);
+usoEl.append(usoIcone, usoResumo, usoDetalhe);
+
+/// A última leitura boa: um 429 ou a rede caindo não apagam o que já se sabia.
+let usoAtual: Uso | undefined;
+/// O pedaço do círculo aceso agora, em comprimento de traço.
+let usoArco = USO_CIRCULO;
+/// As animações do brilho do círculo e das barrinhas, criadas juntas.
+let usoEscoar: Animation[] = [];
+
+const limitar = (n: number) => Math.round(Math.min(100, Math.max(0, n)));
+
+function pintarBarra(b: BarraDeUso, resta: number | null, texto: string, nivel: Nivel) {
+  b.cheio.style.width = `${resta ?? 0}%`;
+  b.num.textContent = resta === null ? "—" : texto;
+  b.linha.dataset.nivel = nivel;
+}
+
+/// A dica de uma janela: o nome e, uma por linha, o que resta dela.
+function dicaDeUso(nome: string, j: Janela | null): string {
+  if (!j) return `${nome}:\nsem janela aberta`;
+  return `${nome}:\n${limitar(100 - j.uso)}% de tokens disponíveis\n${faltaPara(j.renova)} de tempo restante`;
+}
+
+/// Uma coluna: as duas barras contam o que resta, o tempo e o uso.
+function pintarColuna(c: ReturnType<typeof colunaDeUso>, j: Janela | null, janelaMin: number, nivel: Nivel) {
+  if (!j) {
+    pintarBarra(c.tempo, null, "", "");
+    pintarBarra(c.uso, null, "", "");
+    return;
+  }
+  const tempo = limitar(fracaoRestante(j.renova, janelaMin) * 100);
+  const resta = limitar(100 - j.uso);
+  const falta = faltaPara(j.renova);
+  pintarBarra(c.tempo, tempo, falta, "");
+  pintarBarra(c.uso, resta, `${resta}%`, nivel);
+}
+
+/// O brilho do círculo e as barrinhas das barras correm da ponta de volta ao
+/// começo, no sentido em que tudo diminui, e o ponteiro do minuto dá uma volta.
+/// São criados todos na mesma chamada, e por isso andam juntos: mesmo período,
+/// mesmo passo, e apagam no fim. Uma vez só, no hover — parado o resto do tempo.
+function escoarUso() {
+  for (const a of usoEscoar) a.cancel();
+  usoEscoar = [];
+  if (movimentoReduzido.matches) {
+    usoBrilho.style.display = "none";
+    return;
+  }
+  const tempo: KeyframeAnimationOptions = { duration: USO_ESCOAR_MS, easing: "linear" };
+  usoEscoar.push(
+    usoMinuto.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], {
+      duration: USO_ESCOAR_MS,
+      easing: "cubic-bezier(0.22, 0.61, 0.36, 1)",
+    }),
+  );
+  const ponta = usoArco - USO_BRILHO;
+  usoBrilho.style.display = ponta <= 0 ? "none" : "";
+  if (ponta > 0) {
+    usoEscoar.push(
+      usoBrilho.animate(
+        [
+          { strokeDashoffset: -ponta, opacity: 0.9 },
+          { strokeDashoffset: -ponta * 0.3, opacity: 0.9, offset: 0.7 },
+          { strokeDashoffset: 0, opacity: 0 },
+        ],
+        tempo,
+      ),
+    );
+  }
+  for (const b of usoBarras) {
+    usoEscoar.push(
+      b.ponteiro.animate(
+        b.vertical
+          ? [
+              { bottom: "calc(100% - 6px)", height: "6px", opacity: 0.9 },
+              { bottom: "calc(30% - 4px)", height: "4px", opacity: 0.9, offset: 0.7 },
+              { bottom: "0px", height: "2px", opacity: 0 },
+            ]
+          : [
+              { left: "calc(100% - 10px)", width: "10px", opacity: 0.9 },
+              { left: "calc(30% - 5px)", width: "5px", opacity: 0.9, offset: 0.7 },
+              { left: "0px", width: "3px", opacity: 0 },
+            ],
+        tempo,
+      ),
+    );
+  }
+}
+
+function desenharUso() {
+  const u = usoAtual;
+  usoEl.hidden = !u;
+  if (!u) return;
+  const s = u.sessao;
+  const restante = s ? fracaoRestante(s.renova, SESSAO_MIN) : 1;
+  const nivelSessao = s ? nivelDoRitmo(s.uso, restante) : "";
+  pintarColuna(usoSessao, s, SESSAO_MIN, nivelSessao);
+  pintarColuna(usoSemana, u.semana, SEMANA_MIN, u.semana ? nivelDoUso(u.semana.uso) : "");
+  usoEl.dataset.nivel = nivelSessao;
+  usoPct.textContent = s ? `${limitar(100 - s.uso)}%` : "—";
+  usoMini.cheio.style.height = `${s ? limitar(100 - s.uso) : 0}%`;
+  usoCirculo.style.strokeDashoffset = String(USO_CIRCULO * (1 - restante));
+  usoHora.style.transform = `rotate(${restante * 360}deg)`;
+  usoEl.title = `${dicaDeUso("Sessão", s)}\n\n${dicaDeUso("Semana", u.semana)}`;
+  usoArco = USO_CIRCULO * restante;
+}
+
+/// Ao passar o mouse, o círculo e as barras partem do cheio e descem até onde
+/// estão: a cada vez que você olha, vê que estão diminuindo.
+function replayUso() {
+  if (movimentoReduzido.matches || !usoAtual) return;
+  const cheios = usoBarras.map((b) => b.cheio);
+  const alvos: (HTMLElement | SVGElement)[] = [usoCirculo, usoHora, ...cheios];
+  const lado = (i: number) => (usoBarras[i].vertical ? "height" : "width");
+  for (const el of alvos) el.style.transition = "none";
+  const larguras = cheios.map((el, i) => el.style[lado(i)]);
+  const offset = usoCirculo.style.strokeDashoffset;
+  const hora = usoHora.style.transform;
+  cheios.forEach((el, i) => (el.style[lado(i)] = "100%"));
+  usoCirculo.style.strokeDashoffset = "0";
+  usoHora.style.transform = "rotate(360deg)";
+  void usoEl.offsetWidth;
+  for (const el of alvos) el.style.transition = "";
+  cheios.forEach((el, i) => (el.style[lado(i)] = larguras[i]));
+  escoarUso();
+  usoCirculo.style.strokeDashoffset = offset;
+  usoHora.style.transform = hora;
+}
+usoEl.addEventListener("mouseenter", replayUso);
+
+/// A última notícia do uso fica guardada: a status line só fala com o Claude
+/// rodando, e abrir o app não pode deixar o rodapé vazio até lá.
+const CHAVE_USO = "termiau:uso";
+
+/// O uso chegou pela status line de algum painel: vale para todos, a conta é
+/// uma só.
+function receberUso(u: Uso) {
+  usoNoticia = u;
+  try {
+    localStorage.setItem(CHAVE_USO, JSON.stringify(u));
+  } catch {
+    // Só uma conveniência.
+  }
+  atualizarUso();
+}
+
+/// A notícia, como está agora: a janela que renovou desde ela volta zerada.
+let usoNoticia: Uso | undefined;
+function atualizarUso() {
+  usoAtual = usoNoticia && {
+    sessao: janelaAgora(usoNoticia.sessao),
+    semana: janelaAgora(usoNoticia.semana),
+  };
+  desenharUso();
+}
+
+try {
+  usoNoticia = JSON.parse(localStorage.getItem(CHAVE_USO) ?? "null") ?? undefined;
+} catch {
+  usoNoticia = undefined;
+}
+usoEl.hidden = true;
+atualizarUso();
+// Entre uma notícia e outra, o tempo continua passando: o "quanto falta" e o
+// círculo andam sozinhos.
+setInterval(atualizarUso, 30_000);
+
 // ---------- rádio: a do rodapé ----------
 
 /// A lista mora no `estacoes.ts`, com a explicação de onde ela vem e do que o
@@ -2083,6 +4548,8 @@ const estacoes = ESTACOES;
 /// um número de 0 a 100.
 const CHAVE_ATUAL = "termiau:radio:atual";
 const CHAVE_VOLUME = "termiau:lofi:volume";
+/// Se a rádio estava no ar quando o app fechou: ela volta a tocar na abertura.
+const CHAVE_TOCANDO = "termiau:radio:tocando";
 
 /// Os cinco estágios do volume. Um clique sobe um; depois do cheio, mudo. É o
 /// que cabe num rodapé de 30px: um slider precisa de um alvo comprido para o
@@ -2475,19 +4942,69 @@ function moverSpec() {
   }
 }
 
-let pulsoSpec: ReturnType<typeof setInterval> | undefined;
+/// Os alvos inventados de cada banda, quando não há o que medir, e daqui a
+/// quantos quadros cada uma sorteia o próximo.
+const specSorteio = new Array<number>(SPEC_BANDAS).fill(0);
+const specEspera = new Array<number>(SPEC_BANDAS).fill(0);
+/// Quantos quadros faltam para a próxima batida, também sorteados.
+let specBatida = 0;
 
-/// Liga e desliga a animação. A saída rápida importa: `desenharLofi` roda a cada
+const sortear = (de: number, ate: number) => de + Math.random() * (ate - de);
+
+/// Pelo caminho direto (a estação não deixa o áudio ser lido) o mostrador não
+/// tem amostra, mas parado ele parecia a rádio desligada. Então ele anda de
+/// mentira, sem compasso nenhum: cada banda sorteia a altura e quanto tempo
+/// fica nela, e de tempos em tempos (também sorteados) vem uma batida de força
+/// sorteada nos graves. O resto — subir no quadro, descer aos poucos, o pico no
+/// ar — é o mesmo do medido.
+function moverSpecSorteado() {
+  if (--specBatida <= 0) {
+    specBatida = Math.round(sortear(4, 16));
+    const forca = sortear(0.5, 1);
+    const largura = Math.round(sortear(1, 4));
+    for (let b = 0; b < largura; b++) specSorteio[b] = Math.max(specSorteio[b], forca * sortear(0.8, 1));
+  }
+  for (let b = 0; b < SPEC_BANDAS; b++) {
+    if (--specEspera[b] <= 0) {
+      specEspera[b] = Math.round(sortear(1, 7));
+      // Os graves tendem a ir mais alto, mas qualquer banda pode ir ao topo ou
+      // ao chão.
+      const teto = 1 - (b / SPEC_BANDAS) * 0.35;
+      specSorteio[b] = teto * Math.random() ** sortear(0.6, 1.6);
+    }
+    const alvo = specSorteio[b];
+    specNiveis[b] = alvo > specNiveis[b] ? alvo : Math.max(0, specNiveis[b] - SPEC_QUEDA * sortear(0.6, 1.4));
+    specPicos[b] = Math.max(specNiveis[b], specPicos[b] - SPEC_QUEDA_PICO);
+    // O alvo cumprido se desfaz: sem isto a coluna ficava pregada nele.
+    specSorteio[b] *= sortear(0.7, 0.9);
+
+    const { nivel, pico } = specColunas[b];
+    const alto = alturaSpec(specNiveis[b]);
+    const altoPico = alturaSpec(specPicos[b]);
+    nivel.style.height = `${alto}px`;
+    pico.hidden = altoPico <= alto;
+    pico.style.bottom = `${Math.max(0, altoPico - 2)}px`;
+  }
+}
+
+let pulsoSpec: ReturnType<typeof setInterval> | undefined;
+let modoSpec: "medido" | "sorteado" | undefined;
+
+/// Liga e desliga a animação: medida (pelo grafo), sorteada (pelo caminho
+/// direto) ou nenhuma. A saída rápida importa: `desenharLofi` roda a cada
 /// evento do áudio, e reiniciar o intervalo em cada um faria o mostrador andar
 /// aos trancos.
-function animarSpec(ligado: boolean) {
-  if (ligado === !!pulsoSpec) return;
+function animarSpec(modo: "medido" | "sorteado" | undefined) {
+  if (modo === modoSpec) return;
+  modoSpec = modo;
   clearInterval(pulsoSpec);
   pulsoSpec = undefined;
-  if (ligado) {
-    pulsoSpec = setInterval(moverSpec, SPEC_MS);
+  if (modo) {
+    pulsoSpec = setInterval(modo === "medido" ? moverSpec : moverSpecSorteado, SPEC_MS);
     return;
   }
+  specSorteio.fill(0);
+  specEspera.fill(0);
   // Parado, tudo no chão: um mostrador congelado no meio pareceria travado.
   specNiveis.fill(0);
   specPicos.fill(0);
@@ -2524,10 +5041,9 @@ function desenharLofi() {
     passearTitulo();
   }
 
-  // O mostrador só anda quando há o que medir: pelo caminho direto não há
-  // amostra, e dez colunas paradas no chão dizem isso melhor que dez colunas
-  // inventadas.
-  animarSpec(tocandoLofi && audio === audioGrafo);
+  // Pelo grafo o mostrador mede o som; pelo caminho direto não há amostra, e
+  // ele anda sorteado — parado, parecia que a rádio não estava tocando.
+  animarSpec(!tocandoLofi ? undefined : audio === audioGrafo ? "medido" : "sorteado");
 }
 
 /// Os dois elementos respondem igual, e só o que está no ar tem voz: o outro
@@ -2551,6 +5067,22 @@ function ouvir(el: HTMLAudioElement) {
     desenharLofi();
   });
 
+  // Pausa que não veio de nós: a tecla de mídia do teclado, os controles de
+  // "Tocando agora" do macOS. O rodapé tem de saber. Na volta seguinte do laço,
+  // porque trocar o `src` no meio de um `tocarLofi` também passa por aqui, e aí
+  // o `play()` logo atrás já desfez a pausa.
+  el.addEventListener("pause", () => {
+    setTimeout(() => {
+      if (el !== audio || !noAr || !el.paused) return;
+      pausarLofi();
+    });
+  });
+  // E o play de fora, depois dela: volta ao vivo, e não ao ponto em que parou.
+  el.addEventListener("play", () => {
+    if (el !== audio || noAr) return;
+    tocarLofi();
+  });
+
   el.addEventListener("error", () => caiu(el));
   // Um Icecast que fecha a conexão do lado dele chega como fim de mídia, e não
   // como erro. Numa rádio, que não acaba, é a mesma coisa.
@@ -2571,6 +5103,7 @@ function caiu(el: HTMLAudioElement) {
   tocandoLofi = false;
   carregandoLofi = false;
   avisoLofi = "estação fora do ar — tente a próxima";
+  localStorage.removeItem(CHAVE_TOCANDO);
   desenharLofi();
 }
 
@@ -2614,13 +5147,14 @@ function calar(el: HTMLAudioElement) {
 /// cai do outro lado do clique e é recusado — `NotSupportedError`, que ainda
 /// por cima não parece o que é. Então o `play()` sai primeiro, síncrono, e o
 /// contexto é solto logo atrás; o resultado é tratado quando chegar.
-function tocarLofi() {
+function tocarLofi(automatico = false) {
   const e = atual();
   if (!e) return;
 
   noAr = true;
   carregandoLofi = true;
   avisoLofi = undefined;
+  localStorage.setItem(CHAVE_TOCANDO, "1");
 
   // O elemento certo para esta estação. Se for o outro, o que estava no ar cala
   // antes — dois streams tocando juntos é o que acontece sem esta linha.
@@ -2646,10 +5180,50 @@ function tocarLofi() {
     // recusa do próprio navegador.
     noAr = false;
     carregandoLofi = false;
+    // Na abertura não houve gesto, e o WebKit pode recusar: a rádio espera a
+    // primeira tecla ou clique, calada, em vez de dar erro por algo que você
+    // não pediu agora.
+    if (automatico && erro instanceof DOMException && erro.name === "NotAllowedError") {
+      localStorage.setItem(CHAVE_TOCANDO, "1");
+      calar(audio);
+      desenharLofi();
+      tocarNoPrimeiroGesto();
+      return;
+    }
+    localStorage.removeItem(CHAVE_TOCANDO);
     avisoLofi = `a rádio não abriu: ${erro}`;
     desenharLofi();
     jlog(`radio: ${erro}`);
   });
+  atualizarTocandoAgora();
+}
+
+/// O gesto que libera o áudio. Na captura, para valer mesmo com a tecla indo
+/// para o xterm; e o `tocarLofi` é síncrono, então o `play()` sai dentro dele.
+function tocarNoPrimeiroGesto() {
+  const tocar = () => {
+    window.removeEventListener("keydown", tocar, true);
+    window.removeEventListener("pointerdown", tocar, true);
+    if (!noAr && localStorage.getItem(CHAVE_TOCANDO)) tocarLofi();
+  };
+  window.addEventListener("keydown", tocar, true);
+  window.addEventListener("pointerdown", tocar, true);
+}
+
+/// O que o "Tocando agora" do macOS mostra, e quem responde às teclas de mídia:
+/// sem os handlers, o sistema pausaria o elemento por conta própria e o rodapé
+/// ficaria sem saber (o evento `pause` de cima ainda cobre isso).
+function atualizarTocandoAgora() {
+  const ms = navigator.mediaSession;
+  if (!ms) return;
+  const e = atual();
+  ms.metadata = e ? new MediaMetadata({ title: e.nome, artist: "TermIAu" }) : null;
+  ms.playbackState = noAr ? "playing" : "paused";
+}
+
+function alternarLofi() {
+  if (tocandoLofi) pausarLofi();
+  else tocarLofi();
 }
 
 function pausarLofi() {
@@ -2658,7 +5232,16 @@ function pausarLofi() {
   calar(audio);
   tocandoLofi = false;
   carregandoLofi = false;
+  localStorage.removeItem(CHAVE_TOCANDO);
   desenharLofi();
+  atualizarTocandoAgora();
+}
+
+if (navigator.mediaSession) {
+  navigator.mediaSession.setActionHandler("play", () => tocarLofi());
+  navigator.mediaSession.setActionHandler("pause", () => pausarLofi());
+  navigator.mediaSession.setActionHandler("stop", () => pausarLofi());
+  navigator.mediaSession.setActionHandler("nexttrack", () => irPara(estacao + 1));
 }
 
 /// Põe uma estação no ar. Com a rádio parada ela fica só engatilhada: trocar de
@@ -2675,11 +5258,12 @@ function irPara(i: number) {
   if (noAr) tocarLofi();
   desenharLofi();
   desenharLista();
+  atualizarTocandoAgora();
 }
 
 lofiEstacoes.addEventListener("click", () => abrirEditor());
 lofiProxima.addEventListener("click", () => irPara(estacao + 1));
-lofiTocar.addEventListener("click", () => (tocandoLofi ? pausarLofi() : tocarLofi()));
+lofiTocar.addEventListener("click", alternarLofi);
 
 lofiVolume.addEventListener("click", () => {
   volumeLofi = VOLUMES[(VOLUMES.indexOf(volumeLofi) + 1) % VOLUMES.length];
@@ -2794,10 +5378,11 @@ const ATALHOS: { grupo: string; itens: [string | string[], string][] }[] = [
     grupo: "Abas",
     itens: [
       ["⌘T", "Nova aba"],
+      ["⌘⇧T", "Reabrir a aba fechada"],
       ["⌘⇧]", "Próxima aba"],
       ["⌘⇧[", "Aba anterior"],
-      ["⌘1", "Diff da branch (a aba presa)"],
-      ["⌘2 … ⌘8", "Ir para a aba de número"],
+      ["⌘`", "Diff da branch (a aba presa)"],
+      ["⌘1 … ⌘8", "Ir para a aba de número"],
       ["⌘9", "Última aba"],
     ],
   },
@@ -2809,6 +5394,9 @@ const ATALHOS: { grupo: string; itens: [string | string[], string][] }[] = [
       ["⌘⌥ ← ↑ → ↓", "Ir para o painel naquela direção"],
       ["⌘⇧A", "Ir para o painel que espera por você"],
       ["⌘⇧↩", "Maximizar o painel ou recolher de volta"],
+      ["⌘⇧C", "Alternar entre o chat e o terminal do Claude"],
+      ["⌘⇧K", "Compactar a conversa do Claude (/compact)"],
+      [["⌘⇧↑", "⌘⇧↓"], "Ir para a sua mensagem anterior ou seguinte"],
       // ⌃D é o fim de entrada: o shell sai, e o painel vai junto com ele.
       [["⌘W", "⌃D"], "Fechar o painel (o último fecha a aba)"],
     ],
@@ -2839,11 +5427,12 @@ const ATALHOS: { grupo: string; itens: [string | string[], string][] }[] = [
     itens: [
       ["⌘,", "Preferências"],
       ["⌘E", "Escutar (ditado)"],
+      ["⌘⇧P", "Tocar ou pausar a rádio"],
       ["⌘/", "Esta lista"],
       ["⌘M", "Minimizar"],
       ["⌃⌘F", "Tela cheia"],
       ["⌘H", "Ocultar o TermIAu"],
-      ["⌘Q", "Sair"],
+      ["⌘Q", "Sair (pergunta antes)"],
     ],
   },
 ];
@@ -2906,6 +5495,396 @@ ajudaEl.addEventListener("keydown", (e) => {
   }
 });
 
+// ---------- sessão: as abas que voltam ----------
+
+/// A foto de um painel: onde ele estava e, se havia um Claude rodando nele,
+/// qual sessão. É o que vai para o disco e o que o ⌘⇧T guarda de uma aba fechada.
+type NoSalvo =
+  | { tipo: "folha"; cwd: string | null; claude?: string }
+  | { tipo: "divisao"; eixo: Eixo; fracao: number; filhos: [NoSalvo, NoSalvo] };
+
+type AbaSalva = {
+  raiz: NoSalvo;
+  /// O painel em foco, pela posição dele entre as folhas da árvore.
+  foco: number;
+};
+
+/// As últimas abas fechadas, a mais recente no fim. Só desta execução: fechar o
+/// app guarda as abertas, não as que você já tinha mandado embora.
+const fechadas: AbaSalva[] = [];
+const MAX_FECHADAS = 10;
+
+/// O id vai parar numa linha de comando digitada no shell, e veio de um socket
+/// em que qualquer processo do usuário escreve: só passa o que tem cara de id.
+const ID_SESSAO = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
+function fotografar(no: No): NoSalvo {
+  if (no.tipo === "divisao") {
+    return {
+      tipo: "divisao",
+      eixo: no.eixo,
+      fracao: no.fracao,
+      filhos: [fotografar(no.filhos[0]), fotografar(no.filhos[1])],
+    };
+  }
+  // A pasta da sessão antes da do shell: com o Claude na frente, as duas
+  // costumam ser a mesma, mas é a da sessão que o `--resume` exige.
+  return { tipo: "folha", cwd: no.claude?.pasta ?? no.barra?.pasta ?? null, claude: no.claude?.sessao };
+}
+
+function fotografarAba(aba: Aba): AbaSalva {
+  // Com o teclado na gaveta, quem volta em foco é o dono: a gaveta não volta.
+  const foco = [...folhas(aba.raiz)].indexOf(aba.foco.dono ?? aba.foco);
+  return { raiz: fotografar(aba.raiz), foco: Math.max(0, foco) };
+}
+
+/// Confere a forma do que veio do disco. Um arquivo de outra versão, ou mexido
+/// à mão, não pode derrubar a abertura do app: o que não serve é ignorado.
+function noSalvo(x: unknown): NoSalvo | undefined {
+  const n = x as Partial<Record<string, unknown>> | null;
+  if (!n || typeof n !== "object") return;
+  if (n.tipo === "folha") {
+    return {
+      tipo: "folha",
+      cwd: typeof n.cwd === "string" ? n.cwd : null,
+      claude: typeof n.claude === "string" && ID_SESSAO.test(n.claude) ? n.claude : undefined,
+    };
+  }
+  if (n.tipo !== "divisao" || !Array.isArray(n.filhos)) return;
+  const a = noSalvo(n.filhos[0]);
+  const b = noSalvo(n.filhos[1]);
+  if (!a || !b) return a ?? b;
+  const fracao = typeof n.fracao === "number" && Number.isFinite(n.fracao) ? n.fracao : 0.5;
+  return {
+    tipo: "divisao",
+    eixo: n.eixo === "abaixo" ? "abaixo" : "lado",
+    fracao: Math.min(0.9, Math.max(0.1, fracao)),
+    filhos: [a, b],
+  };
+}
+
+function lerSessao(texto: string | null): { abas: AbaSalva[]; ativa: number } {
+  const vazia = { abas: [], ativa: 0 };
+  if (!texto) return vazia;
+  try {
+    const dado = JSON.parse(texto) as { abas?: unknown; ativa?: unknown } | null;
+    if (!dado || !Array.isArray(dado.abas)) return vazia;
+    const salvas = dado.abas.flatMap((a: { raiz?: unknown; foco?: unknown } | null): AbaSalva[] => {
+      const raiz = noSalvo(a?.raiz);
+      return raiz ? [{ raiz, foco: typeof a?.foco === "number" ? a.foco : 0 }] : [];
+    });
+    return { abas: salvas, ativa: typeof dado.ativa === "number" ? dado.ativa : 0 };
+  } catch (e) {
+    jlog(`sessão salva ilegível: ${e}`);
+    return vazia;
+  }
+}
+
+/// Verdadeiro até as abas salvas terminarem de voltar. Enquanto isso nada é
+/// gravado: a primeira aba a voltar salvaria "uma aba" por cima das outras.
+let restaurando = true;
+let esperaSalvar: ReturnType<typeof setTimeout> | undefined;
+
+/// Grava as abas de agora. A cada mudança, e não só ao sair: um crash, um
+/// `kill` ou a bateria acabando também têm de achar as abas na volta.
+function salvarSessao(): Promise<void> {
+  clearTimeout(esperaSalvar);
+  if (restaurando) return Promise.resolve();
+  const dados = JSON.stringify({
+    versao: 1,
+    abas: abas.map(fotografarAba),
+    ativa: ativa ? abas.indexOf(ativa) : 0,
+  });
+  return invoke<void>("sessao_salvar", { dados }).catch((e) => {
+    void jlog(`sessao_salvar: ${e}`);
+  });
+}
+
+function agendarSalvar() {
+  clearTimeout(esperaSalvar);
+  esperaSalvar = setTimeout(() => void salvarSessao(), 500);
+}
+
+function primeiraFolha(no: NoSalvo): Extract<NoSalvo, { tipo: "folha" }> {
+  return no.tipo === "folha" ? no : primeiraFolha(no.filhos[0]);
+}
+
+/// Põe o painel de volta onde estava. Havendo sessão do Claude, a linha do
+/// `--resume` é digitada no shell, como o play digita a dele: é assim que o
+/// `claude` sai do PATH do seu .zshrc. O shell ainda está subindo — a linha
+/// espera no terminal e ele a lê quando chegar ao prompt.
+function retomar(folha: Folha, salvo: Extract<NoSalvo, { tipo: "folha" }>) {
+  // Até o `carregarProjeto` responder: sair antes disso não pode salvar o
+  // painel sem pasta.
+  if (folha.barra && salvo.cwd) folha.barra.pasta ??= salvo.cwd;
+  if (!salvo.claude) return;
+  // Marcado desde já, e não só quando o hook avisar: sair antes do primeiro
+  // evento da sessão retomada não pode esquecê-la.
+  folha.claude = {
+    nome: salvo.cwd?.split("/").filter(Boolean).pop() || "claude",
+    estado: "ocioso",
+    sessao: salvo.claude,
+    pasta: salvo.cwd ?? undefined,
+  };
+  invoke("pty_write", { id: folha.id, data: `claude --resume ${salvo.claude}\r` }).catch((e) =>
+    jlog(`retomar: ${e}`),
+  );
+}
+
+/// Refaz a árvore salva a partir de um painel: cada corte divide o painel, o
+/// primeiro filho continua nele e o segundo vai para o que nasceu. `feitas`
+/// sai na ordem das folhas, que é a ordem em que o foco foi salvo.
+async function montar(aba: Aba, folha: Folha, salvo: NoSalvo, feitas: Folha[]) {
+  if (salvo.tipo === "folha") {
+    retomar(folha, salvo);
+    feitas.push(folha);
+    return;
+  }
+  const [a, b] = salvo.filhos;
+  const nova = await dividirFolha(aba, folha, salvo.eixo, primeiraFolha(b).cwd, salvo.fracao);
+  await montar(aba, folha, a, feitas);
+  // Sem shell para o segundo lado, o primeiro fica com o espaço todo.
+  if (nova) await montar(aba, nova, b, feitas);
+}
+
+/// Traz uma aba de volta: os painéis nas pastas em que estavam, o layout como
+/// era, e as sessões do Claude retomadas.
+async function reabrir(salva: AbaSalva): Promise<Aba | undefined> {
+  const aba = await novaAba(primeiraFolha(salva.raiz).cwd);
+  if (!aba) return;
+  ocupado = true;
+  try {
+    const feitas: Folha[] = [];
+    await montar(aba, aba.foco, salva.raiz, feitas);
+    focar(feitas[salva.foco] ?? feitas[0]);
+  } finally {
+    ocupado = false;
+  }
+  return aba;
+}
+
+/// ⌘⇧T: a última aba fechada volta, como no navegador.
+async function reabrirFechada() {
+  const salva = fechadas.pop();
+  if (!salva) return;
+  // Não abriu (outro atalho no meio do caminho): a foto volta para a pilha.
+  if (!(await reabrir(salva))) fechadas.push(salva);
+}
+
+/// As abas da última execução, na abertura do app. Sem nenhuma para trazer — a
+/// primeira vez, ou a última aba foi fechada à mão —, abre uma nova.
+async function restaurarSessao() {
+  const salva = lerSessao(await invoke<string | null>("sessao_ler").catch(() => null));
+  try {
+    for (const a of salva.abas) await reabrir(a);
+    if (!abas.length) await novaAba();
+    else ativar(abas[salva.ativa] ?? abas[0]);
+  } finally {
+    restaurando = false;
+    agendarSalvar();
+  }
+}
+
+// ---------- a caixa de pergunta ----------
+
+/// Uma pergunta no meio da janela, na mesma casca do seletor de estações. O
+/// botão de confirmar já nasce com o teclado: espaço ou ↩ confirmam, esc
+/// cancela. Sem `cancelar` ela é só um aviso, com um botão.
+type Pergunta = { titulo: string; texto: string; confirmar: string; cancelar?: string };
+
+const perguntaEl = elemento("div", "lofi-editor");
+perguntaEl.hidden = true;
+const perguntaCaixa = elemento("div", "lofi-caixa pergunta-caixa");
+perguntaCaixa.setAttribute("role", "alertdialog");
+const perguntaTitulo = elemento("span", "lofi-cabeca-titulo");
+const perguntaTexto = elemento("p", "pergunta-texto");
+const perguntaBotoes = elemento("div", "pergunta-botoes");
+const perguntaNao = elemento("button", "pergunta-btn");
+const perguntaSim = elemento("button", "pergunta-btn pergunta-sim");
+perguntaBotoes.append(perguntaNao, perguntaSim);
+perguntaCaixa.append(perguntaTitulo, perguntaTexto, perguntaBotoes);
+perguntaEl.appendChild(perguntaCaixa);
+document.body.appendChild(perguntaEl);
+
+/// A que está na tela: quem é e como respondê-la.
+let perguntaAberta: { chave: string; promessa: Promise<boolean>; responder: (sim: boolean) => void } | undefined;
+
+/// `chave` diz qual pergunta é. A mesma, feita de novo com a caixa aberta (um
+/// segundo ⌘Q), só reencosta o teclado; outra toma o lugar, e a anterior fica
+/// respondida com "não".
+function perguntar(chave: string, p: Pergunta): Promise<boolean> {
+  if (perguntaAberta?.chave === chave) {
+    perguntaSim.focus();
+    return perguntaAberta.promessa;
+  }
+  perguntaAberta?.responder(false);
+
+  const rotulo = (b: HTMLButtonElement, texto: string, tecla: string) => {
+    const k = document.createElement("kbd");
+    k.textContent = tecla;
+    b.replaceChildren(texto, k);
+  };
+  perguntaTitulo.textContent = p.titulo;
+  perguntaTexto.textContent = p.texto;
+  rotulo(perguntaSim, p.confirmar, "↩");
+  perguntaNao.hidden = !p.cancelar;
+  if (p.cancelar) rotulo(perguntaNao, p.cancelar, "esc");
+
+  let responder!: (sim: boolean) => void;
+  const promessa = new Promise<boolean>((resolve) => {
+    responder = (sim) => {
+      if (perguntaAberta?.promessa !== promessa) return;
+      perguntaAberta = undefined;
+      perguntaEl.hidden = true;
+      // O teclado volta para onde estava — um painel, ou a aba do diff.
+      if (noDiff) presa?.quadro.contentWindow?.focus();
+      else if (ativa?.foco) focar(ativa.foco);
+      resolve(sim);
+    };
+  });
+  perguntaAberta = { chave, promessa, responder };
+  perguntaEl.hidden = false;
+  perguntaSim.focus();
+  return promessa;
+}
+
+perguntaEl.addEventListener("mousedown", (e) => {
+  if (e.target === perguntaEl) perguntaAberta?.responder(false);
+});
+perguntaNao.addEventListener("click", () => perguntaAberta?.responder(false));
+perguntaSim.addEventListener("click", () => perguntaAberta?.responder(true));
+perguntaEl.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    perguntaAberta?.responder(false);
+    return;
+  }
+  // O teclado não sai da caixa: tab e as setas só alternam entre os dois
+  // botões. Espaço e ↩ são do próprio botão em foco.
+  if (e.key === "Tab" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
+    e.preventDefault();
+    const outro = document.activeElement === perguntaSim ? perguntaNao : perguntaSim;
+    (outro.hidden ? perguntaSim : outro).focus();
+  }
+});
+
+// ---------- sair: o ⌘Q pergunta antes ----------
+
+let saindo = false;
+
+/// Salva as abas e encerra. O `await` do salvamento é o que garante que a
+/// última mudança (um `cd`, uma sessão nova) chegou ao disco antes de o
+/// processo sumir.
+async function sair() {
+  if (saindo) return;
+  saindo = true;
+  await salvarSessao();
+  await invoke("sair").catch((e) => jlog(`sair: ${e}`));
+}
+
+/// Sair leva embora todos os shells e o que estiver rodando neles, e ⌘Q mora
+/// ao lado do ⌘W e do ⌘A.
+async function pedirSair() {
+  if (saindo) return;
+  const paineis = abas.flatMap((a) => [...folhas(a.raiz)]);
+  const claudes = paineis.filter((f) => f.claude?.sessao).length;
+  const quantas = abas.length === 1 ? "A aba aberta fecha" : `As ${abas.length} abas abertas fecham`;
+  const restaura = await invoke<boolean>("restaurar_ligado").catch(() => false);
+  const volta = !restaura
+    ? "Elas não voltam na próxima abertura — TermIAu ▸ Restaurar Abas ao Abrir liga isso."
+    : claudes === 0
+      ? "Na próxima abertura elas voltam, nas mesmas pastas."
+      : claudes === 1
+        ? "Na próxima abertura elas voltam, e a sessão do Claude é retomada."
+        : `Na próxima abertura elas voltam, e as ${claudes} sessões do Claude são retomadas.`;
+  const sim = await perguntar("sair", {
+    titulo: "Sair do TermIAu?",
+    texto: `${quantas} e o que estiver rodando nelas para. ${volta}`,
+    confirmar: "Sair",
+    cancelar: "Cancelar",
+  });
+  if (sim) await sair();
+}
+
+// ---------- hooks: a ligação com o Claude Code ----------
+
+async function instalarHooks(): Promise<boolean> {
+  try {
+    await invoke("hooks_instalar");
+    return true;
+  } catch (e) {
+    await perguntar("hooks", {
+      titulo: "Não consegui ligar ao Claude Code",
+      texto: String(e),
+      confirmar: "Ok",
+    });
+    return false;
+  }
+}
+
+/// É pelos hooks que o TermIAu sabe o que cada Claude está fazendo e qual é a
+/// sessão dele. `pedido`: veio do menu, e aí toda resposta aparece; na abertura
+/// do app só aparece o que precisa de uma decisão.
+async function conferirHooks(pedido: boolean) {
+  const estado = await invoke<string>("hooks_estado").catch(() => "sem-claude");
+
+  if (estado === "sem-claude") {
+    if (pedido) {
+      await perguntar("hooks", {
+        titulo: "Não achei o Claude Code",
+        texto: "A pasta ~/.claude não existe. Abra o Claude Code uma vez e tente de novo.",
+        confirmar: "Ok",
+      });
+    }
+    return;
+  }
+  if (estado === "instalado") {
+    if (pedido) {
+      await perguntar("hooks", {
+        titulo: "Já está ligado",
+        texto: "Os hooks do TermIAu estão instalados no Claude Code e em dia.",
+        confirmar: "Ok",
+      });
+    }
+    return;
+  }
+  // Na abertura só se atualiza o que já estava instalado: quem instalou já
+  // consentiu, e o que muda é o hook que veio junto com o app novo. Instalar
+  // pela primeira vez é sempre um gesto seu, no menu.
+  if (!pedido) {
+    if (estado === "desatualizado") await invoke("hooks_instalar").catch((e) => jlog(`hooks_instalar: ${e}`));
+    return;
+  }
+
+  if (await instalarHooks()) {
+    await perguntar("hooks", {
+      titulo: "Ligado ao Claude Code",
+      texto: "Vale para as sessões do Claude abertas a partir de agora; as que já estão rodando precisam ser reiniciadas.",
+      confirmar: "Ok",
+    });
+  }
+}
+
+/// TermIAu ▸ Restaurar Abas ao Abrir acabou de ser ligado ou desligado. Ligar
+/// traz os hooks junto: sem eles as abas voltam, mas sem saber que sessão do
+/// Claude havia em cada painel.
+async function restaurarMudou(ligado: boolean) {
+  if (!ligado) return;
+  // O que já está aberto entra na conta desde já.
+  await salvarSessao();
+  const estado = await invoke<string>("hooks_estado").catch(() => "sem-claude");
+  const instalou = estado === "ausente" || estado === "desatualizado" ? await instalarHooks() : false;
+  await perguntar("restaurar", {
+    titulo: "As abas voltam na próxima abertura",
+    texto: instalou
+      ? "Liguei também o TermIAu ao Claude Code (um hook em ~/.claude/hooks, registrado no settings.json, com backup): é por ele que as sessões são retomadas. Vale para os Claudes abertos a partir de agora."
+      : estado === "sem-claude"
+        ? "Cada painel volta na pasta em que estava. Não achei o Claude Code (~/.claude), então não há sessões para retomar."
+        : "Cada painel volta na pasta em que estava, e as sessões do Claude são retomadas.",
+    confirmar: "Ok",
+  });
+}
+
 // ---------- teclado ----------
 
 function atalho(e: Atalho) {
@@ -2926,11 +5905,12 @@ function atalho(e: Atalho) {
     return;
   }
 
-  // ⌘1 é a aba presa: ela é a primeira da barra, então os terminais começam no
-  // ⌘2. ⌘9 vai pra última, não pra nona — é o padrão do macOS.
+  // ⌘` é a aba presa, e os números ficam todos para os terminais. Pelo `code`,
+  // não pelo `key`: no ABNT2 a crase é tecla morta e o `key` não chega como "`".
+  if (e.code === "Backquote") return void (presa && abrirPresa());
+  // ⌘9 vai pra última, não pra nona — é o padrão do macOS.
   const n = Number(e.key);
-  if (n === 1 && presa) return abrirPresa();
-  const alvo = n === 9 ? abas[abas.length - 1] : abas[n - 2];
+  const alvo = n === 9 ? abas[abas.length - 1] : abas[n - 1];
   if (alvo) ativar(alvo);
 }
 
@@ -2974,10 +5954,7 @@ window.addEventListener("message", (e) => {
 
 // ---------- ciclo de vida ----------
 
-async function iniciar() {
-  // Medir a célula antes da fonte carregar dá largura errada em toda a grade.
-  await document.fonts.ready;
-
+async function ligarEventos() {
   // O xterm troca o cursor pro estilo inativo quando o terminal perde o foco,
   // mas relê isso só ao redesenhar uma linha — e o app pode ir pro segundo plano
   // sem que a textarea receba `blur`. Sem nada disparando redesenho, a patinha
@@ -2987,14 +5964,27 @@ async function iniciar() {
     if (!ativa || noDiff) return;
     if (!focada) ativa.foco.term.blur();
     // Se um clique já devolveu o teclado a um painel, não roubamos de volta.
-    else if (document.activeElement?.tagName !== "TEXTAREA") ativa.foco.term.focus();
+    else if (!["TEXTAREA", "INPUT"].includes(document.activeElement?.tagName ?? "")) teclado(ativa.foco);
+  });
+
+  // Foco que entra no iframe da aba presa sem ela estar na tela é roubo: algo lá
+  // dentro chamou `focus()` (um aviso do git, por exemplo) e o painel ficou sem
+  // teclado. A janela de cima recebe `blur` quando o foco desce pro iframe.
+  window.addEventListener("blur", () => {
+    setTimeout(() => {
+      if (ativa && !noDiff && presa && document.activeElement === presa.quadro) teclado(ativa.foco);
+    });
   });
 
   // Os hooks do Claude Code entram por aqui, via socket unix (ver ouvir_hooks
   // no Rust e hooks/termiau-evento.sh).
   await listen<string>("claude://evento", (e) => {
     try {
-      receber(JSON.parse(e.payload) as EventoClaude);
+      const bruto = JSON.parse(e.payload);
+      // O `termiau ver` usa o mesmo socket dos hooks (ver hooks/termiau).
+      if (bruto && typeof bruto === "object" && "ver" in bruto) receberVer(bruto as PedidoDoSocket);
+      else if (bruto && typeof bruto === "object" && "status" in bruto) receberStatus(bruto as StatusDoSocket);
+      else receber(bruto as EventoClaude);
     } catch (err) {
       jlog(`evento do claude ilegível: ${err}`);
     }
@@ -3008,6 +5998,17 @@ async function iniciar() {
 
   // ⌘T, ⌘D, ⌘⇧D, ⌘⇧↩ e ⌘W chegam por aqui: quem recebe a tecla é o menu nativo.
   await listen("menu://nova-aba", () => novaAba());
+  await listen("menu://reabrir-aba", () => reabrirFechada());
+  await listen("menu://sair", () => pedirSair());
+  await listen("menu://hooks", () => conferirHooks(true));
+  await listen<boolean>("menu://restaurar", (e) => restaurarMudou(e.payload));
+  // O botão vermelho e o "Fechar Janela" também encerram o app: passam pela
+  // mesma pergunta. Quem sai de verdade é o `sair`, que não pede para fechar a
+  // janela — encerra o processo.
+  await janela.onCloseRequested((e) => {
+    e.preventDefault();
+    void pedirSair();
+  });
   await listen("menu://dividir-lado", () => dividir("lado"));
   await listen("menu://dividir-abaixo", () => dividir("abaixo"));
   await listen("menu://maximizar", () => {
@@ -3016,9 +6017,22 @@ async function iniciar() {
   await listen("menu://fechar", () => {
     if (ativa && !noDiff) fecharFolha(ativa.foco);
   });
+  await listen("menu://chat", () => {
+    if (ativa && !noDiff) alternarChat(ativa.foco.dono ?? ativa.foco);
+  });
+  await listen("menu://visor", () => {
+    if (ativa && !noDiff) alternarVisor(ativa.foco.dono ?? ativa.foco);
+  });
+  await listen("menu://compactar", () => {
+    if (ativa && !noDiff) compactar(ativa.foco);
+  });
+  await listen<number>("menu://mensagem", (e) => {
+    if (ativa && !noDiff) irParaMensagem(ativa.foco.dono ?? ativa.foco, e.payload);
+  });
   await listen("menu://colar-caminho", () => colarCaminho());
   await listen("menu://preferencias", () => abrirPreferencias());
   await listen("menu://estacoes", () => abrirEditor());
+  await listen("menu://radio", () => alternarLofi());
   await listen("menu://atalhos", () => alternarAjuda());
 
   // O .git do repositório aberto na aba do diff mexeu. Só repassa: quem decide
@@ -3028,7 +6042,9 @@ async function iniciar() {
   });
 
   await ligarArrastar();
+}
 
+async function abrirAbas() {
   // Um reload da webview apaga as abas mas não os shells: sem isto eles ficariam
   // vivos, sem ninguém lendo, a cada recarga do dev server.
   await invoke("pty_close_all");
@@ -3036,7 +6052,11 @@ async function iniciar() {
   // que ela não sai — `ligarArrasto` só reordena o que está no array `abas`.
   montarMenu();
   criarPresa();
-  await novaAba();
+  await restaurarSessao();
+}
+
+function depoisDasAbas() {
+  void conferirHooks(false);
 
   // Redimensionamento da janela: só a aba visível tem dimensão pra medir; as
   // outras se ajustam quando voltam a aparecer (ver `ativar`).
@@ -3050,4 +6070,14 @@ async function iniciar() {
 
 // Numa função, não solto no módulo: `await` de topo não passa no alvo de build
 // do Vite, e o `npm run build` quebraria mesmo com o dev funcionando.
-iniciar();
+iniciar({
+  fontes: () => document.fonts.ready,
+  ligar: ligarEventos,
+  abrirAbas,
+  depois: depoisDasAbas,
+  retomarRadio: () => {
+    if (localStorage.getItem(CHAVE_TOCANDO)) tocarLofi(true);
+  },
+});
+void ligarModoDiff();
+void ligarLimitesDoContexto();

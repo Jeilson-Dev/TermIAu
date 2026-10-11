@@ -20,7 +20,7 @@ import type { Bookmark, FileDiff, FocusTarget, Side, ViewMode } from "../types";
 import * as askStore from "../lib/asks";
 import type { Ask, AskState } from "../lib/asks";
 import { AskBox } from "./AskBox";
-import { BookmarkBox, BookmarkEditor } from "./BookmarkBox";
+import { BookmarkBox, BookmarkEditor, CopyPathButton } from "./BookmarkBox";
 import { SplitTable, UnifiedTable, type RowContext, type Selection } from "./DiffTable";
 import { DiffStat, Icon, StatusIcon } from "./Icons";
 import { ImageDiff } from "./ImageDiff";
@@ -485,13 +485,7 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
           )}
           <span>{file.path}</span>
         </span>
-        <button
-          className="icon-btn subtle"
-          title="Copiar caminho"
-          onClick={() => navigator.clipboard.writeText(file.path)}
-        >
-          <Icon name="copy" size={14} />
-        </button>
+        <CopyPathButton path={file.path} />
         {modeChanged && (
           <span className="badge">
             {file.oldMode} → {file.newMode}

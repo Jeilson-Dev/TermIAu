@@ -5,7 +5,9 @@ import { Icon } from "./Icons";
 /// fetch. Pergunta em vez de recarregar sozinho: recarregar fecha os arquivos
 /// que você abriu e desfaz o lugar onde você estava lendo, e fazer isso no meio
 /// de uma revisão é pior do que mostrar diff de um minuto atrás.
-export function Mudou({ onReload, onDismiss }: { onReload(): void; onDismiss(): void }) {
+/// Escondida atrás de um terminal, a aba não pega o foco: o `autoFocus` puxaria
+/// o teclado para dentro do iframe, e o shell que rodou o git pararia de digitar.
+export function Mudou({ onReload, onDismiss, visivel }: { onReload(): void; onDismiss(): void; visivel: boolean }) {
   useEffect(() => {
     const tecla = (e: KeyboardEvent) => {
       if (e.key === "Escape") onDismiss();
@@ -27,7 +29,7 @@ export function Mudou({ onReload, onDismiss }: { onReload(): void; onDismiss(): 
           <button className="btn" onClick={onDismiss}>
             Não
           </button>
-          <button className="btn primary" onClick={onReload} autoFocus>
+          <button className="btn primary" onClick={onReload} autoFocus={visivel}>
             Sim, recarregar
           </button>
         </div>

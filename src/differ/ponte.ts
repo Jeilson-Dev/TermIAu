@@ -18,7 +18,7 @@ if (!window.__TAURI_INTERNALS__ && window.parent !== window) {
 }
 
 // As teclas apertadas aqui dentro não sobem para o documento de cima, e é lá
-// que moram o ⌘1..⌘9 e o ⌘⇧[ / ⌘⇧]. Sem este reenvio, entrar na aba do diff
+// que moram o ⌘`, o ⌘1..⌘9 e o ⌘⇧[ / ⌘⇧]. Sem este reenvio, entrar na aba do diff
 // seria entrar num lugar de onde o teclado não sai.
 //
 // Na fase de captura, e só para as teclas que são do TermIAu: o ⌘C que copia

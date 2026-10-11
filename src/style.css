@@ -195,19 +195,29 @@ body {
   box-sizing: border-box;
 }
 
-/* O terminal dentro do painel: entre a barra, em cima, e a gaveta, embaixo. */
+/* O terminal dentro do painel: entre a barra, em cima, e a gaveta, embaixo.
+   Dentro dele, a `.folha-tela` (o terminal e o chat) e, quando o visor está
+   dividido, a alça e o visor ao lado dela. */
 .folha-termo {
   flex: 1;
   min-height: 0;
   box-sizing: border-box;
+  display: flex;
 }
 
-/* O respiro vai no `.xterm`, e NÃO no `.folha-termo`: o FitAddon mede a altura
+.folha-tela {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
+/* O respiro vai no `.xterm`, e NÃO na `.folha-tela`: o FitAddon mede a altura
    do pai e desconta só o padding do próprio `.xterm`. Com o padding no pai (e
    `border-box`), os 10px de cima+baixo entravam na conta como se fossem espaço
    livre — sempre que a sobra da divisão pela altura da célula dava menos de
    10px, ganhava-se uma linha a mais do que cabia, e a última saía cortada. */
-.folha-termo > .xterm {
+.folha-tela > .xterm {
   height: 100%;
   padding: 6px 4px 4px 8px;
   box-sizing: border-box;
@@ -245,10 +255,12 @@ body {
   box-shadow: 0 6px 22px #000000bf;
 }
 
-/* Dois estados falam mesmo sem o teclado: o painel que espera por você e o que
-   vai receber o arquivo sendo arrastado. Apagá-los engoliria o aviso. */
+/* Três estados falam mesmo sem o teclado: o painel que espera por você, o que
+   vai receber o arquivo sendo arrastado e o de contexto cheio. Apagá-los
+   engoliria o aviso. */
 .aba.dividida .divisao > .folha.esperando,
-.aba.dividida .divisao > .folha.recebendo {
+.aba.dividida .divisao > .folha.recebendo,
+.aba.dividida .divisao > .folha.contexto-cheio {
   opacity: 1;
 }
 
@@ -632,6 +644,81 @@ body {
   display: none;
 }
 
+/* O contexto da sessão do Claude, depois da branch: uma pílula só, com a
+   barra enchendo por dentro e o número por cima. É um botão — o clique manda o
+   /compact. */
+.tarefa-btn.tarefa-contexto {
+  --cor: var(--purple);
+  position: relative;
+  flex: none;
+  justify-content: center;
+  min-width: 92px;
+  height: 16px;
+  margin-left: 8px;
+  padding: 0 10px;
+  overflow: hidden;
+  /* A proporção do chip das abas (8px em 32px de altura): um raio do tamanho
+     da metade da altura fazia uma pílula redonda que não combinava com elas. */
+  border-radius: 4px;
+  background: var(--bg-lighter);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tarefa-contexto[hidden] {
+  display: none;
+}
+
+.tarefa-contexto-cheio {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  background: color-mix(in srgb, var(--cor), transparent 45%);
+  transition: width 600ms cubic-bezier(0.22, 0.61, 0.36, 1), background-color 300ms ease;
+}
+
+.tarefa-contexto-num {
+  position: relative;
+  display: block;
+  text-align: center;
+  line-height: 16px;
+  color: var(--fg);
+}
+
+.tarefa-btn.tarefa-contexto:hover {
+  box-shadow: inset 0 0 0 1px var(--cor);
+}
+
+/* Amarelo a partir de 60% usado, vermelho a partir de 75%: a hora de compactar. */
+.tarefa-contexto[data-nivel="atencao"] { --cor: var(--yellow); }
+.tarefa-contexto[data-nivel="perigo"] { --cor: var(--red); }
+
+/* O modelo e o esforço, logo depois do contexto: a mesma caixa, sem a barra
+   enchendo. O clique abre a lista para trocar. */
+.tarefa-btn.tarefa-claude-opcao {
+  flex: none;
+  height: 16px;
+  margin-left: 4px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--bg-lighter);
+  color: var(--fg);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tarefa-btn.tarefa-claude-opcao:hover {
+  box-shadow: inset 0 0 0 1px var(--purple);
+}
+
+.tarefa-claude-opcao[hidden] {
+  display: none;
+}
+
 .tarefa-ramo {
   margin-left: -4px;
   color: var(--purple);
@@ -978,6 +1065,214 @@ body {
 }
 
 
+/* ---------- o uso do Claude no rodapé ---------- */
+
+/* No canto esquerdo da faixa, antes da onda da voz. O hover abre os detalhes
+   para a direita, por cima do parcial (que fica vazio quase sempre). */
+#uso {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 100%;
+  padding-right: 4px;
+  color: var(--comment);
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+
+#uso[hidden] {
+  display: none;
+}
+
+/* 1px acima do centro: a faixa tem a borda em cima, e o círculo centrado de
+   verdade parecia baixo. */
+.uso-icone {
+  display: inline-flex;
+  transform: translateY(-1px);
+}
+
+/* O relógio é o tempo: no ciano das barras de tempo, e não acende com o
+   ritmo — quem acende são os tokens, ao lado. */
+.uso-icone .circulo {
+  stroke: #3a9fb5;
+  transition: stroke-dashoffset 900ms cubic-bezier(0.22, 0.61, 0.36, 1), stroke 300ms ease;
+}
+
+/* Os ponteiros: giram em volta do centro do círculo (8,8 no viewBox). O da
+   hora acompanha a ponta do trecho aceso; o do minuto dá uma volta no hover,
+   pelo `escoarUso` (src/main.ts), e para. */
+.uso-icone .ponteiros {
+  color: var(--fg-dim);
+}
+
+.uso-icone .ponteiro-hora,
+.uso-icone .ponteiro-minuto {
+  transform-box: view-box;
+  transform-origin: 8px 8px;
+}
+
+.uso-icone .ponteiro-hora {
+  transition: transform 900ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* O brilho que corre pelo círculo, da ponta para o começo: ele escoando. */
+.uso-icone .circulo-brilho {
+  stroke: color-mix(in srgb, #3a9fb5, white 50%);
+  opacity: 0;
+}
+
+/* Os tokens disponíveis: uma barra em pé, que esvazia de cima para baixo, e
+   o número ao lado. */
+.uso-resumo {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.uso-pct {
+  font-size: 11px;
+}
+
+.uso-trilho.uso-mini {
+  position: relative;
+  width: 5px;
+  height: 18px;
+}
+
+/* Em pé, o cheio sobe do fundo: a altura é a fração, e a largura é toda. */
+.uso-mini .uso-cheio {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  height: 0;
+  transition: height 900ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.uso-mini .uso-ponteiro {
+  left: 0;
+  right: 0;
+  top: auto;
+  bottom: 0;
+  width: auto;
+  height: 6px;
+}
+
+/* A cor é a do ritmo: laranja é ir rápido demais, vermelho é acabar antes de
+   renovar. No ritmo, os tokens ficam no roxo da rádio. */
+#uso[data-nivel="atencao"] .uso-mini .uso-cheio { --cor: var(--orange); }
+#uso[data-nivel="perigo"] .uso-mini .uso-cheio { --cor: var(--red); }
+#uso[data-nivel="atencao"] .uso-pct { color: var(--orange); }
+#uso[data-nivel="perigo"] .uso-pct { color: var(--red); font-weight: 600; }
+
+/* Duas colunas, sessão e semana, cada uma com duas linhas no meio da faixa de
+   30px. Fechadas não ocupam nada; o hover as abre para a direita. */
+.uso-detalhe {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-width 220ms ease, opacity 160ms ease, margin 220ms ease;
+  font-size: 10px;
+  line-height: 12px;
+}
+
+#uso:hover .uso-detalhe {
+  max-width: 640px;
+  opacity: 1;
+  margin-left: 6px;
+}
+
+.uso-coluna {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.uso-coluna + .uso-coluna {
+  padding-left: 14px;
+  border-left: 1px solid var(--bg-lighter);
+}
+
+.uso-titulo {
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.uso-linhas {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.uso-linha {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Os rótulos dizem o que a barra conta ("Tempo restante", "Tokens
+   disponíveis"): largura fixa para as barras das duas linhas alinharem. */
+.uso-rotulo {
+  width: 92px;
+}
+
+.uso-trilho {
+  width: 72px;
+  height: 5px;
+  border-radius: 2px;
+  background: var(--bg-lighter);
+  overflow: hidden;
+}
+
+/* O tempo é ciano, o uso é roxo (ou a cor do ritmo). A cor vai em `--cor`
+   para a barrinha de dentro sair dela, só que mais clara. */
+.uso-cheio {
+  --cor: var(--purple);
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 2px;
+  position: relative;
+  background-color: var(--cor);
+  transition: width 900ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* Como o ponteiro que gira dentro do círculo: uma barrinha dentro da barra,
+   alguns tons mais clara que ela, que sai da ponta e anda até o começo
+   encolhendo — o sentido em que a barra diminui. Quem a anima é o
+   `escoarUso` (src/main.ts), junto com o brilho do círculo. */
+.uso-ponteiro {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 10px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--cor), white 50%);
+  opacity: 0;
+}
+
+/* Um ciano mais fechado que o do tema: no claro a barrinha que anda sumia. */
+.uso-tempo .uso-cheio {
+  --cor: #3a9fb5;
+}
+
+.uso-linha[data-nivel="atencao"] .uso-cheio { --cor: var(--orange); }
+.uso-linha[data-nivel="perigo"] .uso-cheio { --cor: var(--red); }
+.uso-linha[data-nivel="atencao"] .uso-num { color: var(--orange); }
+.uso-linha[data-nivel="perigo"] .uso-num { color: var(--red); }
+
+.uso-num {
+  width: 34px;
+  color: var(--fg-dim);
+}
+
 /* ---------- a rádio do rodapé ---------- */
 
 /* Do outro lado da mesma faixa. O `margin-left: auto` é o que a encosta na
@@ -1323,4 +1618,1109 @@ body {
   font: 11px/16px -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
   color: var(--fg);
   white-space: nowrap;
+}
+
+/* A caixa de pergunta (o ⌘Q, os hooks). Estreita: é uma frase e dois botões. */
+.pergunta-caixa {
+  width: 400px;
+  gap: 10px;
+  padding: 16px;
+}
+
+.pergunta-texto {
+  margin: 0;
+}
+
+.pergunta-botoes {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.pergunta-btn {
+  padding: 5px 12px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-lighter);
+  border: 1px solid var(--selection);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.pergunta-btn kbd {
+  margin-left: 6px;
+  font: inherit;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.pergunta-sim {
+  color: var(--bg-darker);
+  background: var(--purple);
+  border-color: var(--purple);
+  font-weight: 600;
+}
+
+/* O anel diz qual dos dois o espaço e o ↩ vão apertar. */
+.pergunta-btn:focus {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+
+.pergunta-btn[hidden] {
+  display: none;
+}
+
+
+/* ---------- os seus prompts, destacados no terminal ---------- */
+
+/* A decoração que o xterm põe sobre cada linha que você mandou pro Claude. Fica
+   por cima do texto, então é um véu ralo e uma barra na margem — o bastante
+   para o olho achar as suas linhas na rolagem sem apagar o que está escrito. O
+   clique atravessa: selecionar o texto de baixo continua funcionando. */
+.xterm .xterm-decoration.prompt-marca {
+  box-sizing: border-box;
+  border-left: 2px solid var(--pink);
+  background: rgba(255, 121, 198, 0.13);
+  pointer-events: none;
+}
+
+
+/* ---------- modo chat ---------- */
+
+/* O chat cobre o terminal sem tirá-lo do lugar: o xterm continua medindo a
+   mesma área por baixo. */
+.folha-termo {
+  position: relative;
+}
+
+.chat {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  font: 13px/1.55 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  color: var(--fg);
+  /* O que muda aqui dentro não refaz o layout do resto do app, e vice-versa. */
+  contain: strict;
+}
+
+/* Fora da área visível a fala não é desenhada nem medida: mudar a largura do
+   painel (dividir, maximizar) custa o que está na tela, e não a conversa toda.
+   O tamanho de reserva é um palpite até ela aparecer uma vez. */
+.chat-fala,
+.chat-ferramenta {
+  flex: none;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 60px;
+}
+
+.chat-ferramenta {
+  contain-intrinsic-size: auto 18px;
+}
+
+.chat-mais {
+  flex: none;
+  align-self: center;
+  padding: 4px 12px;
+  border: 1px solid var(--bg-lighter);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.chat-mais:hover {
+  background: var(--bg-light);
+  color: var(--fg);
+}
+
+.chat-mais[hidden] {
+  display: none;
+}
+
+.chat[hidden],
+.chat-aviso[hidden] {
+  display: none;
+}
+
+.chat-lista {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.chat-fala {
+  max-width: min(100%, 860px);
+  overflow-wrap: anywhere;
+}
+
+/* O seu balão: à direita e de outra cor, que é o que o terminal não dá. */
+.chat-voce {
+  align-self: flex-end;
+  max-width: min(82%, 720px);
+  padding: 8px 12px;
+  border-radius: 12px 12px 3px 12px;
+  background: var(--selection);
+  border-left: 2px solid var(--pink);
+  white-space: pre-wrap;
+}
+
+.chat-voce {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Um texto longo (um log colado) nasce recolhido em poucas linhas, com um
+   esmaecido embaixo dizendo que tem mais. */
+.chat-recolhivel.recolhida .chat-recolhivel-corpo {
+  max-height: 8lh;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 60%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent);
+}
+
+.chat-recolhivel-botao {
+  display: block;
+  margin: 6px 0 0 auto;
+  padding: 2px 10px;
+  border: 1px solid var(--bg-lighter);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-recolhivel-botao:hover {
+  background: var(--bg-light);
+  color: var(--fg);
+}
+
+/* Aberto, o "Recolher" flutua no rodapé da lista enquanto o texto passa por
+   ela: dá para fechar no meio, sem rolar até o fim. */
+.chat-recolhivel:not(.recolhida) > .chat-recolhivel-botao {
+  position: sticky;
+  bottom: 8px;
+  z-index: 1;
+  background: var(--bg-dark);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.chat-recolhivel:not(.recolhida) > .chat-recolhivel-botao:hover {
+  background: var(--bg-light);
+}
+
+/* O que você colou: numa caixa à parte, em fonte de terminal, que é o que
+   costuma ser (um log, uma saída de comando). */
+.chat-colado {
+  padding: 6px 10px 8px;
+  border-radius: 8px;
+  background: var(--bg-dark);
+  font: 12px/1.5 "MesloLGS NF", Menlo, monospace;
+}
+
+.chat-colado-titulo {
+  margin-bottom: 4px;
+  color: var(--comment);
+  font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+}
+
+.chat-imagem {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+  align-self: flex-start;
+  border-radius: 6px;
+  cursor: zoom-in;
+}
+
+.chat-imagem-ampliada {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(0 0 0 / 0.8);
+  cursor: zoom-out;
+}
+
+.chat-imagem-ampliada img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+}
+
+.chat-claude > :first-child {
+  margin-top: 0;
+}
+
+.chat-claude > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-claude p,
+.chat-claude ul,
+.chat-claude ol,
+.chat-claude pre,
+.chat-claude table {
+  margin: 0 0 8px;
+}
+
+.chat-claude h3,
+.chat-claude h4,
+.chat-claude h5,
+.chat-claude h6 {
+  margin: 14px 0 6px;
+  font-size: 13px;
+  color: var(--purple);
+}
+
+.chat-claude h3 {
+  font-size: 15px;
+}
+
+.chat-claude ul,
+.chat-claude ol {
+  padding-left: 22px;
+}
+
+.chat-claude code,
+.chat-claude pre {
+  font: 12px/1.5 "MesloLGS NF", Menlo, monospace;
+}
+
+.chat-claude code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--bg-light);
+  color: var(--cyan);
+}
+
+.chat-claude pre {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg-dark);
+  overflow-x: auto;
+}
+
+.chat-claude pre code {
+  padding: 0;
+  background: none;
+  color: var(--fg);
+}
+
+.chat-claude a {
+  color: var(--cyan);
+}
+
+.chat-claude table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+.chat-claude th,
+.chat-claude td {
+  padding: 4px 10px;
+  border: 1px solid var(--bg-lighter);
+  text-align: left;
+  vertical-align: top;
+}
+
+.chat-claude th {
+  background: var(--bg-dark);
+}
+
+/* O que o Claude fez entre uma fala e outra: uma linha apagada por ferramenta,
+   que cabe de relance e não disputa com a conversa. */
+.chat-ferramenta {
+  display: flex;
+  gap: 1ch;
+  margin: -6px 0;
+  white-space: nowrap;
+  font: 11px/1.6 "MesloLGS NF", Menlo, monospace;
+  color: var(--comment);
+}
+
+.chat-ferramenta-resumo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* O diff logo abaixo da ferramenta que o fez. Num painel largo ele não
+   atravessa a tela: fica do tamanho de um trecho de código. */
+.chat-diffs {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(100%, 1000px);
+  margin: -2px 0 2px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+}
+
+/* Lado a lado são duas colunas de código: os 1000px do unificado as espremiam. */
+.chat-diffs:has(.lado-a-lado) {
+  width: 90%;
+}
+
+.chat-diff {
+  padding-bottom: 4px;
+  border-radius: 6px;
+  background: var(--bg-dark);
+  /* clip, não hidden: hidden faria da caixa um contêiner de rolagem e o
+     "Recolher" flutuante (sticky) grudaria nela em vez de na lista. */
+  overflow: clip;
+}
+
+.chat-diff-resumo {
+  padding: 4px 10px;
+  color: var(--comment);
+  font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+}
+
+.chat-diff-linhas {
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  font: 12px/1.5 "MesloLGS NF", Menlo, monospace;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.chat-diff-linha {
+  padding: 0 10px;
+  white-space: pre;
+  color: var(--fg);
+}
+
+/* As cores do diff do terminal, mais apagadas: é para ler, não para gritar. */
+.chat-diff-linha.menos {
+  background: color-mix(in srgb, var(--red) 22%, transparent);
+}
+
+.chat-diff-linha.mais {
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+}
+
+.chat-diff-linha.pulo {
+  color: var(--comment);
+}
+
+.chat-ferramenta-nome {
+  flex: none;
+  color: var(--purple);
+  opacity: 0.8;
+}
+
+.chat-nota {
+  align-self: center;
+  font-size: 11px;
+  color: var(--comment);
+}
+
+/* O Claude parou para perguntar algo, e a pergunta está no terminal. */
+.chat-aviso {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 12px 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--orange);
+  border-radius: 8px;
+  color: var(--orange);
+  font-size: 12px;
+}
+
+.chat-aviso-texto {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-aviso-sim,
+.chat-aviso-nao,
+.chat-aviso-ver {
+  flex: none;
+  padding: 3px 9px;
+  border: none;
+  border-radius: 5px;
+  background: var(--orange);
+  color: var(--bg-darker);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Permitir é a ação: cheia, na cor do aviso. Negar e ir ao terminal ficam
+   só no contorno. */
+.chat-aviso-nao,
+.chat-aviso-sim:not([hidden]) ~ .chat-aviso-ver {
+  background: transparent;
+  color: var(--orange);
+  box-shadow: inset 0 0 0 1px var(--orange);
+}
+
+.chat-aviso-sim[hidden],
+.chat-aviso-nao[hidden] {
+  display: none;
+}
+
+.chat-anexos {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 12px 6px;
+}
+
+.chat-anexos[hidden] {
+  display: none;
+}
+
+.chat-anexo {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border: 1px solid var(--bg-lighter);
+  border-radius: 8px;
+  cursor: zoom-in;
+}
+
+/* A sua mensagem já na tela, antes de o Claude a gravar. */
+.chat-voce.pendente {
+  opacity: 0.55;
+}
+
+/* O Claude está no turno dele: a linha que faz as vezes do asterisco girando
+   do terminal. */
+.chat-pensando {
+  flex: none;
+  margin: 0 16px 6px;
+  color: var(--comment);
+  font-size: 12px;
+  animation: chat-pensando 1.6s ease-in-out infinite;
+}
+
+.chat-pensando[hidden] {
+  display: none;
+}
+
+@keyframes chat-pensando {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* A pergunta do Claude, respondida daqui: no lugar da faixa de aviso, com a
+   mesma cor dela. Várias perguntas rolam dentro do cartão, sem empurrar o
+   campo para fora da tela. */
+.chat-pergunta {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-height: 55%;
+  overflow-y: auto;
+  margin: 0 12px 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--orange);
+  border-radius: 10px;
+  background: var(--bg-dark);
+}
+
+.chat-pergunta[hidden],
+.chat-pergunta-outra[hidden],
+.chat-pergunta-previa[hidden] {
+  display: none;
+}
+
+/* As perguntas do passo a passo: a de agora acesa, as respondidas com ✓. */
+.chat-pergunta-abas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chat-pergunta-aba {
+  padding: 2px 9px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--comment);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.chat-pergunta-aba:hover {
+  color: var(--fg);
+}
+
+.chat-pergunta-aba[aria-current="true"] {
+  background: color-mix(in srgb, var(--orange) 20%, transparent);
+  color: var(--orange);
+  font-weight: 600;
+}
+
+.chat-pergunta-dica {
+  color: var(--comment);
+  font-weight: 400;
+  font-size: 11px;
+}
+
+.chat-pergunta-etiqueta {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--orange) 20%, transparent);
+  color: var(--orange);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chat-pergunta-texto {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.chat-pergunta-opcoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+
+.chat-opcao {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--bg-lighter);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-opcao:hover {
+  background: var(--bg-light);
+}
+
+.chat-opcao[aria-pressed="true"] {
+  border-color: var(--orange);
+  background: color-mix(in srgb, var(--orange) 14%, transparent);
+}
+
+.chat-opcao-rotulo {
+  font-weight: 600;
+}
+
+.chat-opcao-descricao {
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+
+.chat-pergunta-outra {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--bg-lighter);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+
+.chat-pergunta-outra:focus {
+  border-color: var(--orange);
+}
+
+.chat-pergunta-previa {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: var(--bg);
+  font: 12px/1.5 "MesloLGS NF", Menlo, monospace;
+}
+
+.chat-pergunta-acoes {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  align-self: stretch;
+}
+
+.chat-pergunta-responder,
+.chat-pergunta-terminal {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-pergunta-responder {
+  background: var(--orange);
+  color: var(--bg-darker);
+}
+
+.chat-pergunta-responder:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.chat-pergunta-terminal {
+  background: transparent;
+  color: var(--orange);
+  box-shadow: inset 0 0 0 1px var(--orange);
+}
+
+.chat-campo {
+  flex: none;
+  margin: 0 12px 12px;
+  padding: 9px 12px;
+  box-sizing: border-box;
+  border: 1px solid var(--bg-lighter);
+  border-radius: 10px;
+  background: var(--bg-dark);
+  color: var(--fg);
+  font: inherit;
+  resize: none;
+  outline: none;
+}
+
+.chat-campo:focus {
+  border-color: var(--comment);
+}
+
+.chat-campo::placeholder {
+  color: var(--comment);
+}
+
+.tarefa-chat.ligado {
+  color: var(--pink);
+}
+
+.tarefa-visor.ligado {
+  color: var(--cyan);
+}
+
+/* ---------- o visor: um arquivo por cima do terminal ---------- */
+
+/* Como o chat, mas por cima dele: aberto de dentro do chat (⌘-clique numa
+   referência), fechar volta para a conversa. */
+.visor {
+  position: absolute;
+  inset: 0;
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.55 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  contain: strict;
+}
+
+.visor[hidden] {
+  display: none;
+}
+
+/* Dividido: o visor sai de cima do terminal e toma uma fatia do painel. O
+   terminal fica com o resto, e o FitAddon o mede no tamanho novo. */
+/* Empilhado, o arquivo vai em cima e o terminal (ou o chat) embaixo: o
+   reverso da ordem no DOM, que é tela, alça, visor. */
+.folha-termo.visor-abaixo {
+  flex-direction: column-reverse;
+}
+
+.visor-lado > .visor,
+.visor-abaixo > .visor {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  flex: 0 0 var(--visor-fatia, 50%);
+  min-width: 0;
+  min-height: 0;
+}
+
+/* A borda entre os dois, que se arrasta. Mais larga que a linha que se vê. */
+.visor-alca {
+  display: none;
+  flex: none;
+  background: var(--bg-lighter);
+  background-clip: content-box;
+  z-index: 2;
+}
+
+.visor-lado > .visor-alca {
+  display: block;
+  width: 1px;
+  margin: 0 -3px;
+  padding: 0 3px;
+  cursor: col-resize;
+}
+
+.visor-abaixo > .visor-alca {
+  display: block;
+  height: 1px;
+  margin: -3px 0;
+  padding: 3px 0;
+  cursor: row-resize;
+}
+
+.visor-alca:hover,
+.visor-alca.arrastando {
+  background-color: var(--purple);
+}
+
+.visor-cabeca {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--bg-lighter);
+  background: var(--bg-dark);
+}
+
+.visor-caminho {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 4px;
+  overflow: hidden;
+  /* O fim do caminho é o que importa: o nome e a linha. */
+  direction: rtl;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 12px/1.4 "MesloLGS NF", Menlo, monospace;
+  color: var(--fg-dim);
+}
+
+.visor-ref {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--bg-lighter);
+  color: var(--orange);
+  font: 11px/1.5 "MesloLGS NF", Menlo, monospace;
+}
+
+.visor-ref[hidden] {
+  display: none;
+}
+
+/* A altura da linha igual à do botão, e não `line-height: 1` com flex: com a
+   fonte do sistema a caixa do texto tem mais folga embaixo que em cima, e o
+   rótulo subia. */
+.visor-btn {
+  flex: none;
+  box-sizing: border-box;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 8px;
+  font-family: inherit;
+  line-height: 24px;
+  text-align: center;
+  white-space: nowrap;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.visor-btn-texto {
+  font-size: 12px;
+}
+
+.visor-btn-icone {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+}
+
+.visor-btn[hidden] {
+  display: none;
+}
+
+.visor-btn:hover:not(:disabled) {
+  background: var(--bg-lighter);
+  color: var(--fg);
+}
+
+.visor-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.visor-corpo {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+}
+
+.visor-codigo {
+  min-width: max-content;
+  padding: 6px 0 40vh;
+  font: 12px/1.55 "MesloLGS NF", Menlo, monospace;
+}
+
+.visor-linha {
+  display: flex;
+  white-space: pre;
+}
+
+.visor-linha.marcada {
+  background: rgba(241, 250, 140, 0.12);
+  box-shadow: inset 3px 0 0 var(--yellow);
+}
+
+.visor-num {
+  flex: none;
+  box-sizing: content-box;
+  width: calc(var(--digitos, 3) * 1ch);
+  padding: 0 14px 0 12px;
+  text-align: right;
+  color: var(--comment);
+  user-select: none;
+}
+
+.visor-linha.marcada .visor-num {
+  color: var(--yellow);
+}
+
+.visor-texto {
+  padding-right: 24px;
+  --syntax-comment: var(--comment);
+}
+
+.visor-md {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 18px 24px 40vh;
+}
+
+.visor-md {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.visor-md h1,
+.visor-md h2,
+.visor-md h3 {
+  margin: 22px 0 10px;
+  color: var(--purple);
+}
+
+.visor-md h1 {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--bg-lighter);
+  font-size: 22px;
+}
+
+.visor-md h2 {
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--bg-lighter);
+  font-size: 18px;
+}
+
+.visor-md h3 {
+  font-size: 15px;
+}
+
+.visor-erro {
+  padding: 24px;
+  color: var(--red);
+}
+
+/* A lista de /comandos: acima do campo, do tamanho dele, e com teto — são
+   dezenas, e ela não pode empurrar a conversa para fora da tela. */
+.chat-comandos {
+  flex: none;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0 12px 6px;
+  padding: 4px;
+  border: 1px solid var(--bg-lighter);
+  border-radius: 10px;
+  background: var(--bg-dark);
+  font-size: 12px;
+}
+
+.chat-comandos[hidden] {
+  display: none;
+}
+
+.chat-comando {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.chat-comando.escolhido,
+.chat-comando:hover {
+  background: var(--selection);
+}
+
+.chat-comando-nome {
+  flex: none;
+  font: 12px/1.5 "MesloLGS NF", Menlo, monospace;
+  color: var(--purple);
+}
+
+.chat-comando-descricao {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-dim);
+}
+
+/* Antes da primeira fala: o Claude acabou de abrir, ou a conversa é nova. */
+.chat-lista:not(:has(.chat-fala, .chat-ferramenta))::before {
+  content: "Nenhuma mensagem ainda. Escreva abaixo para começar.";
+  margin: auto;
+  font-size: 12px;
+  color: var(--comment);
+}
+
+/* A lista do /resume usa a mesma caixa dos comandos: uma linha de instrução
+   em cima, e em cada sessão o título à esquerda e a idade à direita. */
+.chat-comandos-cabeca {
+  padding: 4px 8px 6px;
+  font-size: 11px;
+  color: var(--comment);
+}
+
+.chat-sessao-titulo {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-sessao-quando {
+  flex: none;
+  font-size: 11px;
+  color: var(--comment);
+}
+
+.chat-diff-arquivo {
+  color: var(--fg-dim);
+  font-weight: 600;
+}
+
+/* O botão da prévia, dentro da caixa do diff, não encosta na borda. */
+.chat-diff .chat-recolhivel-botao {
+  margin-right: 8px;
+}
+
+/* Unificado ou lado a lado: o ícone fica no canto do cabeçalho do diff. */
+.chat-diff-resumo:has(.chat-diff-modo) {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-diff-modo {
+  display: inline-flex;
+  margin-left: auto;
+  padding: 2px 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--comment);
+  cursor: pointer;
+}
+
+.chat-diff-modo:hover {
+  background: var(--bg-lighter);
+  color: var(--fg);
+}
+
+/* Duas colunas, antes e depois. Cada metade quebra a própria linha em vez de
+   rolar: rolagem horizontal só numa coluna desalinharia as duas. */
+.chat-diff-linhas.lado-a-lado {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  overflow-x: hidden;
+}
+
+.lado-a-lado .chat-diff-linha {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.lado-a-lado .chat-diff-linha:nth-child(odd of :not(.inteira)) {
+  border-right: 1px solid var(--bg-lighter);
+}
+
+.lado-a-lado .chat-diff-linha.inteira {
+  grid-column: 1 / -1;
+}
+
+.lado-a-lado .chat-diff-linha.vazia {
+  background: color-mix(in srgb, var(--comment) 8%, transparent);
+}
+
+/* O contexto da sessão passou do limite vermelho (Preferências, ⌘,): o painel
+   ganha uma borda vermelha pulsando, a hora de compactar. No ::after, que é a
+   borda do cartão e passa por cima do terminal; o `outline` fica livre para o
+   laranja do painel que espera, e os dois valem ao mesmo tempo. */
+.aba > .folha.contexto-cheio::after,
+.aba .divisao > .folha.contexto-cheio::after {
+  border: 2px solid var(--red);
+  box-shadow: inset 0 0 14px #ff555559;
+  animation: contexto-pulso 1.4s ease-in-out infinite;
+}
+
+@keyframes contexto-pulso {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
