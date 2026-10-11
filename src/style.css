@@ -114,6 +114,9 @@ body {
   background: var(--bg);
   box-shadow: 0 1px 4px #000000a6;
   --borda: var(--bg-lighter);
+  /* The card is its own stacking context: what goes up inside it (the chat, the
+     viewer, xterm's layers) stays below its border, and nothing escapes outside. */
+  isolation: isolate;
 }
 
 /* The card's border, in a pseudo-element and not a `box-shadow: inset`: the inset
@@ -133,6 +136,9 @@ body {
      on it instead of reaching xterm. */
   pointer-events: none;
   transition: border-color var(--tempo) ease;
+  /* Above everything in the card: split, the terminal's side covered the border
+     and only the viewer's half pulsed. */
+  z-index: 30;
 }
 
 /* Out of focus the panel dims — but only when there is another panel to
@@ -471,15 +477,22 @@ body {
 .tab-fechar {
   flex: none;
   margin-left: auto;
-  width: 15px;
-  height: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
   border-radius: 4px;
-  line-height: 15px;
-  text-align: center;
   color: var(--comment);
   /* Invisible until the mouse reaches the tab: an X on every tab all the time
      competes with the title for attention. */
   opacity: 0;
+}
+
+/* The drawing doesn't take the click: the chip asks whether the target is ✕ itself. */
+.tab-fechar svg {
+  display: block;
+  pointer-events: none;
 }
 
 .tab:hover .tab-fechar,
@@ -856,6 +869,11 @@ body {
 .tarefa-maximizar.ligado {
   background: var(--bg-light);
   color: var(--fg);
+}
+
+/* Closing kills the shell: the ✕ turns red under the mouse. */
+.tarefa-fechar:hover:not(:disabled) {
+  color: var(--red);
 }
 
 .tarefa-acao {
@@ -1456,6 +1474,7 @@ body {
   box-shadow: 0 12px 40px #000a;
   font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
   color: var(--fg-dim);
+  outline: none;
 }
 
 .lofi-cabeca {
@@ -1464,8 +1483,22 @@ body {
   justify-content: space-between;
 }
 
+/* The dialogs' ✕, the same as the differ's Preferences (.icon-btn there). */
+.lofi-btn.lofi-fechar {
+  width: 24px;
+  height: 24px;
+  color: var(--fg-dim);
+}
+
+.lofi-btn.lofi-fechar:hover:not(:disabled) {
+  background: var(--selection);
+  color: var(--fg);
+}
+
 .lofi-cabeca-titulo {
   color: var(--fg);
+  /* The same title as the differ's Preferences. */
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -1646,6 +1679,18 @@ body {
   border: 1px solid var(--selection);
   border-radius: 6px;
   cursor: pointer;
+}
+
+/* "Discard": apart from the other two, on the left, and red — the answer that loses something. */
+.pergunta-alternativa {
+  margin-right: auto;
+  color: var(--red);
+  background: rgba(255, 85, 85, 0.12);
+  border-color: rgba(255, 85, 85, 0.45);
+}
+
+.pergunta-alternativa:hover {
+  background: rgba(255, 85, 85, 0.22);
 }
 
 .pergunta-btn kbd {
@@ -1920,6 +1965,44 @@ body {
   border-radius: 8px;
   background: var(--bg-dark);
   overflow-x: auto;
+}
+
+/* The block and its copy button, which shows when the mouse is over it. */
+.codigo-bloco {
+  position: relative;
+}
+
+.copiar-codigo {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--bg-lighter);
+  border-radius: 6px;
+  background: var(--bg-light);
+  color: var(--fg-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.codigo-bloco:hover .copiar-codigo,
+.copiar-codigo.copiado {
+  opacity: 1;
+}
+
+.copiar-codigo:hover {
+  background: var(--bg-lighter);
+  color: var(--fg);
+}
+
+.copiar-codigo.copiado {
+  color: var(--green);
 }
 
 .chat-claude pre code {
@@ -2341,6 +2424,166 @@ body {
   color: var(--cyan);
 }
 
+.tarefa-explorar.ligado {
+  color: var(--purple);
+}
+
+/* The floating preferences (⌘,): a transparent page over the whole window, above
+   everything — the dimmed backdrop and the box are drawn in there. */
+.prefs-quadro {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color-scheme: dark;
+  /* Invisible until the page is drawn (.pronta): loading, WebKit paints it white.
+     Transparent, not `visibility: hidden` — hidden, the first field couldn't take the cursor
+     when the page mounts. */
+  opacity: 0;
+  pointer-events: none;
+}
+
+.prefs-quadro.pronta {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0.15s ease;
+}
+
+/* ---------- the file explorer: a drawer from the left, over the panel ---------- */
+
+/* It slides over the terminal, the chat and the viewer without pushing them: absolute,
+   and hidden off the edge when closed (`visibility` waits for the slide to finish, and keeps
+   the closed tree out of the keyboard's reach). */
+.explorador {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 25;
+  width: min(300px, 85%);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-dark);
+  border-right: 1px solid var(--bg-lighter);
+  color: var(--fg);
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  transform: translateX(-100%);
+  visibility: hidden;
+  transition: transform 0.2s ease, visibility 0s linear 0.2s, box-shadow 0.2s ease;
+}
+
+.explorador.aberto {
+  transform: none;
+  visibility: visible;
+  box-shadow: 6px 0 18px #0009;
+  transition: transform 0.2s ease, visibility 0s, box-shadow 0.2s ease;
+}
+
+/* Pinned: no longer over the panel, but beside what is in it. The drawer stays put
+   on the left, and the panel's content steps aside by its width. */
+.explorador.aberto.fixo {
+  width: var(--explorador-fixo);
+  box-shadow: none;
+  transition: none;
+}
+
+.folha-termo {
+  --explorador-fixo: 260px;
+}
+
+.folha-termo.explorador-fixo {
+  padding-left: var(--explorador-fixo);
+}
+
+/* Over the terminal (no split), the viewer is absolute and would cover the tree. */
+.folha-termo.explorador-fixo:not(.visor-lado):not(.visor-abaixo) > .visor {
+  left: var(--explorador-fixo);
+}
+
+.explorador-alfinete.ligado {
+  color: var(--purple);
+}
+
+.explorador-cabeca {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 6px 6px 6px 12px;
+}
+
+.explorador-titulo {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+
+.explorador-arvore {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 12px;
+  outline: none;
+  user-select: none;
+}
+
+.explorador-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding-right: 8px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.explorador-item:hover {
+  background: var(--bg-light);
+}
+
+.explorador-item.atual {
+  background: var(--selection);
+}
+
+/* Folders: a chevron that turns when open. Files: the mark of their kind. */
+.explorador-marca {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  font: 700 9px/1 "MesloLGS NF", Menlo, monospace;
+}
+
+.explorador-item[data-pasta] .explorador-marca {
+  font: 15px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+  color: var(--fg-dim);
+  transition: transform 0.12s ease;
+}
+
+.explorador-item.aberta .explorador-marca {
+  transform: rotate(90deg);
+}
+
+.explorador-nome {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.explorador-aviso {
+  height: 22px;
+  line-height: 22px;
+  color: var(--comment);
+  font-style: italic;
+}
+
 /* ---------- the viewer: a file over the terminal ---------- */
 
 /* Like the chat, but over it: opened from inside the chat (⌘-click on a
@@ -2390,7 +2633,7 @@ body {
 
 .visor-lado > .visor-alca {
   display: block;
-  width: 1px;
+  width: 4px;
   margin: 0 -3px;
   padding: 0 3px;
   cursor: col-resize;
@@ -2398,7 +2641,7 @@ body {
 
 .visor-abaixo > .visor-alca {
   display: block;
-  height: 1px;
+  height: 4px;
   margin: -3px 0;
   padding: 3px 0;
   cursor: row-resize;
@@ -2493,11 +2736,266 @@ body {
   cursor: default;
 }
 
+/* The open files, one tab each, between the header and the body. Too many scroll
+   sideways, without a bar. */
+.visor-abas {
+  flex: none;
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--bg-lighter);
+  background: var(--bg-dark);
+  font-size: 12px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.visor-abas::-webkit-scrollbar {
+  display: none;
+}
+
+.visor-aba {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  height: 28px;
+  padding: 0 5px 0 11px;
+  border-right: 1px solid var(--bg-lighter);
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+
+.visor-aba:hover {
+  background: var(--bg-light);
+}
+
+/* The one on screen: the body's background, so it joins it, and a purple line on top. */
+.visor-aba.atual {
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: inset 0 2px 0 var(--purple);
+}
+
+.visor-aba-nome {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visor-aba-ref {
+  flex: none;
+  color: var(--orange);
+  font: 10px/1 "MesloLGS NF", Menlo, monospace;
+}
+
+.visor-aba-fechar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--comment);
+  opacity: 0;
+}
+
+.visor-aba-fechar svg {
+  display: block;
+  pointer-events: none;
+}
+
+.visor-aba:hover .visor-aba-fechar,
+.visor-aba.atual .visor-aba-fechar {
+  opacity: 1;
+}
+
+.visor-aba-fechar:hover {
+  background: var(--bg-lighter);
+  color: var(--fg);
+}
+
+/* Unsaved changes: a dot in place of ✕, always visible; under the mouse ✕ comes back. */
+.visor-aba.suja .visor-aba-fechar {
+  opacity: 1;
+}
+
+.visor-aba.suja .visor-aba-fechar::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--purple);
+}
+
+.visor-aba.suja .visor-aba-fechar svg {
+  display: none;
+}
+
+.visor-aba.suja .visor-aba-fechar:hover::before {
+  display: none;
+}
+
+.visor-aba.suja .visor-aba-fechar:hover svg {
+  display: block;
+}
+
 .visor-corpo {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   outline: none;
+}
+
+/* An image, fitted to the body with its size below; `.real` (a click) shows it at
+   actual size, scrolling when it doesn't fit. */
+.visor-imagem {
+  box-sizing: border-box;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+}
+
+.visor-imagem img {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-width: 100%;
+  object-fit: contain;
+  background: repeating-conic-gradient(var(--bg-light) 0 25%, var(--bg-dark) 0 50%) 0 0 / 16px 16px;
+  cursor: zoom-in;
+}
+
+.visor-imagem.real {
+  height: auto;
+  min-height: 100%;
+  align-items: flex-start;
+}
+
+.visor-imagem.real img {
+  max-width: none;
+  cursor: zoom-out;
+}
+
+.visor-imagem-tamanho {
+  flex: none;
+  font: 11px/1.4 "MesloLGS NF", Menlo, monospace;
+  color: var(--comment);
+}
+
+/* Edit mode: the numbers in a margin of their own, and the text box over a colored
+   copy of its lines. The box's text is transparent; what is read is the copy below,
+   which follows the scroll. Both share font, padding and tab size to the pixel. */
+.visor-editor {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+  font: 12px/1.55 "MesloLGS NF", Menlo, monospace;
+}
+
+.visor-editor-margem {
+  flex: none;
+  overflow: hidden;
+}
+
+.visor-editor-numeros {
+  box-sizing: content-box;
+  width: calc(var(--digitos, 3) * 1ch);
+  margin: 0;
+  padding: 6px 14px 40vh 12px;
+  font: inherit;
+  text-align: right;
+  color: var(--comment);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.visor-editor-campo {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.visor-editor-cores,
+.visor-edicao {
+  margin: 0;
+  padding: 6px 12px 40vh 0;
+  font: inherit;
+  white-space: pre;
+  tab-size: 4;
+}
+
+.visor-editor-cores {
+  position: absolute;
+  top: 0;
+  left: 0;
+  min-width: 100%;
+  box-sizing: border-box;
+  color: var(--fg);
+  pointer-events: none;
+}
+
+.visor-edicao {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: auto;
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--purple);
+}
+
+.visor-edicao::selection {
+  background: rgba(189, 147, 249, 0.3);
+}
+
+/* Reading or editing: the eye and the pencil in one pill, the current one lit. */
+.visor-modos {
+  flex: none;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--bg-darker);
+}
+
+.visor-modos[hidden] {
+  display: none;
+}
+
+.visor-modos .visor-btn {
+  height: 20px;
+  min-width: 22px;
+}
+
+.visor-modos .visor-btn.ligado {
+  background: var(--bg-lighter);
+  color: var(--fg);
+}
+
+.visor-modos .visor-btn:last-child.ligado {
+  color: var(--purple);
+}
+
+/* Editing shows on the header: a purple line under it. */
+.visor.editando .visor-cabeca {
+  border-bottom-color: var(--purple);
+}
+
+.visor-btn-salvar:not(:disabled) {
+  color: var(--purple);
 }
 
 .visor-codigo {
@@ -2523,6 +3021,7 @@ body {
   padding: 0 14px 0 12px;
   text-align: right;
   color: var(--comment);
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -2823,6 +3322,12 @@ body {
 .aba .divisao > .folha.contexto-cheio::after {
   border: 2px solid var(--red);
   box-shadow: inset 0 0 14px #ff555559;
+  animation: contexto-pulso 1.4s ease-in-out infinite;
+}
+
+/* The split's border is part of the panel: it pulses along with it. */
+.folha.contexto-cheio .visor-alca {
+  background-color: var(--red);
   animation: contexto-pulso 1.4s ease-in-out infinite;
 }
 

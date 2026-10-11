@@ -102,3 +102,11 @@ export function linhaLogica(
 
 /// The file is markdown: it opens rendered.
 export const ehMarkdown = (caminho: string) => /\.(md|markdown|mdx)$/i.test(caminho);
+
+/// An image the viewer shows as a picture, read as bytes. SVG isn't one of them: it is
+/// text, comes as lines and is drawn from them.
+export const ehImagem = (caminho: string) => /\.(png|jpe?g|gif|webp|bmp|ico|avif|tiff?|heic)$/i.test(caminho);
+export const ehSvg = (caminho: string) => /\.svg$/i.test(caminho);
+
+/// What has a drawn view besides the source, and opens drawn: .md and .svg.
+export const temRenderizado = (caminho: string) => ehMarkdown(caminho) || ehSvg(caminho);

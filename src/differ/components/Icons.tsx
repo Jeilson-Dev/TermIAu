@@ -7,7 +7,8 @@ const PATHS = {
   "chevron-right": <path d="M6 4l4 4-4 4" />,
   check: <path d="M3 8.5l3.2 3L13 4.5" />,
   plus: <path d="M8 3.5v9M3.5 8h9" />,
-  x: <path d="M4 4l8 8M12 4l-8 8" />,
+  // A "+" turned 45°: the same ✕ as the terminal's dialogs and panels.
+  x: <path d="M8 2.5v11M2.5 8h11" transform="rotate(45 8 8)" />,
   "arrow-right": <path d="M3 8h10M9.5 4.5L13 8l-3.5 3.5" />,
   "arrow-left": <path d="M13 8H3M6.5 4.5L3 8l3.5 3.5" />,
   folder: (

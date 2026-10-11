@@ -61,6 +61,13 @@ body {
   overflow: hidden;
 }
 
+/* The floating preferences: the page is only the dimmed backdrop and the box, with the
+   tab on screen showing through. */
+.so-prefs,
+.so-prefs body {
+  background: transparent;
+}
+
 button,
 input,
 select,
@@ -2157,11 +2164,14 @@ tr.gap {
 }
 
 .prefs {
+  display: flex;
+  flex-direction: column;
   width: min(460px, calc(100vw - 32px));
-  /* Taller than the window, it scrolls inside: the backdrop starts 14vh from the top. */
+  /* Taller than the window, the fields scroll below the fixed header: the backdrop
+     starts 14vh from the top. */
   max-height: calc(86vh - 16px);
-  overflow-y: auto;
-  padding: 16px 18px 18px;
+  /* The same padding as the terminal's dialogs (the radio's, .lofi-caixa). */
+  padding: 12px;
   border: 1px solid var(--selection);
   border-radius: 10px;
   background: var(--bg-light);
@@ -2169,10 +2179,20 @@ tr.gap {
 }
 
 .prefs-topo {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 14px;
+}
+
+.prefs-corpo {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* Room for the fields' focus ring, which the scroll would otherwise clip at the edges. */
+  margin: 0 -4px;
+  padding: 0 4px;
 }
 
 .prefs-topo h2 {

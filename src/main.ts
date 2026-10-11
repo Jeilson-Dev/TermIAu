@@ -37,7 +37,10 @@ import {
 } from "./conversa";
 import {
   acharReferencias,
+  ehImagem,
   ehMarkdown,
+  ehSvg,
+  temRenderizado,
   linhaLogica,
   referenciaInteira,
   type LinhaDaTela,
@@ -151,6 +154,8 @@ type Folha = {
   /// The file shown in the panel, over the terminal and the chat. It exists
   /// after the first `termiau ver` or ⌘-click on a reference.
   visor?: Visor;
+  /// The file explorer, a drawer over the panel. It exists after the first time it opens.
+  explorador?: Explorador;
 };
 
 type SessaoClaude = {
@@ -579,7 +584,8 @@ async function novaAba(em?: string | null): Promise<Aba | undefined> {
     const ramo = criarRamo("tab-ramo");
     const fechar = document.createElement("span");
     fechar.className = "tab-fechar";
-    fechar.textContent = "✕";
+    // The "+" of the new tab, turned: the same stroke and size, where the "✕" glyph came out small.
+    fechar.innerHTML = ICONE_FECHAR_ABA;
     chip.append(sinal, rotulo, ramo.el, fechar);
     barra.appendChild(chip);
 
@@ -765,8 +771,7 @@ function criarPresa() {
 
 /// Lights up or dims the diff chip. A tab that can only show a blank screen
 /// doesn't open: while there is no repository, the chip stays dimmed and clicking
-/// it does nothing. ⌘, still gets in — the preferences live there, and don't
-/// depend on any repository.
+/// it does nothing.
 function habilitarPresa(raiz: string | null) {
   if (!presa) return;
   presa.repoAberto = !!raiz;
@@ -806,11 +811,28 @@ async function abrirDiff(folha: Folha) {
   if (cwd) recado({ termiauRepo: cwd });
 }
 
-/// ⌘, — the preferences live in the differ, which has what to configure and
-/// stores the file. Opening the tab along with it is part of the gesture.
+/// ⌘, — the preferences float over whatever tab is on screen. They are the differ's page
+/// on its own (`differ.html?prefs`), in an iframe over the whole window: their CSS is
+/// the differ's, and loose in this document it would reach the terminal (see `criarPresa`).
+/// The page says when it is drawn (`termiauPrefsPronta`) and closes itself by message
+/// (`termiauPrefsFechou`).
+let prefsQuadro: HTMLIFrameElement | undefined;
+
 function abrirPreferencias() {
-  abrirPresa(true);
-  recado({ termiauPrefs: true });
+  if (prefsQuadro) return prefsQuadro.contentWindow?.focus();
+  const q = document.createElement("iframe");
+  q.className = "prefs-quadro";
+  q.src = "/differ.html?prefs";
+  document.body.append(q);
+  prefsQuadro = q;
+}
+
+function fecharPreferencias() {
+  prefsQuadro?.remove();
+  prefsQuadro = undefined;
+  // The keyboard goes back where it was — a panel, or the diff tab.
+  if (noDiff) presa?.quadro.contentWindow?.focus();
+  else if (ativa?.foco) focar(ativa.foco);
 }
 
 function abrirPresa(forcar = false) {
@@ -1209,8 +1231,8 @@ function vizinho(folha: Folha, dir: "Left" | "Right" | "Up" | "Down"): Folha | u
 function irParaAba(delta: number) {
   // The pinned tab joins the ring like any other — it is first in the bar,
   // and ⌘⇧[ on the next tab must land on it. Dimmed, it stays out, unless
-  // it is the one on screen: ⌘, opens the preferences with no
-  // repository, and the cycle must be able to leave from there.
+  // it is the one on screen: a panel's diff button opens it before the
+  // repository loads, and the cycle must be able to leave from there.
   const dentro = presa && (presa.repoAberto || noDiff);
   const anel: (Aba | Presa)[] = dentro ? [presa as Presa, ...abas] : [...abas];
   const i = noDiff ? 0 : ativa ? anel.indexOf(ativa) : -1;
@@ -1879,7 +1901,8 @@ function limparAnexos(chat: Chat) {
 /// Who gets the panel's keyboard: the chat field, if it is the one on screen.
 function teclado(folha: Folha) {
   const v = folha.visor;
-  if (v?.aberto && (arranjoVisor === "sobre" || v.comTeclado)) v.corpo.focus({ preventScroll: true });
+  if (folha.explorador?.aberto && !folha.explorador.fixo) folha.explorador.arvore.focus({ preventScroll: true });
+  else if (v?.aberto && (arranjoVisor === "sobre" || v.comTeclado)) (v.edicao?.area ?? v.corpo).focus({ preventScroll: true });
   else if (folha.chat?.aberto) folha.chat.campo.focus();
   else folha.term.focus();
 }
@@ -2290,8 +2313,42 @@ function desenharFala(f: Fala): HTMLElement {
   const el = elemento("div", `chat-fala chat-${f.quem}`);
   // Your text goes as written; only Claude's answer is markdown.
   if (f.quem === "voce") desenharSeu(el, f.texto, f.imagens ?? []);
-  else el.innerHTML = markdown(f.texto);
+  else {
+    el.innerHTML = markdown(f.texto);
+    botoesDeCopiar(el);
+  }
   return el;
+}
+
+/// A copy button on each code block of rendered markdown — a Claude answer, a .md in
+/// the viewer. It copies the block as it is: the command ready to paste. In a frame
+/// around the block, not inside it: the block scrolls sideways, and the button would go along.
+function botoesDeCopiar(el: HTMLElement) {
+  for (const pre of el.querySelectorAll<HTMLPreElement>("pre:not(.mermaid)")) {
+    const moldura = elemento("div", "codigo-bloco");
+    const b = elemento("button", "copiar-codigo");
+    const voltar = () => {
+      b.innerHTML = ICONE_COPIAR;
+      b.title = T.copiarCodigo;
+      b.classList.remove("copiado");
+    };
+    voltar();
+    b.addEventListener("mousedown", (e) => e.preventDefault());
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      navigator.clipboard
+        .writeText(pre.querySelector("code")?.textContent ?? pre.textContent ?? "")
+        .then(() => {
+          b.innerHTML = ICONE_COPIADO;
+          b.title = T.codigoCopiado;
+          b.classList.add("copiado");
+          setTimeout(voltar, 1500);
+        })
+        .catch((err) => jlog(`copy: ${err}`));
+    });
+    pre.replaceWith(moldura);
+    moldura.append(pre, b);
+  }
 }
 
 /// How many diff lines go on screen. A `Write` of a whole file
@@ -2677,6 +2734,14 @@ type Visor = {
   avancar: HTMLButtonElement;
   modo: HTMLButtonElement;
   arranjo: HTMLButtonElement;
+  /// Reading or editing: the eye and the pencil, side by side, the current one lit.
+  modos: HTMLDivElement;
+  ler: HTMLButtonElement;
+  editar: HTMLButtonElement;
+  salvar: HTMLButtonElement;
+  fechar: HTMLButtonElement;
+  /// Edit mode. Meanwhile nothing redraws the viewer.
+  edicao?: Edicao;
   aberto: boolean;
   transicao?: Animation;
   /// In split mode, who has the keyboard: the file or the terminal/chat. It is the
@@ -2688,21 +2753,43 @@ type Visor = {
   rolagem: number;
   /// The scroll events the redraw itself causes aren't you scrolling.
   segurando: number;
-  /// The files opened in this panel, for ‹ and › to move between them.
+  /// The files open in this panel, one tab each, and the one on screen. ‹ and › move
+  /// between them too.
   historico: PedidoVer[];
   pos: number;
+  /// What each tab not on screen had when it was left — its lines, its scroll, its
+  /// edit in progress. The one on screen lives in the fields below.
+  estados: Map<PedidoVer, EstadoAba>;
+  /// The tab strip, between the header and the body.
+  abas: HTMLDivElement;
   /// A .md shown rendered, not as source.
   renderizado: boolean;
   /// The shown file's stamp: changed on disk, the viewer rereads it.
   carimbo?: string;
   linhas?: string[];
+  /// A binary image (`ehImagem`), as a data URL. Then there are no `linhas`.
+  imagem?: string;
+  /// Leaving the edit to a rendered .md: how far down it was, as a fraction — the
+  /// rendered page has another height, and pixels wouldn't land on the same place.
+  fracao?: number;
   pulso?: ReturnType<typeof setInterval>;
   /// Responses arriving out of order (‹ › pressed quickly) don't draw
   /// over the newest one.
   vez: number;
 };
 
-/// How many files ‹ reaches.
+/// A tab that is not on screen, as it was left.
+type EstadoAba = {
+  linhas?: string[];
+  imagem?: string;
+  carimbo?: string;
+  edicao?: Edicao;
+  renderizado: boolean;
+  rolagem: number;
+};
+
+/// How many tabs the viewer keeps open. Past that, the oldest one without unsaved
+/// changes closes.
 const VISOR_HISTORICO = 30;
 /// How often the open viewer checks whether the file changed on disk.
 const VISOR_MS = 1000;
@@ -2758,19 +2845,392 @@ function abrirArquivo(folha: Folha, pedido: PedidoVer) {
   const dono = folha.dono ?? folha;
   if (dono.morta) return;
   const v = (dono.visor ??= criarVisor(dono));
-  const atual = v.historico[v.pos];
-  // The same file again, without a line: just show it, without losing where you were.
-  if (atual && atual.caminho === pedido.caminho && atual.ref === pedido.ref && !pedido.linha && !atual.linha) {
-    if (v.aberto) void carregarVisor(dono, false);
-    else alternarVisor(dono);
+  // Already open: its tab comes to the front, as it was left. A requested line moves it
+  // there — and a .md goes to source, which is where the line exists.
+  const i = v.historico.findIndex((p) => p.caminho === pedido.caminho && p.ref === pedido.ref);
+  if (i >= 0) {
+    const ja = v.historico[i];
+    if (pedido.linha) {
+      ja.linha = pedido.linha;
+      ja.ate = pedido.ate;
+    }
+    let guardada = true;
+    if (i !== v.pos) {
+      guardarAba(v);
+      guardada = ativarAba(v, i);
+    }
+    if (pedido.linha && !v.edicao) v.renderizado = false;
+    if (!v.aberto) alternarVisor(dono, !!pedido.linha || !guardada);
+    else mostrarAba(dono, !!pedido.linha || !guardada);
     return;
   }
-  v.historico = [...v.historico.slice(0, v.pos + 1), pedido].slice(-VISOR_HISTORICO);
-  v.pos = v.historico.length - 1;
-  // With a requested line, the .md opens as source: that is where the line exists.
-  v.renderizado = ehMarkdown(pedido.caminho) && !pedido.linha;
+  // A new tab, right after the one on screen.
+  if (v.historico.length) guardarAba(v);
+  v.historico.splice(v.pos + 1, 0, pedido);
+  v.pos = Math.min(v.pos + 1, v.historico.length - 1);
+  v.linhas = v.imagem = v.carimbo = v.edicao = undefined;
+  v.rolagem = 0;
+  v.renderizado = temRenderizado(pedido.caminho) && !pedido.linha;
+  podarAbas(v);
   if (v.aberto) void carregarVisor(dono, true);
   else alternarVisor(dono, true);
+}
+
+/// The tab on screen, kept as it is: lines, scroll, the edit in progress (with its box,
+/// out of the page but alive, undo included).
+function guardarAba(v: Visor) {
+  const p = v.historico[v.pos];
+  if (!p) return;
+  const ed = v.edicao;
+  if (ed) ed.rolagem = [ed.area.scrollLeft, ed.area.scrollTop];
+  v.estados.set(p, {
+    linhas: v.linhas,
+    imagem: v.imagem,
+    carimbo: v.carimbo,
+    edicao: ed,
+    renderizado: v.renderizado,
+    rolagem: v.rolagem,
+  });
+}
+
+/// Puts tab `i` on the viewer's fields, without drawing. False when it had never been
+/// shown (there is nothing kept, it has to be read).
+function ativarAba(v: Visor, i: number): boolean {
+  v.pos = i;
+  v.vez++;
+  const p = v.historico[i];
+  const e = v.estados.get(p);
+  v.estados.delete(p);
+  v.linhas = e?.linhas;
+  v.imagem = e?.imagem;
+  v.carimbo = e?.carimbo;
+  v.edicao = e?.edicao;
+  v.renderizado = e?.renderizado ?? (temRenderizado(p.caminho) && !p.linha);
+  v.rolagem = e?.rolagem ?? 0;
+  return !!e;
+}
+
+/// Draws the tab on screen: an edit in progress goes back as it was; the rest is reread
+/// from disk, which may have changed meanwhile.
+function mostrarAba(folha: Folha, rolar: boolean) {
+  const v = folha.visor;
+  const ed = v?.edicao;
+  if (!v) return;
+  if (!ed) return void carregarVisor(folha, rolar);
+  legendaVisor(folha);
+  v.corpo.replaceChildren(ed.raiz);
+  const [x, y] = ed.rolagem ?? [0, 0];
+  ed.area.scrollLeft = x;
+  ed.area.scrollTop = y;
+  ed.area.dispatchEvent(new Event("scroll"));
+  ed.area.focus({ preventScroll: true });
+}
+
+function trocarAba(folha: Folha, i: number) {
+  const v = folha.visor;
+  if (!v || i < 0 || i >= v.historico.length || i === v.pos) return;
+  guardarAba(v);
+  const guardada = ativarAba(v, i);
+  mostrarAba(folha, !guardada);
+}
+
+/// Closes a file's tab. With unsaved changes it comes to the front and asks first.
+async function fecharArquivo(folha: Folha, i: number) {
+  const v = folha.visor;
+  if (!v || i < 0 || i >= v.historico.length) return;
+  if (i !== v.pos) trocarAba(folha, i);
+  if (!(await podeLargarEdicao(folha))) return;
+  if (v.edicao) clearTimeout(v.edicao.espera);
+  v.edicao = undefined;
+  // The last one: the viewer closes, and is born empty the next time.
+  if (v.historico.length === 1) {
+    if (v.aberto) alternarVisor(folha);
+    v.historico = [];
+    v.pos = 0;
+    v.linhas = v.imagem = v.carimbo = undefined;
+    desenharBarra(folha);
+    return;
+  }
+  v.historico.splice(i, 1);
+  const guardada = ativarAba(v, Math.min(i, v.historico.length - 1));
+  mostrarAba(folha, !guardada);
+}
+
+/// Loose, the drawer is a passing thing: a click outside it closes it, like a menu.
+/// Pinned it is part of the panel, and stays. The folder button on the bar doesn't count
+/// as outside — it closes it by itself, and counting it would reopen it right away.
+function vigiarFora(folha: Folha) {
+  const ex = folha.explorador;
+  if (!ex) return;
+  const vigiar = ex.aberto && !ex.fixo;
+  if (vigiar && !ex.fora) {
+    ex.fora = (e) => {
+      const alvo = e.target as Node;
+      if (ex.el.contains(alvo) || folha.barra?.explorar.contains(alvo)) return;
+      alternarExplorador(folha);
+    };
+    document.addEventListener("mousedown", ex.fora, true);
+  } else if (!vigiar && ex.fora) {
+    document.removeEventListener("mousedown", ex.fora, true);
+    ex.fora = undefined;
+  }
+}
+
+/// Past the limit, the oldest tabs without unsaved changes close.
+function podarAbas(v: Visor) {
+  while (v.historico.length > VISOR_HISTORICO) {
+    const j = v.historico.findIndex((p, k) => {
+      const ed = v.estados.get(p)?.edicao;
+      return k !== v.pos && !(ed && ed.area.value !== ed.salvo);
+    });
+    if (j < 0) return;
+    v.estados.delete(v.historico[j]);
+    v.historico.splice(j, 1);
+    if (j < v.pos) v.pos--;
+  }
+}
+
+/// The tabs, the one on screen lit. One with unsaved changes shows a dot in place of ✕
+/// (the ✕ comes back under the mouse).
+function desenharAbasVisor(v: Visor) {
+  v.abas.replaceChildren(
+    ...v.historico.map((p, i) => {
+      const ed = i === v.pos ? v.edicao : v.estados.get(p)?.edicao;
+      const aba = elemento("div", "visor-aba");
+      aba.dataset.i = String(i);
+      aba.classList.toggle("atual", i === v.pos);
+      aba.classList.toggle("suja", !!ed && ed.area.value !== ed.salvo);
+      aba.title = p.ref ? `${p.caminho} @ ${p.ref}` : p.caminho;
+      const nome = elemento("span", "visor-aba-nome");
+      nome.textContent = p.caminho.slice(p.caminho.lastIndexOf("/") + 1);
+      aba.append(nome);
+      if (p.ref) {
+        const ref = elemento("span", "visor-aba-ref");
+        ref.textContent = p.ref;
+        aba.append(ref);
+      }
+      const fechar = elemento("span", "visor-aba-fechar");
+      fechar.innerHTML = ICONE_FECHAR_ABA;
+      fechar.title = T.fecharArquivo;
+      aba.append(fechar);
+      return aba;
+    }),
+  );
+  v.abas.querySelector(".atual")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+// ---------- the file explorer ----------
+
+type Entrada = { nome: string; pasta: boolean };
+
+type Explorador = {
+  el: HTMLDivElement;
+  titulo: HTMLSpanElement;
+  arvore: HTMLDivElement;
+  aberto: boolean;
+  /// The project's folder (the repository's root, or the shell's folder).
+  raiz: string;
+  /// The folders expanded in the tree, which stay so between openings.
+  abertas: Set<string>;
+  /// Each folder's listing, read once per opening: reopening shows what changed.
+  listas: Map<string, Entrada[]>;
+  /// Responses arriving out of order don't draw over the newest tree.
+  vez: number;
+  /// Pinned: it stops floating and takes the panel's left side, and choosing a file
+  /// doesn't close it.
+  fixo: boolean;
+  alfinete: HTMLButtonElement;
+  /// Open and loose, a click anywhere else closes it: the listener for that, while it exists.
+  fora?: (e: MouseEvent) => void;
+};
+
+/// A drawer from the left, over the terminal, the chat and the viewer — it pushes nothing
+/// aside. Choosing a file opens it in the viewer and closes the drawer.
+function criarExplorador(folha: Folha): Explorador {
+  const el = elemento("div", "explorador");
+  const cabeca = elemento("div", "explorador-cabeca");
+  const titulo = elemento("span", "explorador-titulo");
+  const fechar = elemento("button", "visor-btn visor-btn-icone");
+  fechar.innerHTML = ICONE_FECHAR;
+  fechar.title = T.fecharExplorador;
+  fechar.addEventListener("mousedown", (e) => e.preventDefault());
+  fechar.addEventListener("click", () => alternarExplorador(folha));
+  const alfinete = elemento("button", "visor-btn visor-btn-icone explorador-alfinete");
+  alfinete.innerHTML = ICONE_ALFINETE;
+  alfinete.title = T.fixarExplorador;
+  alfinete.addEventListener("mousedown", (e) => e.preventDefault());
+  alfinete.addEventListener("click", () => fixarExplorador(folha, !ex.fixo));
+  cabeca.append(titulo, alfinete, fechar);
+  const arvore = elemento("div", "explorador-arvore");
+  arvore.tabIndex = 0;
+  el.append(cabeca, arvore);
+  folha.el.querySelector(".folha-termo")?.append(el);
+  const ex: Explorador = {
+    el,
+    titulo,
+    arvore,
+    aberto: false,
+    raiz: "",
+    abertas: new Set(),
+    listas: new Map(),
+    vez: 0,
+    fixo: false,
+    alfinete,
+  };
+  el.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    // Pinned, esc only gives the keyboard back: the tree stays.
+    if (ex.fixo) teclado(folha);
+    else alternarExplorador(folha);
+  });
+  arvore.addEventListener("click", (e) => {
+    const item = (e.target as HTMLElement).closest<HTMLElement>(".explorador-item");
+    const caminho = item?.dataset.caminho;
+    if (!item || !caminho) return;
+    if (item.dataset.pasta) {
+      if (!ex.abertas.delete(caminho)) ex.abertas.add(caminho);
+      void desenharExplorador(folha);
+      return;
+    }
+    if (!ex.fixo) alternarExplorador(folha);
+    abrirArquivo(folha, { caminho });
+    // Pinned, the tree stays on screen: the chosen file is the one that lights up now.
+    if (ex.fixo) void desenharExplorador(folha);
+  });
+  return ex;
+}
+
+/// Pinned, the drawer becomes part of the panel: the terminal and the viewer step aside
+/// for it (`.explorador-fixo`, padding on the side) instead of being covered.
+function fixarExplorador(folha: Folha, fixo: boolean) {
+  const ex = folha.explorador;
+  if (!ex) return;
+  ex.fixo = fixo;
+  ex.el.classList.toggle("fixo", fixo);
+  ex.alfinete.classList.toggle("ligado", fixo);
+  ex.alfinete.title = fixo ? T.soltarExplorador : T.fixarExplorador;
+  encaixarExplorador(folha);
+}
+
+function encaixarExplorador(folha: Folha) {
+  vigiarFora(folha);
+  const ex = folha.explorador;
+  const termo = folha.el.querySelector(".folha-termo");
+  const fixo = !!ex?.fixo && ex.aberto;
+  if (!termo || termo.classList.contains("explorador-fixo") === fixo) return;
+  termo.classList.toggle("explorador-fixo", fixo);
+  // The terminal changed width without the window changing: it is measured again here.
+  const aba = abaDe(folha);
+  if (aba && aba === ativa && !noDiff) {
+    medir(aba);
+    agendarSync(aba);
+  }
+}
+
+function alternarExplorador(folha: Folha) {
+  const raiz = folha.barra?.repo ?? folha.barra?.pasta;
+  const nova = !folha.explorador;
+  const ex = (folha.explorador ??= criarExplorador(folha));
+  // Just created, the drawer has never been drawn closed: without a layout first, the
+  // browser goes straight to open and there is no slide.
+  if (nova) void ex.el.offsetWidth;
+  ex.aberto = !ex.aberto && !!raiz;
+  ex.el.classList.toggle("aberto", ex.aberto);
+  encaixarExplorador(folha);
+  if (ex.aberto && raiz) {
+    if (ex.raiz !== raiz) {
+      ex.raiz = raiz;
+      ex.abertas.clear();
+    }
+    ex.listas.clear();
+    ex.titulo.textContent = raiz.slice(raiz.lastIndexOf("/") + 1) || raiz;
+    ex.titulo.title = raiz;
+    void desenharExplorador(folha);
+    ex.arvore.focus({ preventScroll: true });
+  } else if (abaDe(folha)?.foco === folha) {
+    teclado(folha);
+  }
+  desenharBarra(folha);
+}
+
+/// The little mark before the name, by extension: as in an editor's tree, it is what
+/// lets you find the file by eye.
+const MARCAS_DO_EXPLORADOR: Record<string, [string, string]> = {
+  ts: ["TS", "cyan"],
+  tsx: ["TS", "cyan"],
+  js: ["JS", "yellow"],
+  jsx: ["JS", "yellow"],
+  mjs: ["JS", "yellow"],
+  json: ["{}", "yellow"],
+  html: ["<>", "orange"],
+  css: ["#", "purple"],
+  md: ["M↓", "cyan"],
+  rs: ["RS", "orange"],
+  sh: ["$", "green"],
+  py: ["PY", "yellow"],
+  dart: ["D", "cyan"],
+  toml: ["⚙", "comment"],
+  yaml: ["⚙", "comment"],
+  yml: ["⚙", "comment"],
+  png: ["▣", "pink"],
+  jpg: ["▣", "pink"],
+  jpeg: ["▣", "pink"],
+  gif: ["▣", "pink"],
+  svg: ["▣", "pink"],
+};
+
+async function desenharExplorador(folha: Folha) {
+  const ex = folha.explorador;
+  if (!ex) return;
+  const vez = ++ex.vez;
+  const atual = folha.visor?.historico[folha.visor.pos]?.caminho;
+  const linhas: HTMLElement[] = [];
+  const aviso = (texto: string, nivel: number) => {
+    const el = elemento("div", "explorador-aviso");
+    el.style.paddingLeft = `${22 + nivel * 12}px`;
+    el.textContent = texto;
+    linhas.push(el);
+  };
+  const descer = async (pasta: string, nivel: number) => {
+    let itens = ex.listas.get(pasta);
+    if (!itens) {
+      try {
+        itens = await invoke<Entrada[]>("pasta_listar", { caminho: pasta });
+      } catch (e) {
+        aviso(T.naoDeuParaListar(String(e)), nivel);
+        return;
+      }
+      ex.listas.set(pasta, itens);
+    }
+    if (!itens.length) aviso(T.pastaVazia, nivel);
+    for (const it of itens) {
+      const caminho = `${pasta}/${it.nome}`;
+      const aberta = it.pasta && ex.abertas.has(caminho);
+      const linha = elemento("div", "explorador-item");
+      linha.dataset.caminho = caminho;
+      if (it.pasta) linha.dataset.pasta = "1";
+      linha.style.paddingLeft = `${8 + nivel * 12}px`;
+      linha.classList.toggle("aberta", aberta);
+      linha.classList.toggle("atual", caminho === atual);
+      const marca = elemento("span", "explorador-marca");
+      if (it.pasta) marca.textContent = "›";
+      else {
+        const ext = it.nome.slice(it.nome.lastIndexOf(".") + 1).toLowerCase();
+        const [texto, cor] = MARCAS_DO_EXPLORADOR[ext] ?? ["≡", "fg-dim"];
+        marca.textContent = texto;
+        marca.style.color = `var(--${cor})`;
+      }
+      const nome = elemento("span", "explorador-nome");
+      nome.textContent = it.nome;
+      linha.append(marca, nome);
+      linhas.push(linha);
+      if (aberta) await descer(caminho, nivel + 1);
+    }
+  };
+  await descer(ex.raiz, 0);
+  if (vez === ex.vez) ex.arvore.replaceChildren(...linhas);
 }
 
 /// Shows or hides the viewer. Hiding and showing again goes back to where you
@@ -2875,16 +3335,29 @@ function criarVisor(folha: Folha): Visor {
   const ref = elemento("span", "visor-ref");
   const modo = elemento("button", "visor-btn visor-btn-texto");
   const arranjo = elemento("button", "visor-btn visor-btn-icone");
+  const ler = elemento("button", "visor-btn visor-btn-icone");
+  ler.innerHTML = ICONE_OLHO;
+  ler.title = T.lerDica;
+  const editar = elemento("button", "visor-btn visor-btn-icone");
+  editar.innerHTML = ICONE_LAPIS;
+  editar.title = T.editarDica;
+  const modos = elemento("div", "visor-modos");
+  modos.append(ler, editar);
+  const salvar = elemento("button", "visor-btn visor-btn-icone visor-btn-salvar");
+  salvar.innerHTML = ICONE_DISQUETE;
+  salvar.title = T.salvarDica;
+  salvar.hidden = true;
   const editor = elemento("button", "visor-btn visor-btn-texto");
   editor.textContent = T.abrirNoEditor;
   editor.title = T.editorNasPreferencias;
-  const fechar = elemento("button", "visor-btn");
-  fechar.textContent = "✕";
+  const fechar = elemento("button", "visor-btn visor-btn-icone");
+  fechar.innerHTML = ICONE_FECHAR;
   fechar.title = T.voltarAoTerminal;
-  cabeca.append(voltar, avancar, caminho, ref, modo, arranjo, editor, fechar);
+  cabeca.append(voltar, avancar, caminho, ref, modo, arranjo, salvar, modos, editor, fechar);
+  const abas = elemento("div", "visor-abas");
   const corpo = elemento("div", "visor-corpo");
   corpo.tabIndex = 0;
-  el.append(cabeca, corpo);
+  el.append(cabeca, abas, corpo);
   const alca = elemento("div", "visor-alca");
   // Inside the terminal's element, beside its screen: split, the viewer
   // takes a share of it; on top, it covers it entirely.
@@ -2900,12 +3373,19 @@ function criarVisor(folha: Folha): Visor {
     avancar,
     modo,
     arranjo,
+    modos,
+    ler,
+    editar,
+    salvar,
+    fechar,
     aberto: false,
     comTeclado: false,
     rolagem: 0,
     segurando: 0,
     historico: [],
     pos: 0,
+    estados: new Map(),
+    abas,
     renderizado: false,
     vez: 0,
   };
@@ -2914,7 +3394,9 @@ function criarVisor(folha: Folha): Visor {
     if (!v.segurando) v.rolagem = corpo.scrollTop;
   });
   // The buttons don't take the keyboard from the body: esc keeps closing.
-  for (const b of [voltar, avancar, modo, arranjo, editor, fechar]) b.addEventListener("mousedown", (e) => e.preventDefault());
+  for (const b of [voltar, avancar, modo, arranjo, ler, editar, salvar, editor, fechar]) {
+    b.addEventListener("mousedown", (e) => e.preventDefault());
+  }
   arranjo.addEventListener("click", () => {
     arranjoVisor = ARRANJOS[(ARRANJOS.indexOf(arranjoVisor) + 1) % ARRANJOS.length];
     lembrarPrefVisor();
@@ -2923,16 +3405,21 @@ function criarVisor(folha: Folha): Visor {
     arrumarVisor(folha);
     if (abaDe(folha)?.foco === folha) teclado(folha);
   });
-  const andar = (passo: number) => {
-    const pos = v.pos + passo;
-    if (pos < 0 || pos >= v.historico.length) return;
-    v.pos = pos;
-    const p = v.historico[pos];
-    v.renderizado = ehMarkdown(p.caminho) && !p.linha;
-    void carregarVisor(folha, true);
-  };
-  voltar.addEventListener("click", () => andar(-1));
-  avancar.addEventListener("click", () => andar(1));
+  voltar.addEventListener("click", () => trocarAba(folha, v.pos - 1));
+  avancar.addEventListener("click", () => trocarAba(folha, v.pos + 1));
+  // A click on a tab shows it; on its ✕, or with the middle button, it closes.
+  abas.addEventListener("mousedown", (e) => {
+    const aba = (e.target as HTMLElement).closest<HTMLElement>(".visor-aba");
+    if (!aba || e.button !== 0) return;
+    e.preventDefault();
+    const i = Number(aba.dataset.i);
+    if ((e.target as HTMLElement).closest(".visor-aba-fechar")) void fecharArquivo(folha, i);
+    else trocarAba(folha, i);
+  });
+  abas.addEventListener("auxclick", (e) => {
+    const aba = (e.target as HTMLElement).closest<HTMLElement>(".visor-aba");
+    if (aba && e.button === 1) void fecharArquivo(folha, Number(aba.dataset.i));
+  });
   modo.addEventListener("click", () => {
     v.renderizado = !v.renderizado;
     desenharVisor(folha, true);
@@ -2944,7 +3431,10 @@ function criarVisor(folha: Folha): Visor {
       await invoke("abrir_no_editor", { caminho: p.caminho, linha: p.linha ?? null, comando });
     })().catch((e) => avisar(folha, T.editorErro(String(e))));
   });
-  fechar.addEventListener("click", () => alternarVisor(folha));
+  ler.addEventListener("click", () => void sairEdicao(folha));
+  editar.addEventListener("click", () => entrarEdicao(folha));
+  salvar.addEventListener("click", () => void salvarEdicao(folha));
+  fechar.addEventListener("click", () => (v.edicao ? void sairEdicao(folha) : alternarVisor(folha)));
   corpo.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     e.preventDefault();
@@ -2999,30 +3489,48 @@ function caminhoCurto(folha: Folha, caminho: string): string {
   return home ? `~/${caminho.slice(home.length)}` : caminho;
 }
 
-async function carregarVisor(folha: Folha, rolar: boolean) {
+/// The header follows the tab on screen: its path (with the line), its ref, its buttons.
+function legendaVisor(folha: Folha) {
   const v = folha.visor;
-  if (!v) return;
-  const p = v.historico[v.pos];
-  const vez = ++v.vez;
+  const p = v?.historico[v.pos];
+  if (!v || !p) return;
   v.caminho.textContent = caminhoCurto(folha, p.caminho) + (p.linha ? `:${p.linha}${p.ate ? `-${p.ate}` : ""}` : "");
   v.caminho.title = p.caminho;
   v.ref.textContent = p.ref ?? "";
   v.ref.hidden = !p.ref;
-  v.voltar.disabled = v.pos === 0;
-  v.avancar.disabled = v.pos === v.historico.length - 1;
+  botoesVisor(v);
+}
+
+async function carregarVisor(folha: Folha, rolar: boolean) {
+  const v = folha.visor;
+  if (!v || v.edicao) return;
+  const p = v.historico[v.pos];
+  const vez = ++v.vez;
+  legendaVisor(folha);
   try {
-    const arq = await invoke<{ linhas: string[]; carimbo: string }>("arquivo_ler", { caminho: p.caminho, rf: p.ref ?? null });
-    if (vez !== v.vez) return;
-    v.linhas = arq.linhas;
-    v.carimbo = arq.carimbo;
+    if (ehImagem(p.caminho)) {
+      const img = await invoke<{ url: string; carimbo: string }>("arquivo_imagem", { caminho: p.caminho, rf: p.ref ?? null });
+      if (vez !== v.vez) return;
+      v.linhas = undefined;
+      v.imagem = img.url;
+      v.carimbo = img.carimbo;
+    } else {
+      const arq = await invoke<{ linhas: string[]; carimbo: string }>("arquivo_ler", { caminho: p.caminho, rf: p.ref ?? null });
+      if (vez !== v.vez) return;
+      v.linhas = arq.linhas;
+      v.imagem = undefined;
+      v.carimbo = arq.carimbo;
+    }
   } catch (e) {
     if (vez !== v.vez) return;
     v.linhas = undefined;
+    v.imagem = undefined;
     v.carimbo = undefined;
     const erro = elemento("div", "visor-erro");
     erro.textContent = T.naoDeuParaAbrir(String(e));
     v.corpo.replaceChildren(erro);
     v.modo.hidden = true;
+    botoesVisor(v);
     return;
   }
   desenharVisor(folha, rolar);
@@ -3031,7 +3539,7 @@ async function carregarVisor(folha: Folha, rolar: boolean) {
 /// Claude edited the open file: the viewer follows, without losing the scroll.
 async function conferirVisor(folha: Folha) {
   const v = folha.visor;
-  if (!v?.aberto || !v.carimbo) return;
+  if (!v?.aberto || !v.carimbo || v.edicao) return;
   const p = v.historico[v.pos];
   if (p.ref) return;
   const agora = await invoke<string | null>("arquivo_carimbo", { caminho: p.caminho }).catch(() => null);
@@ -3041,10 +3549,11 @@ async function conferirVisor(folha: Folha) {
 function desenharVisor(folha: Folha, rolar: boolean) {
   const v = folha.visor;
   const linhas = v?.linhas;
-  if (!v || !linhas) return;
+  if (!v || (!linhas && !v.imagem) || v.edicao) return;
   const p = v.historico[v.pos];
   const md = ehMarkdown(p.caminho);
-  v.modo.hidden = !md;
+  v.modo.hidden = !temRenderizado(p.caminho);
+  botoesVisor(v);
   v.modo.textContent = v.renderizado ? T.verFonte : T.verRenderizado;
   // The scroll the redraw moves (the content disappears and comes back) isn't yours: only
   // what you do after two frames counts.
@@ -3056,12 +3565,24 @@ function desenharVisor(folha: Folha, rolar: boolean) {
   );
   const topo = rolar ? 0 : v.rolagem;
 
+  if (v.imagem || (linhas && ehSvg(p.caminho) && v.renderizado)) {
+    const url = v.imagem ?? `data:image/svg+xml;charset=utf-8,${encodeURIComponent((linhas ?? []).join("\n"))}`;
+    v.corpo.replaceChildren(imagemDoVisor(url));
+    return;
+  }
+  if (!linhas) return;
+
   if (md && v.renderizado) {
     const html = elemento("div", "visor-md chat-claude");
     html.innerHTML = markdown(linhas.join("\n"), 0, p.ref ? "ver" : "marcar");
+    botoesDeCopiar(html);
     v.corpo.replaceChildren(html);
     void desenharMermaid(v, html);
-    v.corpo.scrollTop = topo;
+    if (v.fracao !== undefined) {
+      v.corpo.scrollTop = v.fracao * (v.corpo.scrollHeight - v.corpo.clientHeight);
+      v.rolagem = v.corpo.scrollTop;
+      v.fracao = undefined;
+    } else v.corpo.scrollTop = topo;
     if (rolar) v.rolagem = 0;
     return;
   }
@@ -3087,6 +3608,222 @@ function desenharVisor(folha: Folha, rolar: boolean) {
   }
   if (rolar) v.rolagem = v.corpo.scrollTop;
   void colorirVisor(v, codigo, p.caminho, linhas);
+}
+
+/// The edit mode: the file in a text box over its own colored copy. The box's text
+/// is transparent — only the caret and the selection show —, and below it a <pre>
+/// draws the same lines with the read mode's colors, following the scroll. The numbers
+/// go in a margin of their own, outside what is selected.
+type Edicao = {
+  area: HTMLTextAreaElement;
+  cores: HTMLPreElement;
+  numeros: HTMLPreElement;
+  raiz: HTMLDivElement;
+  /// The text as it was last saved: what tells whether there is something to save.
+  salvo: string;
+  /// The colored HTML of each line, by its text, from the last tokenization: while typing,
+  /// the lines that didn't change keep their colors until the next one.
+  pintadas: Map<string, string>;
+  total: number;
+  espera?: ReturnType<typeof setTimeout>;
+  /// Where the box was scrolled when its tab was left.
+  rolagem?: [number, number];
+};
+
+/// The viewer's buttons follow the mode: editing, the source/rendered switch rests, Save
+/// shows up (lit only with something to save) and ✕ leaves editing. The tabs too.
+function botoesVisor(v: Visor) {
+  const ed = v.edicao;
+  const p = v.historico[v.pos];
+  v.el.classList.toggle("editando", !!ed);
+  v.modos.hidden = !!p?.ref || !v.linhas;
+  v.ler.classList.toggle("ligado", !ed);
+  v.editar.classList.toggle("ligado", !!ed);
+  v.salvar.hidden = !ed;
+  v.salvar.disabled = !ed || ed.area.value === ed.salvo;
+  v.voltar.disabled = v.pos === 0;
+  v.avancar.disabled = v.pos === v.historico.length - 1;
+  if (ed) v.modo.hidden = true;
+  v.fechar.title = ed ? T.sairDaEdicao : T.voltarAoTerminal;
+  desenharAbasVisor(v);
+}
+
+/// A line's tokens as HTML, with the theme's colors — the same in reading and in editing.
+function htmlDosTokens(linha: { content: string; color?: string; fontStyle?: number }[]): string {
+  return linha
+    .map((t) => {
+      const estilo = [t.color ? `color:${t.color}` : "", t.fontStyle === 1 ? "font-style:italic" : ""].filter(Boolean).join(";");
+      return estilo ? `<span style="${estilo}">${escapar(t.content)}</span>` : escapar(t.content);
+    })
+    .join("");
+}
+
+/// Edit mode: right in the viewer. Not for a git version, which has nowhere to be saved.
+function entrarEdicao(folha: Folha) {
+  const v = folha.visor;
+  if (!v?.linhas || v.edicao || v.historico[v.pos]?.ref) return;
+  const raiz = elemento("div", "visor-editor");
+  const margem = elemento("div", "visor-editor-margem");
+  const numeros = elemento("pre", "visor-editor-numeros");
+  margem.append(numeros);
+  const campo = elemento("div", "visor-editor-campo");
+  const cores = elemento("pre", "visor-editor-cores");
+  const area = elemento("textarea", "visor-edicao");
+  area.spellcheck = false;
+  area.value = v.linhas.join("\n");
+  campo.append(cores, area);
+  raiz.append(margem, campo);
+  const ed: Edicao = { area, cores, numeros, raiz, salvo: area.value, pintadas: new Map(), total: 0 };
+  v.edicao = ed;
+  // Tab indents the way the file already does.
+  const recuo = v.linhas.some((l) => l.startsWith("\t")) ? "\t" : "  ";
+  area.addEventListener("input", () => {
+    pintarEdicao(ed);
+    botoesVisor(v);
+    clearTimeout(ed.espera);
+    ed.espera = setTimeout(() => void colorirEdicao(folha, ed), 200);
+  });
+  area.addEventListener("scroll", () => {
+    cores.style.transform = `translate(${-area.scrollLeft}px, ${-area.scrollTop}px)`;
+    numeros.style.transform = `translateY(${-area.scrollTop}px)`;
+  });
+  area.addEventListener("keydown", (e) => {
+    const cmd = e.metaKey && !e.altKey && !e.ctrlKey;
+    if (cmd && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      void salvarEdicao(folha);
+    } else if (e.key === "Escape") {
+      // Not up to the body, where esc closes the viewer.
+      e.preventDefault();
+      e.stopPropagation();
+      void sairEdicao(folha);
+    } else if (e.key === "Tab" && !cmd && !e.shiftKey) {
+      e.preventDefault();
+      document.execCommand("insertText", false, recuo);
+    } else if (cmd && e.key.toLowerCase() === "z") {
+      // The Edit menu has no Undo — it would reach the terminal too —, so ⌘Z is handled here.
+      e.preventDefault();
+      document.execCommand(e.shiftKey ? "redo" : "undo");
+    } else if (cmd && e.key.toLowerCase() === "x") {
+      e.preventDefault();
+      document.execCommand("cut");
+    }
+  });
+  pintarEdicao(ed);
+  // The edit opens where reading was. The source has the same lines, font and padding as
+  // the box, so the same scroll; rendered, the same fraction of the way. And the caret
+  // goes to the first line on screen: left at the end, where the box puts it, the
+  // scroll would jump down there.
+  const ler = v.corpo;
+  const doCodigo = !v.renderizado;
+  const topo = ler.scrollTop;
+  const fracao = ler.scrollHeight > ler.clientHeight ? topo / (ler.scrollHeight - ler.clientHeight) : 0;
+  ler.replaceChildren(raiz);
+  area.scrollTop = doCodigo ? topo : fracao * (area.scrollHeight - area.clientHeight);
+  const alturaLinha = parseFloat(getComputedStyle(area).lineHeight) || 18.6;
+  const primeira = Math.max(0, Math.floor(area.scrollTop / alturaLinha));
+  const linhas = area.value.split("\n");
+  const inicio = linhas.slice(0, primeira).reduce((n, l) => n + l.length + 1, 0);
+  area.setSelectionRange(inicio, inicio);
+  area.focus({ preventScroll: true });
+  area.dispatchEvent(new Event("scroll"));
+  botoesVisor(v);
+  void colorirEdicao(folha, ed);
+}
+
+/// Redraws the colored copy and the numbers from the box's text. A changed line goes
+/// plain until the next tokenization colors it.
+function pintarEdicao(ed: Edicao) {
+  const linhas = ed.area.value.split("\n");
+  // The trailing space keeps a last empty line: a <pre> drops the final line break.
+  ed.cores.innerHTML = `${linhas.map((l) => ed.pintadas.get(l) ?? escapar(l)).join("\n")}\n `;
+  if (linhas.length !== ed.total) {
+    ed.total = linhas.length;
+    ed.numeros.textContent = Array.from({ length: linhas.length }, (_, i) => i + 1).join("\n");
+    ed.raiz.style.setProperty("--digitos", String(String(linhas.length).length));
+  }
+}
+
+async function colorirEdicao(folha: Folha, ed: Edicao) {
+  const v = folha.visor;
+  if (!v) return;
+  const { langFor, tokenizeFresh } = await import("./differ/lib/highlight");
+  const lang = langFor(v.historico[v.pos].caminho);
+  if (!lang) return;
+  const linhas = ed.area.value.split("\n");
+  const tokens = await tokenizeFresh(linhas, lang);
+  if (!tokens || v.edicao !== ed) return;
+  ed.pintadas = new Map(tokens.map((t, i) => [linhas[i], htmlDosTokens(t)]));
+  pintarEdicao(ed);
+}
+
+async function salvarEdicao(folha: Folha): Promise<boolean> {
+  const v = folha.visor;
+  const ed = v?.edicao;
+  if (!v || !ed) return false;
+  const texto = ed.area.value;
+  try {
+    v.carimbo = await invoke<string>("arquivo_salvar", {
+      caminho: v.historico[v.pos].caminho,
+      texto,
+      desde: v.carimbo ?? "",
+    });
+  } catch (e) {
+    avisar(folha, T.naoDeuParaSalvar(String(e)));
+    return false;
+  }
+  v.linhas = texto.split("\n");
+  ed.salvo = texto;
+  botoesVisor(v);
+  return true;
+}
+
+/// Whether the edit on screen can go: nothing unsaved, or the question answered with
+/// save (and saved) or discard.
+async function podeLargarEdicao(folha: Folha): Promise<boolean> {
+  const ed = folha.visor?.edicao;
+  if (!ed || ed.area.value === ed.salvo) return true;
+  const r = await escolher("visor-sair-edicao", {
+    titulo: T.salvarAlteracoesTitulo,
+    texto: T.salvarAlteracoesTexto,
+    confirmar: T.salvar,
+    alternativa: T.descartar,
+    cancelar: T.cancelar,
+  });
+  if (r === "alternativa" || (r === "sim" && (await salvarEdicao(folha)))) return true;
+  ed.area.focus();
+  return false;
+}
+
+/// Back to reading. With unsaved changes it asks first: save, discard or stay.
+async function sairEdicao(folha: Folha) {
+  const v = folha.visor;
+  const ed = v?.edicao;
+  if (!v || !ed || !(await podeLargarEdicao(folha))) return;
+  clearTimeout(ed.espera);
+  // Reading comes back where the edit was (see `entrarEdicao`).
+  const a = ed.area;
+  if (v.renderizado) v.fracao = a.scrollHeight > a.clientHeight ? a.scrollTop / (a.scrollHeight - a.clientHeight) : 0;
+  else v.rolagem = a.scrollTop;
+  v.edicao = undefined;
+  // What was saved may be older than the disk: rereading also brings the stamp up to date.
+  await carregarVisor(folha, false);
+  v.corpo.focus({ preventScroll: true });
+}
+
+/// An image, fitted to the viewer; a click switches to actual size and back. The
+/// checkerboard behind it is what shows a transparent area as transparent.
+function imagemDoVisor(url: string): HTMLElement {
+  const caixa = elemento("div", "visor-imagem");
+  const img = elemento("img", "");
+  img.alt = "";
+  const tamanho = elemento("div", "visor-imagem-tamanho");
+  img.addEventListener("load", () => (tamanho.textContent = `${img.naturalWidth} × ${img.naturalHeight}`));
+  img.addEventListener("error", () => (tamanho.textContent = T.imagemIlegivel));
+  img.addEventListener("click", () => caixa.classList.toggle("real"));
+  img.src = url;
+  caixa.append(img, tamanho);
+  return caixa;
 }
 
 let mermaidPronto: Promise<typeof import("mermaid").default> | null = null;
@@ -3220,13 +3957,7 @@ async function colorirVisor(v: Visor, codigo: HTMLDivElement, caminho: string, l
   const textos = codigo.querySelectorAll<HTMLElement>(".visor-texto");
   tokens.forEach((linha, i) => {
     const alvo = textos[i];
-    if (!alvo || !linha.length) return;
-    alvo.innerHTML = linha
-      .map((t) => {
-        const estilo = [t.color ? `color:${t.color}` : "", t.fontStyle === 1 ? "font-style:italic" : ""].filter(Boolean).join(";");
-        return estilo ? `<span style="${estilo}">${escapar(t.content)}</span>` : escapar(t.content);
-      })
-      .join("");
+    if (alvo && linha.length) alvo.innerHTML = htmlDosTokens(linha);
   });
 }
 
@@ -3691,7 +4422,9 @@ type Barra = {
   diff: HTMLButtonElement;
   chat: HTMLButtonElement;
   visor: HTMLButtonElement;
+  explorar: HTMLButtonElement;
   maximizar: HTMLButtonElement;
+  fechar: HTMLButtonElement;
   projeto: Projeto | null;
   /// The root of the git repository this panel's shell is in, or `null` if
   /// it isn't in any. It says whether the diff button has somewhere to
@@ -3718,9 +4451,23 @@ const ICONE_PLAY = `<svg viewBox="0 0 16 16" width="13" height="13" fill="curren
 const ICONE_PARAR = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/></svg>`;
 const ICONE_REINICIAR = traco("M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3");
 const ICONE_ESCOLHER = traco("M4.5 6.5 8 10l3.5-3.5");
+/// The tab's ✕: the new tab's "+" (index.html), turned 45°.
+const ICONE_FECHAR_ABA = `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.75v8.5M1.75 6h8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" transform="rotate(45 6 6)"/></svg>`;
+/// A dialog's ✕ (the radio's list, the shortcuts): drawn like the differ's Preferences one —
+/// 16px and a 1.5 stroke, in a 24px button —, so every dialog closes with the same ✕.
+const ICONE_FECHAR_DIALOGO = `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 2.5v11M2.5 8h11" transform="rotate(45 8 8)"/></svg>`;
+/// The panel's ✕: the "+" turned 45°, like the tab's.
+const ICONE_FECHAR = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 2.5v11M2.5 8h11" transform="rotate(45 8 8)"/></svg>`;
 const ICONE_MAXIMIZAR = traco("M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9");
 const ICONE_RECOLHER = traco("M13.5 2.5 9 7M9 3.5V7h3.5M2.5 13.5 7 9M7 12.5V9H3.5");
 const ICONE_CHAT = traco("M3 3.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5v-2.5H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z");
+const ICONE_COPIAR = traco("M5.5 5.5h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1ZM2.5 10.5V3a1 1 0 0 1 1-1h7.5");
+const ICONE_COPIADO = traco("M3 8.5l3.2 3L13 4.5");
+const ICONE_OLHO = traco("M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8ZM8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z");
+const ICONE_LAPIS = traco("M11 2.5 13.5 5l-8 8-3 .5.5-3 8-8ZM9.5 4 12 6.5");
+const ICONE_DISQUETE = traco("M3 2.5h8l2.5 2.5v8a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5ZM5 2.5V6h5V2.5M5 13.5v-4h6v4");
+const ICONE_ALFINETE = traco("M6 1.5h4M7 1.5v4L4.5 8.5h7L9 5.5v-4M8 8.5v6");
+const ICONE_PASTA = traco("M1.5 4.5a1 1 0 0 1 1-1h3.4l1.5 1.6h6.1a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1Z");
 const ICONE_ARQUIVO = traco("M4 1.5h5.5L13 5v9a.5.5 0 0 1-.5.5h-8.5a.5.5 0 0 1-.5-.5v-12a.5.5 0 0 1 .5-.5ZM9.5 1.5V5H13M6 8.5h4M6 11h4");
 /// The viewer's arrangement button (see `Arranjo`).
 const ICONE_ARRANJO: Record<Arranjo, string> = {
@@ -3777,7 +4524,11 @@ function criarBarra(): Barra {
   const maximizar = botaoTarefa("tarefa-maximizar", ICONE_MAXIMIZAR);
   // `desenharMaximizar` decides whether it shows, once the leaf has a tab.
   maximizar.hidden = true;
-  controles.append(acoes, gaveta, parar, grupoPlay, diff, chat, visor, maximizar);
+  const fechar = botaoTarefa("tarefa-fechar", ICONE_FECHAR);
+  fechar.title = T.fecharPainel;
+  // Like maximize: `desenharMaximizar` shows it once the leaf has a tab.
+  fechar.hidden = true;
+  controles.append(acoes, gaveta, parar, grupoPlay, diff, chat, visor, maximizar, fechar);
   const ramo = criarRamo("tarefa-ramo");
   const contexto = botaoTarefa("tarefa-contexto", "");
   contexto.hidden = true;
@@ -3787,7 +4538,9 @@ function criarBarra(): Barra {
   const modelo = botaoTarefa("tarefa-claude-opcao tarefa-modelo", "");
   const esforco = botaoTarefa("tarefa-claude-opcao tarefa-esforco", "");
   modelo.hidden = esforco.hidden = true;
-  el.append(titulo, ramo.el, contexto, modelo, esforco, aviso, controles);
+  // On the left, like the drawer it opens.
+  const explorar = botaoTarefa("tarefa-explorar", ICONE_PASTA);
+  el.append(explorar, titulo, ramo.el, contexto, modelo, esforco, aviso, controles);
   return {
     el,
     titulo,
@@ -3811,7 +4564,9 @@ function criarBarra(): Barra {
     diff,
     chat,
     visor,
+    explorar,
     maximizar,
+    fechar,
     projeto: null,
     repo: null,
     pedido: 0,
@@ -3822,6 +4577,7 @@ function ligarBarra(folha: Folha) {
   const b = folha.barra;
   if (!b) return;
   b.contexto.addEventListener("click", () => compactar(folha));
+  b.explorar.addEventListener("click", () => alternarExplorador(folha));
   b.modelo.addEventListener("click", () => alternarOpcoesDoClaude(folha, "modelo"));
   b.esforco.addEventListener("click", () => alternarOpcoesDoClaude(folha, "esforco"));
   b.play.addEventListener("click", () => {
@@ -3839,6 +4595,7 @@ function ligarBarra(folha: Folha) {
   b.chat.addEventListener("click", () => alternarChat(folha));
   b.visor.addEventListener("click", () => alternarVisor(folha));
   b.maximizar.addEventListener("click", () => alternarMaximizar(folha));
+  b.fechar.addEventListener("click", () => fecharFolha(folha));
   // Double-clicking the bar does the same — the big target, like a window's
   // title bar. Not on its buttons: two clicks on play are two plays.
   b.el.addEventListener("dblclick", (e) => {
@@ -3857,6 +4614,8 @@ function desenharMaximizar(folha: Folha) {
   b.maximizar.classList.toggle("ligado", cheio);
   b.maximizar.innerHTML = cheio ? ICONE_RECOLHER : ICONE_MAXIMIZAR;
   b.maximizar.title = cheio ? T.recolherPainel : T.ocuparAba;
+  // Alone in the tab, ⌘W and the tab's ✕ already close it: the bar's ✕ is for a split.
+  b.fechar.hidden = aba.raiz.tipo === "folha";
 }
 
 function desenharBarra(folha: Folha) {
@@ -3941,6 +4700,11 @@ function desenharBarra(folha: Folha) {
     : folha.claude
       ? T.verEmModoChat
       : T.abrirClaudeNoChat;
+
+  const explorando = folha.explorador?.aberto === true;
+  b.explorar.hidden = !(b.repo ?? b.pasta);
+  b.explorar.classList.toggle("ligado", explorando);
+  b.explorar.title = explorando ? T.fecharExplorador : T.abrirExplorador;
 
   const visor = folha.visor;
   b.visor.hidden = !visor?.historico.length;
@@ -4747,7 +5511,6 @@ function guardarAtual() {
 const ICONE_PAUSA = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="4" y="3.5" width="3" height="9" rx="1"/><rect x="9" y="3.5" width="3" height="9" rx="1"/></svg>`;
 const ICONE_ESTACOES = traco("M3.5 4.5h9M3.5 8h9M3.5 11.5h9");
 const ICONE_PROXIMA = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="10.7" y="3.6" width="1.7" height="8.8" rx=".85"/><path d="M3.8 4.2v7.6a.6.6 0 0 0 .92.5l5.2-3.8a.6.6 0 0 0 0-1L4.72 3.7a.6.6 0 0 0-.92.5Z"/></svg>`;
-const ICONE_TIRAR = traco("M4.8 4.8l6.4 6.4M11.2 4.8l-6.4 6.4");
 
 const lofiEl = document.getElementById("lofi") as HTMLDivElement;
 
@@ -5444,10 +6207,13 @@ function aplicarVolume() {
 const lofiEditor = elemento("div", "lofi-editor");
 lofiEditor.hidden = true;
 const lofiCaixa = elemento("div", "lofi-caixa");
+// The box takes the keyboard when it opens (esc, the arrows in the list), not ✕: focused,
+// it would show as pressed.
+lofiCaixa.tabIndex = -1;
 const lofiCabeca = elemento("div", "lofi-cabeca");
 const lofiCabecaTitulo = elemento("span", "lofi-cabeca-titulo");
 lofiCabecaTitulo.textContent = T.estacoes;
-const lofiFechar = botaoLofi("lofi-fechar", ICONE_TIRAR, T.fecharEsc);
+const lofiFechar = botaoLofi("lofi-fechar", ICONE_FECHAR_DIALOGO, T.fecharEsc);
 lofiCabeca.append(lofiCabecaTitulo, lofiFechar);
 const lofiLista = elemento("div", "lofi-lista");
 lofiCaixa.append(lofiCabeca, lofiLista);
@@ -5492,7 +6258,7 @@ function desenharLista() {
 function abrirEditor() {
   lofiEditor.hidden = false;
   desenharLista();
-  lofiFechar.focus();
+  lofiCaixa.focus({ preventScroll: true });
 }
 
 function fecharEditor() {
@@ -5594,10 +6360,11 @@ const ATALHOS: { grupo: string; itens: [string | string[], string][] }[] = [
 const ajudaEl = elemento("div", "lofi-editor");
 ajudaEl.hidden = true;
 const ajudaCaixa = elemento("div", "lofi-caixa ajuda-caixa");
+ajudaCaixa.tabIndex = -1;
 const ajudaCabeca = elemento("div", "lofi-cabeca");
 const ajudaTitulo = elemento("span", "lofi-cabeca-titulo");
 ajudaTitulo.textContent = T.atalhosDoTeclado;
-const ajudaFechar = botaoLofi("lofi-fechar", ICONE_TIRAR, T.fecharEsc);
+const ajudaFechar = botaoLofi("lofi-fechar", ICONE_FECHAR_DIALOGO, T.fecharEsc);
 ajudaCabeca.append(ajudaTitulo, ajudaFechar);
 const ajudaLista = elemento("div", "ajuda-lista");
 for (const { grupo, itens } of ATALHOS) {
@@ -5628,7 +6395,7 @@ document.body.appendChild(ajudaEl);
 function alternarAjuda() {
   if (!ajudaEl.hidden) return fecharAjuda();
   ajudaEl.hidden = false;
-  ajudaFechar.focus();
+  ajudaCaixa.focus({ preventScroll: true });
 }
 
 function fecharAjuda() {
@@ -5842,7 +6609,9 @@ async function restaurarSessao() {
 /// A question in the middle of the window, in the same shell as the station picker. The
 /// confirm button is born with the keyboard: space or ↩ confirm, esc
 /// cancels. Without `cancelar` it is just a notice, with one button.
-type Pergunta = { titulo: string; texto: string; confirmar: string; cancelar?: string };
+/// `alternativa`: a third answer, on the left (the "Discard" beside "Cancel" and "Save").
+type Pergunta = { titulo: string; texto: string; confirmar: string; cancelar?: string; alternativa?: string };
+type Resposta = "sim" | "nao" | "alternativa";
 
 const perguntaEl = elemento("div", "lofi-editor");
 perguntaEl.hidden = true;
@@ -5851,25 +6620,31 @@ perguntaCaixa.setAttribute("role", "alertdialog");
 const perguntaTitulo = elemento("span", "lofi-cabeca-titulo");
 const perguntaTexto = elemento("p", "pergunta-texto");
 const perguntaBotoes = elemento("div", "pergunta-botoes");
+const perguntaAlternativa = elemento("button", "pergunta-btn pergunta-alternativa");
 const perguntaNao = elemento("button", "pergunta-btn");
 const perguntaSim = elemento("button", "pergunta-btn pergunta-sim");
-perguntaBotoes.append(perguntaNao, perguntaSim);
+perguntaBotoes.append(perguntaAlternativa, perguntaNao, perguntaSim);
 perguntaCaixa.append(perguntaTitulo, perguntaTexto, perguntaBotoes);
 perguntaEl.appendChild(perguntaCaixa);
 document.body.appendChild(perguntaEl);
 
 /// The one on screen: which it is and how to answer it.
-let perguntaAberta: { chave: string; promessa: Promise<boolean>; responder: (sim: boolean) => void } | undefined;
+let perguntaAberta: { chave: string; promessa: Promise<Resposta>; responder: (r: Resposta) => void } | undefined;
 
 /// `chave` says which question it is. The same one, asked again with the box open (a
 /// second ⌘Q), only refocuses the keyboard; another takes its place, and the previous one is
 /// answered with "no".
 function perguntar(chave: string, p: Pergunta): Promise<boolean> {
+  return escolher(chave, p).then((r) => r === "sim");
+}
+
+/// `perguntar` with the third answer: which of the three buttons it was.
+function escolher(chave: string, p: Pergunta): Promise<Resposta> {
   if (perguntaAberta?.chave === chave) {
     perguntaSim.focus();
     return perguntaAberta.promessa;
   }
-  perguntaAberta?.responder(false);
+  perguntaAberta?.responder("nao");
 
   const rotulo = (b: HTMLButtonElement, texto: string, tecla: string) => {
     const k = document.createElement("kbd");
@@ -5881,9 +6656,11 @@ function perguntar(chave: string, p: Pergunta): Promise<boolean> {
   rotulo(perguntaSim, p.confirmar, "↩");
   perguntaNao.hidden = !p.cancelar;
   if (p.cancelar) rotulo(perguntaNao, p.cancelar, "esc");
+  perguntaAlternativa.hidden = !p.alternativa;
+  perguntaAlternativa.textContent = p.alternativa ?? "";
 
-  let responder!: (sim: boolean) => void;
-  const promessa = new Promise<boolean>((resolve) => {
+  let responder!: (r: Resposta) => void;
+  const promessa = new Promise<Resposta>((resolve) => {
     responder = (sim) => {
       if (perguntaAberta?.promessa !== promessa) return;
       perguntaAberta = undefined;
@@ -5901,22 +6678,25 @@ function perguntar(chave: string, p: Pergunta): Promise<boolean> {
 }
 
 perguntaEl.addEventListener("mousedown", (e) => {
-  if (e.target === perguntaEl) perguntaAberta?.responder(false);
+  if (e.target === perguntaEl) perguntaAberta?.responder("nao");
 });
-perguntaNao.addEventListener("click", () => perguntaAberta?.responder(false));
-perguntaSim.addEventListener("click", () => perguntaAberta?.responder(true));
+perguntaAlternativa.addEventListener("click", () => perguntaAberta?.responder("alternativa"));
+perguntaNao.addEventListener("click", () => perguntaAberta?.responder("nao"));
+perguntaSim.addEventListener("click", () => perguntaAberta?.responder("sim"));
 perguntaEl.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     e.preventDefault();
-    perguntaAberta?.responder(false);
+    perguntaAberta?.responder("nao");
     return;
   }
-  // The keyboard doesn't leave the box: tab and the arrows only toggle between the two
-  // buttons. Space and ↩ belong to the focused button itself.
+  // The keyboard doesn't leave the box: tab and the arrows only move between the
+  // buttons on screen. Space and ↩ belong to the focused button itself.
   if (e.key === "Tab" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
     e.preventDefault();
-    const outro = document.activeElement === perguntaSim ? perguntaNao : perguntaSim;
-    (outro.hidden ? perguntaSim : outro).focus();
+    const botoes = [perguntaAlternativa, perguntaNao, perguntaSim].filter((b) => !b.hidden);
+    const passo = e.key === "ArrowLeft" || (e.key === "Tab" && e.shiftKey) ? -1 : 1;
+    const i = botoes.indexOf(document.activeElement as HTMLButtonElement);
+    botoes[(i + passo + botoes.length) % botoes.length]?.focus();
   }
 });
 
@@ -6074,6 +6854,17 @@ window.addEventListener("keydown", (e) => {
 // here: the differ's bridge forwards it, and from here it counts the same. The origin is
 // checked in `source` — no other window talks to this one.
 window.addEventListener("message", (e) => {
+  // The floating preferences only say they closed; TermIAu's keys wait until then.
+  if (prefsQuadro && e.source === prefsQuadro.contentWindow) {
+    const dado = e.data as { termiauPrefsPronta?: boolean; termiauPrefsFechou?: boolean } | null;
+    // Shown only once drawn: loading, the page flashes white.
+    if (dado?.termiauPrefsPronta) {
+      prefsQuadro.classList.add("pronta");
+      prefsQuadro.contentWindow?.focus();
+    }
+    if (dado?.termiauPrefsFechou) fecharPreferencias();
+    return;
+  }
   if (!presa || e.source !== presa.quadro.contentWindow) return;
   const dado = e.data as {
     termiau?: Atalho;

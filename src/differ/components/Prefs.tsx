@@ -1,5 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { T } from "../../i18n/differ";
+import * as persist from "../lib/persist";
+import type { Settings } from "../lib/persist";
 import { Trechos } from "./Trechos";
 import { Icon } from "./Icons";
 
@@ -60,96 +62,144 @@ export function Prefs({
           </button>
         </header>
 
-        <label className="prefs-campo">
-          <span className="prefs-nome">{T.branchPadrao}</span>
-          <input
-            ref={campo}
-            type="text"
-            value={defaultTarget}
-            placeholder="main"
-            spellCheck={false}
-            autoComplete="off"
-            onChange={(e) => onDefaultTarget(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && onClose()}
-          />
-          <span className="prefs-ajuda">{T.branchPadraoAjuda}</span>
-        </label>
+        <div className="prefs-corpo">
+          <label className="prefs-campo">
+            <span className="prefs-nome">{T.branchPadrao}</span>
+            <input
+              ref={campo}
+              type="text"
+              value={defaultTarget}
+              placeholder="main"
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(e) => onDefaultTarget(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && onClose()}
+            />
+            <span className="prefs-ajuda">{T.branchPadraoAjuda}</span>
+          </label>
 
-        <label className="prefs-campo">
-          <span className="prefs-nome">{T.editor}</span>
-          <input
-            type="text"
-            value={editor}
-            placeholder="VS Code"
-            spellCheck={false}
-            autoComplete="off"
-            onChange={(e) => onEditor(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && onClose()}
-          />
-          <span className="prefs-ajuda"><Trechos de={T.editorAjuda} /></span>
-        </label>
+          <label className="prefs-campo">
+            <span className="prefs-nome">{T.editor}</span>
+            <input
+              type="text"
+              value={editor}
+              placeholder="VS Code"
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(e) => onEditor(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && onClose()}
+            />
+            <span className="prefs-ajuda"><Trechos de={T.editorAjuda} /></span>
+          </label>
 
-        <div className="prefs-campo">
-          <span className="prefs-nome">{T.contextoDaSessao}</span>
-          <div className="prefs-limites">
-            <label className="prefs-limite">
-              <span className="prefs-bolinha atencao" />
-              {T.amareloAPartirDe}
-              <input
-                type="number"
-                min={1}
-                max={100}
-                value={contexto.atencao}
-                onChange={(e) => {
-                  const n = e.target.valueAsNumber;
-                  if (Number.isFinite(n)) onContexto({ ...contexto, atencao: n });
-                }}
-                onKeyDown={(e) => e.key === "Enter" && onClose()}
-              />
-              %
-            </label>
-            <label className="prefs-limite">
-              <span className="prefs-bolinha perigo" />
-              {T.vermelhoAPartirDe}
-              <input
-                type="number"
-                min={1}
-                max={100}
-                value={contexto.perigo}
-                onChange={(e) => {
-                  const n = e.target.valueAsNumber;
-                  if (Number.isFinite(n)) onContexto({ ...contexto, perigo: n });
-                }}
-                onKeyDown={(e) => e.key === "Enter" && onClose()}
-              />
-              %
-            </label>
-            <label className="prefs-limite">
-              <input
-                type="checkbox"
-                checked={contexto.autoCompact}
-                onChange={(e) => onContexto({ ...contexto, autoCompact: e.target.checked })}
-              />
-              {T.autoCompactAPartirDe}
-              <input
-                type="number"
-                min={contexto.perigo + 1}
-                max={100}
-                value={contexto.autoCompactEm}
-                disabled={!contexto.autoCompact}
-                onChange={(e) => {
-                  const n = e.target.valueAsNumber;
-                  if (Number.isFinite(n)) onContexto({ ...contexto, autoCompactEm: n });
-                }}
-                onKeyDown={(e) => e.key === "Enter" && onClose()}
-              />
-              %
-            </label>
+          <div className="prefs-campo">
+            <span className="prefs-nome">{T.contextoDaSessao}</span>
+            <div className="prefs-limites">
+              <label className="prefs-limite">
+                <span className="prefs-bolinha atencao" />
+                {T.amareloAPartirDe}
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={contexto.atencao}
+                  onChange={(e) => {
+                    const n = e.target.valueAsNumber;
+                    if (Number.isFinite(n)) onContexto({ ...contexto, atencao: n });
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && onClose()}
+                />
+                %
+              </label>
+              <label className="prefs-limite">
+                <span className="prefs-bolinha perigo" />
+                {T.vermelhoAPartirDe}
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={contexto.perigo}
+                  onChange={(e) => {
+                    const n = e.target.valueAsNumber;
+                    if (Number.isFinite(n)) onContexto({ ...contexto, perigo: n });
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && onClose()}
+                />
+                %
+              </label>
+              <label className="prefs-limite">
+                <input
+                  type="checkbox"
+                  checked={contexto.autoCompact}
+                  onChange={(e) => onContexto({ ...contexto, autoCompact: e.target.checked })}
+                />
+                {T.autoCompactAPartirDe}
+                <input
+                  type="number"
+                  min={contexto.perigo + 1}
+                  max={100}
+                  value={contexto.autoCompactEm}
+                  disabled={!contexto.autoCompact}
+                  onChange={(e) => {
+                    const n = e.target.valueAsNumber;
+                    if (Number.isFinite(n)) onContexto({ ...contexto, autoCompactEm: n });
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && onClose()}
+                />
+                %
+              </label>
+            </div>
+            <span className="prefs-ajuda"><Trechos de={T.contextoAjuda} /></span>
           </div>
-          <span className="prefs-ajuda"><Trechos de={T.contextoAjuda} /></span>
         </div>
       </div>
     </div>
   );
 }
 
+/// The preferences on their own, floating over any tab: the page TermIAu opens with ⌘,
+/// in an iframe over the whole window (`differ.html?prefs`). Each change goes to the store
+/// over what is there at that moment, one after the other — the differ tab, behind,
+/// writes the same preferences. Closing tells TermIAu, which removes the iframe.
+export function PrefsFlutuantes() {
+  const [s, setS] = useState<Settings | null>(null);
+  const fila = useRef(Promise.resolve());
+
+  useEffect(() => {
+    void persist.loadSettings().then(setS);
+  }, []);
+
+  // Drawn, with the styles in: only now does TermIAu show the iframe. Before this the page
+  // is blank, and WebKit paints a blank page white.
+  const pronta = s !== null;
+  useEffect(() => {
+    if (pronta) window.parent.postMessage({ termiauPrefsPronta: true }, "*");
+  }, [pronta]);
+
+  const mudar = (parte: Partial<Settings>) => {
+    setS((atual) => atual && { ...atual, ...parte });
+    fila.current = fila.current
+      .then(async () => persist.saveSettings({ ...(await persist.loadSettings()), ...parte }))
+      .catch(() => {});
+  };
+
+  if (!s) return null;
+  return (
+    <Prefs
+      defaultTarget={s.defaultTarget}
+      onDefaultTarget={(defaultTarget) => mudar({ defaultTarget })}
+      editor={s.editor}
+      onEditor={(editor) => mudar({ editor })}
+      contexto={{
+        atencao: s.contextoAtencao,
+        perigo: s.contextoPerigo,
+        autoCompact: s.autoCompact,
+        autoCompactEm: s.autoCompactEm,
+      }}
+      onContexto={({ atencao, perigo, autoCompact, autoCompactEm }) =>
+        mudar({ contextoAtencao: atencao, contextoPerigo: perigo, autoCompact, autoCompactEm })
+      }
+      onClose={() => window.parent.postMessage({ termiauPrefsFechou: true }, "*")}
+    />
+  );
+}

@@ -42,15 +42,12 @@ window.addEventListener("message", (e) => {
   if (e.source !== window.parent) return;
   const dado = e.data as {
     termiauRepo?: string;
-    termiauPrefs?: boolean;
     termiauMudou?: string;
     termiauVisivel?: boolean;
   } | null;
   if (typeof dado?.termiauRepo === "string") {
     window.dispatchEvent(new CustomEvent("termiau:repo", { detail: dado.termiauRepo }));
   }
-  // ⌘, in TermIAu's menu: the preferences live here, so this is where they open.
-  if (dado?.termiauPrefs) window.dispatchEvent(new Event("termiau:prefs"));
   // Hidden behind a terminal, the tab doesn't need to watch anything.
   if (typeof dado?.termiauVisivel === "boolean") {
     window.dispatchEvent(new CustomEvent("termiau:visivel", { detail: dado.termiauVisivel }));

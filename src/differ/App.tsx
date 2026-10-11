@@ -13,7 +13,6 @@ import {
 import { COLLAPSE_MS, FileDiffView, type NewBookmark } from "./components/FileDiffView";
 import { Icon } from "./components/Icons";
 import { Mudou } from "./components/Mudou";
-import { Prefs } from "./components/Prefs";
 import { Sidebar, type GrupoArquivos } from "./components/Sidebar";
 import { Toolbar } from "./components/Toolbar";
 import { Trechos } from "./components/Trechos";
@@ -164,7 +163,6 @@ export default function App() {
   const [activePath, setActivePath] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [prefs, setPrefs] = useState(false);
   const [mudou, setMudou] = useState(false);
   /** The tab is on screen. TermIAu says so: inside a hidden iframe, the
       browser's visibility API keeps saying "visible". */
@@ -328,12 +326,14 @@ export default function App() {
       .then(setSettings);
   }, []);
 
-  // The view mode is a single one for the app: changed in the chat diff, it applies here too.
+  // The preferences are written by others too: the view mode by the chat diff, the rest by
+  // the floating preferences (⌘,). What arrives replaces what is here — otherwise the next
+  // save from this tab would write the old values back over them.
   useEffect(() => {
     let parar: (() => void) | undefined;
     let vivo = true;
     persist
-      .onSettings(({ viewMode }) => setSettings((s) => (s && s.viewMode !== viewMode ? { ...s, viewMode } : s)))
+      .onSettings((novas) => setSettings((s) => (s && JSON.stringify(s) !== JSON.stringify(novas) ? novas : s)))
       .then((u) => (vivo ? (parar = u) : u()))
       .catch(() => {});
     return () => {
@@ -354,14 +354,9 @@ export default function App() {
 
   useEffect(() => {
     const abrir = (e: Event) => void openRepoAt((e as CustomEvent<string>).detail);
-    const preferencias = () => setPrefs(true);
     window.addEventListener("termiau:repo", abrir);
-    window.addEventListener("termiau:prefs", preferencias);
     if (window.parent !== window) window.parent.postMessage({ termiauPronto: true }, "*");
-    return () => {
-      window.removeEventListener("termiau:repo", abrir);
-      window.removeEventListener("termiau:prefs", preferencias);
-    };
+    return () => window.removeEventListener("termiau:repo", abrir);
   }, [openRepoAt]);
 
   // With no repository open there is nothing for this tab to show, and TermIAu removes
@@ -456,7 +451,7 @@ export default function App() {
    * while the tab is visible.
    */
   useEffect(() => {
-    if (!repo || !working || !visivel || prefs) return;
+    if (!repo || !working || !visivel) return;
     let vivo = true;
     const bater = async () => {
       try {
@@ -480,7 +475,7 @@ export default function App() {
       vivo = false;
       clearInterval(relogio);
     };
-  }, [repo, working, visivel, prefs, doRefresh]);
+  }, [repo, working, visivel, doRefresh]);
 
   // .git changed. A commit writes several files in there, and a fetch
   // writes many: without the wait, the same commit would open the dialog six times.
@@ -864,26 +859,6 @@ export default function App() {
           }}
           onDismiss={() => setMudou(false)}
           visivel={visivel}
-        />
-      )}
-      {prefs && (
-        <Prefs
-          defaultTarget={settings?.defaultTarget ?? ""}
-          onDefaultTarget={(branch) => setSettings((s) => s && { ...s, defaultTarget: branch })}
-          editor={settings?.editor ?? ""}
-          onEditor={(editor) => setSettings((s) => s && { ...s, editor })}
-          contexto={{
-            atencao: settings?.contextoAtencao ?? persist.DEFAULT_SETTINGS.contextoAtencao,
-            perigo: settings?.contextoPerigo ?? persist.DEFAULT_SETTINGS.contextoPerigo,
-            autoCompact: settings?.autoCompact ?? persist.DEFAULT_SETTINGS.autoCompact,
-            autoCompactEm: settings?.autoCompactEm ?? persist.DEFAULT_SETTINGS.autoCompactEm,
-          }}
-          onContexto={({ atencao, perigo, autoCompact, autoCompactEm }) =>
-            setSettings(
-              (s) => s && { ...s, contextoAtencao: atencao, contextoPerigo: perigo, autoCompact, autoCompactEm },
-            )
-          }
-          onClose={() => setPrefs(false)}
         />
       )}
       {repo && (

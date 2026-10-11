@@ -791,11 +791,11 @@ fn texto_do_visor(bytes: Vec<u8>) -> Result<Vec<String>, String> {
     Ok(texto.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l).to_string()).collect())
 }
 
-/// The whole file, as lines. With `rf`, as it is at that commit or
-/// branch (`git show <rf>:./<file>`), not on disk — it is "how it was on main".
-#[tauri::command(async)]
-fn arquivo_ler(caminho: String, rf: Option<String>) -> Result<Arquivo, String> {
-    let p = std::path::Path::new(&caminho);
+/// The file's bytes and its stamp. With `rf`, as it is at that commit or
+/// branch (`git show <rf>:./<file>`), not on disk — it is "how it was on main" —, and
+/// with no stamp, since a git version doesn't change.
+fn bytes_do_arquivo(caminho: &str, rf: Option<String>) -> Result<(Vec<u8>, String), String> {
+    let p = std::path::Path::new(caminho);
     if !p.is_absolute() {
         return Err(format!("{}: {caminho}", tr("caminho relativo", "relative path")));
     }
@@ -804,7 +804,7 @@ fn arquivo_ler(caminho: String, rf: Option<String>) -> Result<Arquivo, String> {
             return Err(format!("{}: {caminho}", tr("não existe", "doesn't exist")));
         }
         let bytes = std::fs::read(p).map_err(|e| e.to_string())?;
-        return Ok(Arquivo { linhas: texto_do_visor(bytes)?, carimbo: carimbo(p).unwrap_or_default() });
+        return Ok((bytes, carimbo(p).unwrap_or_default()));
     };
     // A ref starting with `-` would become a git option.
     if rf.starts_with('-') || rf.contains(char::is_whitespace) {
@@ -823,7 +823,42 @@ fn arquivo_ler(caminho: String, rf: Option<String>) -> Result<Arquivo, String> {
         let erro = String::from_utf8_lossy(&out.stderr);
         return Err(erro.lines().next().unwrap_or(tr("git show falhou", "git show failed")).to_string());
     }
-    Ok(Arquivo { linhas: texto_do_visor(out.stdout)?, carimbo: String::new() })
+    Ok((out.stdout, String::new()))
+}
+
+/// The whole file, as lines.
+#[tauri::command(async)]
+fn arquivo_ler(caminho: String, rf: Option<String>) -> Result<Arquivo, String> {
+    let (bytes, carimbo) = bytes_do_arquivo(&caminho, rf)?;
+    Ok(Arquivo { linhas: texto_do_visor(bytes)?, carimbo })
+}
+
+/// Above this the viewer won't show an image: it travels to the page as base64.
+const IMAGEM_MAX: usize = 25 * 1024 * 1024;
+
+#[derive(serde::Serialize)]
+struct Imagem {
+    url: String,
+    carimbo: String,
+}
+
+/// An image for the viewer, as a data URL. The type comes from the extension, the
+/// same one that made the viewer ask for an image.
+#[tauri::command(async)]
+fn arquivo_imagem(caminho: String, rf: Option<String>) -> Result<Imagem, String> {
+    let (bytes, carimbo) = bytes_do_arquivo(&caminho, rf)?;
+    if bytes.len() > IMAGEM_MAX {
+        return Err(tr("imagem grande demais para o visor (mais de 25 MB)", "image too large for the viewer (over 25 MB)").into());
+    }
+    let ext = caminho.rsplit('.').next().unwrap_or_default().to_lowercase();
+    let tipo = match ext.as_str() {
+        "jpg" | "jpeg" => "jpeg",
+        "ico" => "x-icon",
+        "tif" => "tiff",
+        outro => outro,
+    };
+    let dados = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(Imagem { url: format!("data:image/{tipo};base64,{dados}"), carimbo })
 }
 
 /// Cheap enough for the viewer to ask every second: just a `stat`.
@@ -846,6 +881,38 @@ fn arquivo_marcar(caminho: String, linha: usize, antes: String, depois: String) 
     Ok(carimbo(p).unwrap_or_default())
 }
 
+/// The viewer's edit mode, saving. `desde` is the stamp the text was loaded with: if the
+/// file changed on disk since (Claude edited it), nothing is written — saving would
+/// erase that edit. Returns the new stamp.
+#[tauri::command]
+fn arquivo_salvar(caminho: String, texto: String, desde: String) -> Result<String, String> {
+    let p = std::path::Path::new(&caminho);
+    if !p.is_absolute() {
+        return Err(format!("{}: {caminho}", tr("caminho relativo", "relative path")));
+    }
+    if carimbo(p).unwrap_or_default() != desde {
+        return Err(tr(
+            "o arquivo mudou no disco desde que a edição começou",
+            "the file changed on disk since editing started",
+        )
+        .into());
+    }
+    let antes = std::fs::read(p).map_err(|e| e.to_string())?;
+    std::fs::write(p, com_os_fins(&texto, &antes)).map_err(|e| e.to_string())?;
+    Ok(carimbo(p).unwrap_or_default())
+}
+
+/// The text box only knows `\n` and the viewer dropped the final newline: the file
+/// gets back its CRLF, if it had them, and its final newline.
+fn com_os_fins(texto: &str, antes: &[u8]) -> String {
+    let fim = if antes.windows(2).any(|w| w == b"\r\n") { "\r\n" } else { "\n" };
+    let mut saida = texto.replace('\n', fim);
+    if antes.ends_with(b"\n") && !texto.is_empty() {
+        saida.push_str(fim);
+    }
+    saida
+}
+
 /// The rest of the file stays byte for byte, line endings included. If the line is no
 /// longer `antes`, the file changed under the viewer and nothing is replaced.
 fn trocar_linha(texto: &str, linha: usize, antes: &str, depois: &str) -> Result<String, String> {
@@ -866,6 +933,33 @@ fn trocar_linha(texto: &str, linha: usize, antes: &str, depois: &str) -> Result<
         achou = true;
     }
     if achou { Ok(saida) } else { Err(mudou()) }
+}
+
+#[derive(serde::Serialize)]
+struct Entrada {
+    nome: String,
+    pasta: bool,
+}
+
+/// A folder's entries, for the file explorer: folders first, then files, by name
+/// ignoring case. `.git` and `.DS_Store` stay out — nobody opens them from there.
+#[tauri::command(async)]
+fn pasta_listar(caminho: String) -> Result<Vec<Entrada>, String> {
+    let mut itens: Vec<Entrada> = std::fs::read_dir(&caminho)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let nome = e.file_name().to_string_lossy().into_owned();
+            if nome == ".git" || nome == ".DS_Store" {
+                return None;
+            }
+            // `metadata` follows links: a link to a folder opens as a folder.
+            let pasta = std::fs::metadata(e.path()).map(|m| m.is_dir()).unwrap_or(false);
+            Some(Entrada { nome, pasta })
+        })
+        .collect();
+    itens.sort_by(|a, b| b.pasta.cmp(&a.pasta).then_with(|| a.nome.to_lowercase().cmp(&b.nome.to_lowercase())));
+    Ok(itens)
 }
 
 /// Which of these paths (relative to `base`, absolute or with `~`) are files
@@ -1631,6 +1725,9 @@ pub fn run() {
             arquivo_ler,
             arquivo_carimbo,
             arquivo_marcar,
+            arquivo_salvar,
+            arquivo_imagem,
+            pasta_listar,
             arquivos_existem,
             abrir_no_editor,
             pty_resize,
@@ -1748,7 +1845,26 @@ Binary files a/img.png and b/img.png differ\n";
 
 #[cfg(test)]
 mod testes_visor {
-    use super::{arquivo_ler, arquivos_existem, comando_do_editor, texto_do_visor, trocar_linha};
+    use super::{arquivo_ler, arquivos_existem, com_os_fins, comando_do_editor, pasta_listar, texto_do_visor, trocar_linha};
+
+    #[test]
+    fn lista_pastas_primeiro_e_por_nome() {
+        let itens = pasta_listar(env!("CARGO_MANIFEST_DIR").into()).unwrap();
+        let primeiro_arquivo = itens.iter().position(|e| !e.pasta).unwrap();
+        assert!(itens[..primeiro_arquivo].iter().all(|e| e.pasta));
+        assert!(itens[primeiro_arquivo..].iter().all(|e| !e.pasta));
+        assert!(itens.iter().any(|e| e.pasta && e.nome == "src"));
+        assert!(itens.iter().any(|e| !e.pasta && e.nome == "Cargo.toml"));
+        assert!(itens.iter().all(|e| e.nome != ".DS_Store"));
+    }
+
+    #[test]
+    fn salvar_devolve_os_fins_do_arquivo() {
+        assert_eq!(com_os_fins("a\nb", b"x\ny\n"), "a\nb\n");
+        assert_eq!(com_os_fins("a\nb", b"x\r\ny\r\n"), "a\r\nb\r\n");
+        assert_eq!(com_os_fins("a\nb", b"x\ny"), "a\nb");
+        assert_eq!(com_os_fins("", b"x\n"), "");
+    }
 
     #[test]
     fn troca_so_a_linha_e_guarda_os_fins() {
