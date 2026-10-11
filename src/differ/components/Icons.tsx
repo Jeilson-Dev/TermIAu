@@ -60,16 +60,16 @@ const PATHS = {
   warning: <path d="M8 2.5l6 10.5H2zM8 6.5v3M8 11.5v.01" />,
   history: <path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v3h3M8 5.5V8l2 1.5" />,
   sparkle: <path d="M8 2l1.4 4.6L14 8l-4.6 1.4L8 14l-1.4-4.6L2 8l4.6-1.4z" />,
-  /// O commit: o ponto na linha da branch, que é o lado velho do diff do que está por commitar.
+  /// The commit: the dot on the branch line, which is the old side of the to-be-committed diff.
   "git-commit": (
     <>
       <circle cx="8" cy="8" r="2.75" />
       <path d="M2 8h3.25M10.75 8H14" />
     </>
   ),
-  /// O menos, para tirar do índice; o mais, que põe, já existe lá em cima.
+  /// The minus, to unstage; the plus, which stages, already exists up there.
   minus: <path d="M3.5 8h9" />,
-  /// O lápis: o que está escrito e ainda não virou commit.
+  /// The pencil: what is written and hasn't become a commit yet.
   pencil: <path d="M11.5 2.5l2 2-7.5 7.5-2.8.8.8-2.8zM10 4l2 2" />,
 } satisfies Record<string, ReactElement>;
 

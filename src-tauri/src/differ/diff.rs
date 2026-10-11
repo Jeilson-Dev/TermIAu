@@ -20,9 +20,9 @@ pub enum FileStatus {
     TypeChanged,
 }
 
-/// Como o arquivo está no índice, no diff do que está para ser commitado: o
-/// `git add` pode ter levado tudo, parte (o arquivo mudou de novo depois dele)
-/// ou nada.
+/// How the file stands in the index, in the diff of what is about to be
+/// committed: `git add` may have taken all of it, part of it (the file changed
+/// again afterwards) or nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Staged {
@@ -82,8 +82,8 @@ pub struct FileDiff {
     pub deletions: u32,
     /// Changes whenever this file's diff changes; used to invalidate "viewed" marks.
     pub fingerprint: String,
-    /// Só no diff do que está para ser commitado; `None` nos outros escopos,
-    /// onde tudo o que se vê já é commit e índice não há.
+    /// Only in the diff of what is about to be committed; `None` in the other
+    /// scopes, where everything shown is already committed and there is no index.
     pub staged: Option<Staged>,
     pub hunks: Vec<Hunk>,
 }

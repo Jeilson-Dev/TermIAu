@@ -16,21 +16,21 @@ use portable_pty::{Child, ChildKiller, CommandBuilder, MasterPty, PtySize, nativ
 use tauri::menu::{AboutMetadata, CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-/// Tudo que precisamos guardar de uma sessão de PTY viva — uma por aba.
+/// Everything we need to keep from a live PTY session — one per tab.
 struct Session {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     killer: Box<dyn ChildKiller + Send + Sync>,
-    /// Pid do shell. Comparado ao grupo em primeiro plano do terminal, diz se há
-    /// um programa rodando na frente dele (ver `pty_ocupado`).
+    /// The shell's pid. Compared to the terminal's foreground group, it tells whether
+    /// a program is running in front of it (see `pty_ocupado`).
     pid: Option<u32>,
-    /// Marcado antes de matarmos o shell de propósito (aba fechada, reload da
-    /// webview). A thread de espera consulta isto para não anunciar "encerrado"
-    /// de uma aba que o próprio usuário já mandou embora.
+    /// Set before we kill the shell on purpose (tab closed, webview
+    /// reload). The wait thread checks this so it doesn't announce "exited"
+    /// for a tab the user already sent away.
     closing: Arc<AtomicBool>,
-    /// Guardados no spawn e retirados no attach. As threads que consomem os dois
-    /// só começam quando a aba avisa que já está ouvindo os eventos dela — ver
-    /// `pty_attach`. Enquanto isso a saída do shell espera no buffer do PTY.
+    /// Stored at spawn and taken at attach. The threads that consume both
+    /// only start once the tab says it is already listening to its events — see
+    /// `pty_attach`. Meanwhile the shell's output waits in the PTY buffer.
     reader: Option<Box<dyn Read + Send>>,
     child: Option<Box<dyn Child + Send + Sync>>,
 }
@@ -38,12 +38,12 @@ struct Session {
 #[derive(Default)]
 struct Ptys {
     sessions: Mutex<HashMap<u64, Session>>,
-    /// Ids nascem aqui, não no JS: um reload da webview zeraria o contador de lá
-    /// e a aba nova colidiria com a sessão órfã de mesmo número.
+    /// Ids are born here, not in JS: a webview reload would reset the counter there
+    /// and the new tab would collide with the orphan session of the same number.
     next_id: AtomicU64,
 }
 
-/// O que é resolvido uma vez no boot e vale para a execução inteira.
+/// What is resolved once at boot and holds for the whole run.
 struct Config {
     socket: PathBuf,
 }
@@ -51,22 +51,22 @@ struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            // O pid no nome deixa duas janelas do TermIAu conviverem sem se
-            // roubarem eventos; o hook descobre o caminho pelo ambiente do painel.
+            // The pid in the name lets two TermIAu windows coexist without
+            // stealing each other's events; the hook finds the path in the panel's environment.
             socket: std::env::temp_dir().join(format!("termiau-{}.sock", std::process::id())),
         }
     }
 }
 
-/// Erros da webview são invisíveis no terminal sem esta ponte.
+/// Webview errors are invisible in the terminal without this bridge.
 #[tauri::command]
 fn js_log(msg: String) {
-    eprintln!("[termiau] erro na webview: {msg}");
+    eprintln!("[termiau] webview error: {msg}");
 }
 
-/// Variáveis que uma sessão de shell legitimamente precisa herdar do sistema.
-/// Tudo o mais é lixo de quem lançou o app (npm, cargo, o terminal-pai) e não
-/// tem por que aparecer aqui dentro: o login shell reconstrói PATH, FPATH etc.
+/// Variables a shell session legitimately needs to inherit from the system.
+/// Everything else is junk from whoever launched the app (npm, cargo, the parent
+/// terminal) and has no business here: the login shell rebuilds PATH, FPATH etc.
 const HERDA: &[&str] = &[
     "HOME",
     "USER",
@@ -76,17 +76,17 @@ const HERDA: &[&str] = &[
     "LANG",
     "LC_ALL",
     "LC_CTYPE",
-    "SSH_AUTH_SOCK",              // sem isto, git/ssh com agente para de funcionar
-    "__CF_USER_TEXT_ENCODING",    // codificação de texto do macOS
+    "SSH_AUTH_SOCK",              // without this, git/ssh with an agent stop working
+    "__CF_USER_TEXT_ENCODING",    // macOS text encoding
 ];
 
 fn shell(cwd: Option<String>, id: u64, cfg: &Config) -> CommandBuilder {
     let sh = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
     let mut cmd = CommandBuilder::new(sh);
-    cmd.arg("-l"); // login shell: carrega o PATH completo do usuário
+    cmd.arg("-l"); // login shell: loads the user's full PATH
 
-    // Começa de zero: senão o shell herda o ambiente de quem abriu o app
-    // (npm_*, CARGO_*, ITERM_SESSION_ID...) e se comporta como se fosse aquele contexto.
+    // Start from scratch: otherwise the shell inherits the environment of whoever opened
+    // the app (npm_*, CARGO_*, ITERM_SESSION_ID...) and behaves as if it were in that context.
     cmd.env_clear();
     for k in HERDA {
         if let Ok(v) = std::env::var(k) {
@@ -94,18 +94,18 @@ fn shell(cwd: Option<String>, id: u64, cfg: &Config) -> CommandBuilder {
         }
     }
 
-    // PATH mínimo de bootstrap; /etc/zprofile + .zshrc montam o resto.
-    // O `termiau` vai no fim: o /etc/zprofile põe os do sistema na frente e
-    // mantém os que já estavam, então ele continua achável sem passar na frente
-    // de nada seu.
+    // Minimal bootstrap PATH; /etc/zprofile + .zshrc build the rest.
+    // `termiau` goes last: /etc/zprofile puts the system ones in front and
+    // keeps those already there, so it stays findable without getting ahead
+    // of anything of yours.
     let mut path = String::from("/usr/bin:/bin:/usr/sbin:/sbin");
     if let Some(bin) = dir_cli() {
         path = format!("{path}:{}", bin.display());
     }
     cmd.env("PATH", path);
 
-    // Aba nova herda o diretório da aba de origem, como no iTerm2. Um cwd que
-    // não existe mais (pasta apagada) faria o spawn falhar: cai pro HOME.
+    // A new tab inherits the source tab's directory, like iTerm2. A cwd that
+    // no longer exists (deleted folder) would make the spawn fail: fall back to HOME.
     let dir = cwd
         .filter(|p| std::path::Path::new(p).is_dir())
         .or_else(dirs_home);
@@ -113,14 +113,14 @@ fn shell(cwd: Option<String>, id: u64, cfg: &Config) -> CommandBuilder {
         cmd.cwd(dir);
     }
 
-    // Sem isto, aplicações TUI não sabem que podem usar cor.
+    // Without this, TUI apps don't know they can use color.
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "TermIAu");
 
-    // Como o hook do Claude Code sabe pra quem está falando. Ele roda como neto
-    // deste shell, então herda os dois — e fora do TermIAu não existem, que é o
-    // que faz o mesmo hook ficar calado em outro terminal.
+    // How the Claude Code hook knows who it is talking to. It runs as a grandchild
+    // of this shell, so it inherits both — and outside TermIAu they don't exist, which
+    // is what keeps the same hook quiet in another terminal.
     cmd.env("TERMIAU_PAINEL", id.to_string());
     cmd.env("TERMIAU_SOCK", &cfg.socket);
     cmd
@@ -130,9 +130,9 @@ fn dirs_home() -> Option<String> {
     std::env::var("HOME").ok()
 }
 
-/// Abre um shell novo e devolve o id da sessão. Os eventos dela saem em
-/// `pty://data/<id>` e `pty://exit/<id>`, para cada aba ouvir só o que é seu.
-/// O shell já começa a rodar aqui, mas ninguém lê a saída dele até `pty_attach`.
+/// Opens a new shell and returns the session id. Its events go out on
+/// `pty://data/<id>` and `pty://exit/<id>`, so each tab hears only its own.
+/// The shell starts running here, but nobody reads its output until `pty_attach`.
 #[tauri::command]
 fn pty_spawn(
     state: State<'_, Ptys>,
@@ -150,7 +150,7 @@ fn pty_spawn(
     let child = pair.slave.spawn_command(shell(cwd, id, &cfg)).map_err(|e| e.to_string())?;
     let killer = child.clone_killer();
     let pid = child.process_id();
-    drop(pair.slave); // solta o lado escravo, senão nunca vemos o EOF
+    drop(pair.slave); // release the slave side, otherwise we never see EOF
 
     let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
@@ -171,29 +171,29 @@ fn pty_spawn(
     Ok(id)
 }
 
-/// Liga as threads que bombeiam a sessão. Separado do spawn de propósito: um
-/// evento emitido antes de a aba chamar `listen` seria descartado, e o que se
-/// perderia é justamente o começo do prompt.
+/// Starts the threads that pump the session. Separate from spawn on purpose: an
+/// event emitted before the tab calls `listen` would be dropped, and what would
+/// be lost is precisely the start of the prompt.
 #[tauri::command]
 fn pty_attach(app: AppHandle, state: State<'_, Ptys>, id: u64) -> Result<(), String> {
     let (mut reader, mut child, closing) = {
         let mut sessions = state.sessions.lock().unwrap();
-        let s = sessions.get_mut(&id).ok_or("pty não iniciado")?;
-        let reader = s.reader.take().ok_or("pty já ligado")?;
-        let child = s.child.take().ok_or("pty já ligado")?;
+        let s = sessions.get_mut(&id).ok_or("pty not started")?;
+        let reader = s.reader.take().ok_or("pty already attached")?;
+        let child = s.child.take().ok_or("pty already attached")?;
         (reader, child, s.closing.clone())
     };
 
-    // Thread de leitura: bombeia a saída do shell pra janela.
+    // Reader thread: pumps the shell's output to the window.
     let reader_app = app.clone();
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
-                Err(e) => { eprintln!("[termiau] erro de leitura no pty {id}: {e}"); break }
+                Err(e) => { eprintln!("[termiau] read error on pty {id}: {e}"); break }
                 Ok(n) => {
-                    // base64 porque um chunk pode cortar um caractere UTF-8 ao meio.
+                    // base64 because a chunk may cut a UTF-8 character in half.
                     let payload = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
                     let _ = reader_app.emit(&format!("pty://data/{id}"), payload);
                 }
@@ -201,7 +201,7 @@ fn pty_attach(app: AppHandle, state: State<'_, Ptys>, id: u64) -> Result<(), Str
         }
     });
 
-    // Thread de espera: avisa a UI quando o shell morrer sozinho (`exit`, crash).
+    // Wait thread: tells the UI when the shell dies on its own (`exit`, crash).
     std::thread::spawn(move || {
         let code = child.wait().ok().map(|s| s.exit_code());
         if !closing.load(Ordering::SeqCst) {
@@ -212,8 +212,8 @@ fn pty_attach(app: AppHandle, state: State<'_, Ptys>, id: u64) -> Result<(), Str
     Ok(())
 }
 
-/// Um link do terminal ou do chat, no navegador padrão. Dentro do WebView o
-/// `window.open` não vai a lugar nenhum.
+/// A link from the terminal or the chat, in the default browser. Inside the WebView
+/// `window.open` goes nowhere.
 #[tauri::command]
 fn abrir_link(url: String) -> Result<(), String> {
     if !["http://", "https://", "mailto:"].iter().any(|p| url.starts_with(p)) {
@@ -226,7 +226,7 @@ fn abrir_link(url: String) -> Result<(), String> {
 #[tauri::command]
 fn pty_write(state: State<'_, Ptys>, id: u64, data: String) -> Result<(), String> {
     let mut sessions = state.sessions.lock().unwrap();
-    let s = sessions.get_mut(&id).ok_or("pty não iniciado")?;
+    let s = sessions.get_mut(&id).ok_or("pty not started")?;
     s.writer.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
     s.writer.flush().map_err(|e| e.to_string())
 }
@@ -234,14 +234,14 @@ fn pty_write(state: State<'_, Ptys>, id: u64, data: String) -> Result<(), String
 #[tauri::command]
 fn pty_resize(state: State<'_, Ptys>, id: u64, rows: u16, cols: u16) -> Result<(), String> {
     let sessions = state.sessions.lock().unwrap();
-    let s = sessions.get(&id).ok_or("pty não iniciado")?;
+    let s = sessions.get(&id).ok_or("pty not started")?;
     s.master
         .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| e.to_string())
 }
 
-/// Diretório de trabalho atual da sessão — o que a aba nova vai herdar.
-/// No macOS o kernel responde isso pelo pid do processo em primeiro plano do PTY.
+/// The session's current working directory — what the new tab will inherit.
+/// On macOS the kernel answers this by the pid of the PTY's foreground process.
 #[tauri::command]
 fn pty_cwd(state: State<'_, Ptys>, id: u64) -> Option<String> {
     let sessions = state.sessions.lock().unwrap();
@@ -252,8 +252,8 @@ fn pty_cwd(state: State<'_, Ptys>, id: u64) -> Option<String> {
 
 #[cfg(target_os = "macos")]
 fn cwd_do_processo(pid: i32) -> Option<String> {
-    // `lsof -a -d cwd` é o caminho sem dependência nova; o -F sai em campos
-    // prefixados por letra, e o do cwd é `n`.
+    // `lsof -a -d cwd` is the path with no new dependency; -F outputs fields
+    // prefixed by a letter, and the cwd one is `n`.
     let out = std::process::Command::new("/usr/sbin/lsof")
         .args(["-a", "-d", "cwd", "-p", &pid.to_string(), "-Fn"])
         .output()
@@ -270,7 +270,7 @@ fn cwd_do_processo(pid: i32) -> Option<String> {
         .map(|p| p.to_string_lossy().into_owned())
 }
 
-/// Fecha uma aba: mata o shell dela e esquece a sessão.
+/// Closes a tab: kills its shell and forgets the session.
 #[tauri::command]
 fn pty_close(state: State<'_, Ptys>, id: u64) {
     if let Some(mut s) = state.sessions.lock().unwrap().remove(&id) {
@@ -279,8 +279,8 @@ fn pty_close(state: State<'_, Ptys>, id: u64) {
     }
 }
 
-/// Toda recarga da webview começa do zero: sem isto os shells das abas
-/// anteriores continuariam vivos, sem nenhuma aba apontando pra eles.
+/// Every webview reload starts from scratch: without this the previous tabs'
+/// shells would stay alive, with no tab pointing at them.
 #[tauri::command]
 fn pty_close_all(state: State<'_, Ptys>) {
     for (_, mut s) in state.sessions.lock().unwrap().drain() {
@@ -289,9 +289,9 @@ fn pty_close_all(state: State<'_, Ptys>) {
     }
 }
 
-/// Há um programa na frente do shell — o app que o play mandou rodar, um `vim`.
-/// O terminal tem um grupo de processos em primeiro plano; quando ele é o próprio
-/// shell, o comando digitado já terminou.
+/// There is a program in front of the shell — the app the play button launched, a `vim`.
+/// The terminal has a foreground process group; when it is the shell itself,
+/// the typed command has already finished.
 #[tauri::command]
 fn pty_ocupado(state: State<'_, Ptys>, id: u64) -> bool {
     let sessions = state.sessions.lock().unwrap();
@@ -302,15 +302,15 @@ fn pty_ocupado(state: State<'_, Ptys>, id: u64) -> bool {
     }
 }
 
-/// Manda um sinal ao programa em primeiro plano. Vai para o grupo inteiro, como
-/// o Ctrl+C: os filhos que ele abriu (um servidor, o processo do emulador) saem
-/// junto em vez de ficarem órfãos. O shell nunca recebe — fechar o painel é outra
-/// conversa, e é do `pty_close`.
+/// Sends a signal to the foreground program. It goes to the whole group, like
+/// Ctrl+C: the children it spawned (a server, the emulator process) exit
+/// along with it instead of being orphaned. The shell never gets it — closing the panel
+/// is another matter, handled by `pty_close`.
 #[tauri::command]
 fn pty_sinal(state: State<'_, Ptys>, id: u64, sinal: i32) -> Result<(), String> {
     let sessions = state.sessions.lock().unwrap();
-    let s = sessions.get(&id).ok_or("pty não iniciado")?;
-    let frente = s.master.process_group_leader().ok_or("sem processo em primeiro plano")?;
+    let s = sessions.get(&id).ok_or("pty not started")?;
+    let frente = s.master.process_group_leader().ok_or("no foreground process")?;
     if Some(frente as u32) == s.pid {
         return Ok(());
     }
@@ -320,19 +320,19 @@ fn pty_sinal(state: State<'_, Ptys>, id: u64, sinal: i32) -> Result<(), String> 
     Ok(())
 }
 
-/// O `.vscode/launch.json` do projeto de um painel, com o `tasks.json` ao lado.
+/// The project's `.vscode/launch.json` for a panel, with `tasks.json` beside it.
 #[derive(serde::Serialize)]
 struct Launch {
-    /// A pasta que tem o `.vscode`: é o `${workspaceFolder}` das configurações.
+    /// The folder holding `.vscode`: it is the configurations' `${workspaceFolder}`.
     pasta: String,
     home: String,
     launch: String,
     tasks: Option<String>,
 }
 
-/// O mais próximo subindo a partir do diretório do painel: um painel numa
-/// subpasta do projeto ainda roda o launch.json da raiz, como no VS Code aberto
-/// na raiz do repositório.
+/// The nearest one going up from the panel's directory: a panel in a
+/// project subfolder still runs the root's launch.json, like VS Code opened
+/// at the repository root.
 #[tauri::command]
 fn launch_ler(cwd: String) -> Option<Launch> {
     std::path::Path::new(&cwd).ancestors().find_map(|dir| {
@@ -347,8 +347,8 @@ fn launch_ler(cwd: String) -> Option<Launch> {
     })
 }
 
-/// Um projeto Dart é Flutter quando o pubspec depende do SDK do Flutter — é o
-/// que decide entre `flutter run` e `dart run`, como a extensão do Dart decide.
+/// A Dart project is Flutter when the pubspec depends on the Flutter SDK — it is
+/// what decides between `flutter run` and `dart run`, as the Dart extension does.
 #[tauri::command]
 fn projeto_flutter(pasta: String) -> bool {
     std::fs::read_to_string(std::path::Path::new(&pasta).join("pubspec.yaml"))
@@ -356,32 +356,32 @@ fn projeto_flutter(pasta: String) -> bool {
         .unwrap_or(false)
 }
 
-/// Um pedaço do transcript de uma sessão do Claude Code.
+/// A chunk of a Claude Code session transcript.
 #[derive(serde::Serialize)]
 struct Trecho {
     texto: String,
-    /// Até onde este pedaço foi, em bytes: é o `desde` da próxima leitura.
+    /// How far this chunk went, in bytes: it is the next read's `desde`.
     fim: u64,
-    /// O começo ficou de fora (arquivo grande demais), ou o arquivo encolheu e a
-    /// leitura recomeçou: o que a tela já mostrava não vale mais.
+    /// The start was left out (file too large), or the file shrank and the
+    /// read started over: what the screen already showed is no longer valid.
     do_zero: bool,
     cortado: bool,
 }
 
-/// O transcript inteiro de uma sessão longa passa de dezenas de MB, quase tudo
-/// resultado de ferramenta. A conversa que interessa é o fim dele.
+/// The full transcript of a long session exceeds tens of MB, almost all of it
+/// tool results. The conversation that matters is its end.
 const TRANSCRICAO_TETO: u64 = 6 * 1024 * 1024;
 
-/// O que o transcript ganhou desde `desde`. Só linhas inteiras: a última, se o
-/// Claude ainda a está escrevendo, fica para a próxima leitura.
+/// What the transcript gained since `desde`. Whole lines only: the last one, if
+/// Claude is still writing it, waits for the next read.
 ///
-/// O caminho vem do hook, mas quem o entrega é a webview — então só vale um
-/// `.jsonl` de dentro de `~/.claude`, e não qualquer arquivo do disco.
+/// The path comes from the hook, but the webview delivers it — so only a
+/// `.jsonl` inside `~/.claude` is accepted, not any file on disk.
 #[tauri::command]
 fn transcricao_ler(caminho: String, desde: u64) -> Result<Trecho, String> {
     use std::io::{Seek, SeekFrom};
 
-    let base = dir_claude().ok_or("sem pasta do Claude Code")?;
+    let base = dir_claude().ok_or("no Claude Code folder")?;
     let base = base.canonicalize().map_err(|e| e.to_string())?;
     let arquivo = PathBuf::from(&caminho).canonicalize().map_err(|e| e.to_string())?;
     if !arquivo.starts_with(&base) || arquivo.extension().is_none_or(|e| e != "jsonl") {
@@ -390,7 +390,7 @@ fn transcricao_ler(caminho: String, desde: u64) -> Result<Trecho, String> {
 
     let mut f = std::fs::File::open(&arquivo).map_err(|e| e.to_string())?;
     let tamanho = f.metadata().map_err(|e| e.to_string())?.len();
-    // Menor do que o que já foi lido: o arquivo foi reescrito. Recomeça.
+    // Smaller than what was already read: the file was rewritten. Start over.
     let mut do_zero = desde > tamanho;
     let mut inicio = if do_zero { 0 } else { desde };
     let cortado = tamanho - inicio > TRANSCRICAO_TETO;
@@ -402,12 +402,12 @@ fn transcricao_ler(caminho: String, desde: u64) -> Result<Trecho, String> {
     f.seek(SeekFrom::Start(inicio)).map_err(|e| e.to_string())?;
     let mut bytes = Vec::new();
     f.take(tamanho - inicio).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-    // Pulou para o meio do arquivo: a primeira linha veio pela metade.
+    // Jumped into the middle of the file: the first line came in half.
     let pular = if cortado { bytes.iter().position(|b| *b == b'\n').map_or(bytes.len(), |p| p + 1) } else { 0 };
     let ate = bytes.iter().rposition(|b| *b == b'\n').map_or(pular, |p| (p + 1).max(pular));
-    // Quase todo o peso do arquivo é resultado de ferramenta (um arquivo lido, a
-    // saída de um comando), que o chat não mostra. Fica aqui: mandar isso para a
-    // webview e fazê-la interpretar megabytes de JSON travava a tela.
+    // Almost all of the file's weight is tool results (a file read, a
+    // command's output), which the chat doesn't show. It stays here: sending it to the
+    // webview and making it parse megabytes of JSON froze the screen.
     let mut texto = String::new();
     for linha in String::from_utf8_lossy(&bytes[pular..ate]).lines() {
         let fala = linha.contains(r#""type":"user""#) || linha.contains(r#""type":"assistant""#);
@@ -430,12 +430,12 @@ fn transcricao_ler(caminho: String, desde: u64) -> Result<Trecho, String> {
     })
 }
 
-/// O diff que o Claude Code guardou no resultado de uma ferramenta, já enxuto:
-/// `{"type":"diff","arquivos":[{"caminho","hunks"}]}`. É o mesmo que o terminal
-/// desenha, com os números de linha do arquivo. Vem de dois lugares: o
-/// `structuredPatch` de um Edit ou Write, e o `bashEditDiff` de um comando
-/// (um `sed -i`, um script) que mexeu em arquivo. O resto do resultado — o
-/// arquivo inteiro de antes, num Edit — fica aqui.
+/// The diff Claude Code stored in a tool result, already trimmed:
+/// `{"type":"diff","arquivos":[{"caminho","hunks"}]}`. It is the same one the terminal
+/// draws, with the file's line numbers. It comes from two places: the
+/// `structuredPatch` of an Edit or Write, and the `bashEditDiff` of a command
+/// (a `sed -i`, a script) that changed a file. The rest of the result — the
+/// whole previous file, in an Edit — stays here.
 fn diff_do_resultado(linha: &str) -> Option<String> {
     use serde_json::{json, Value};
     if !linha.contains(r#""structuredPatch""#) && !linha.contains(r#""bashEditDiff""#) {
@@ -460,7 +460,7 @@ fn diff_do_resultado(linha: &str) -> Option<String> {
         }
     } else if let Some(caminho) = r.get("filePath") {
         let mut h = hunks(&r["structuredPatch"]);
-        // Arquivo novo: o Write não traz patch, só o conteúdo.
+        // New file: Write brings no patch, only the content.
         if h.is_empty() && r.get("type").and_then(Value::as_str) == Some("create") {
             if let Some(c) = r.get("content").and_then(Value::as_str) {
                 let linhas: Vec<String> = c.lines().map(|l| format!("+{l}")).collect();
@@ -476,10 +476,10 @@ fn diff_do_resultado(linha: &str) -> Option<String> {
     Some(json!({ "type": "diff", "arquivos": arquivos }).to_string())
 }
 
-/// O diff que o nosso hook tirou de um Bash, para quando o Claude Code não
-/// gravou nenhum (um comando que mexeu em arquivo e terminou com erro). Fica em
-/// `~/.termiau/diffs/<sessão>/<tool_use_id>.patch`; a sessão é o nome do
-/// transcript.
+/// The diff our hook took from a Bash, for when Claude Code didn't
+/// store one (a command that changed a file and ended with an error). It lives in
+/// `~/.termiau/diffs/<session>/<tool_use_id>.patch`; the session is the
+/// transcript's name.
 fn diff_do_hook(transcript: &std::path::Path, linha: &str) -> Option<String> {
     let id = linha.split(r#""tool_use_id":""#).nth(1)?.split('"').next()?;
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
@@ -495,10 +495,10 @@ fn diff_do_hook(transcript: &std::path::Path, linha: &str) -> Option<String> {
     Some(serde_json::json!({ "type": "diff", "arquivos": arquivos }).to_string())
 }
 
-/// Um `git diff` em arquivos e trechos, no mesmo formato do `structuredPatch`
-/// do Claude Code. A primeira linha, `# raiz <pasta>`, é do hook: é dela que os
-/// caminhos `a/…` e `b/…` do git viram absolutos. Arquivo binário não tem
-/// trecho e fica de fora.
+/// A `git diff` into files and hunks, in the same format as Claude Code's
+/// `structuredPatch`. The first line, `# raiz <folder>`, is from the hook: it is what
+/// turns git's `a/…` and `b/…` paths absolute. A binary file has no
+/// hunk and is left out.
 fn arquivos_do_patch(texto: &str) -> Vec<serde_json::Value> {
     use serde_json::json;
     let mut linhas = texto.lines();
@@ -521,7 +521,7 @@ fn arquivos_do_patch(texto: &str) -> Vec<serde_json::Value> {
             }
             hunks.clear();
         };
-    // O início de um trecho: `@@ -velha[,n] +nova[,n] @@`.
+    // The start of a hunk: `@@ -old[,n] +new[,n] @@`.
     let inicio = |l: &str| -> Option<(u64, u64)> {
         let mut partes = l.strip_prefix("@@ ")?.split(' ');
         let num = |p: &str| p.split(',').next().and_then(|n| n.parse::<u64>().ok());
@@ -532,8 +532,8 @@ fn arquivos_do_patch(texto: &str) -> Vec<serde_json::Value> {
             fechar_hunk(&mut atual, &mut hunks);
             fechar_arquivo(&mut caminho, &mut hunks, &mut arquivos);
         } else if atual.is_none() && (l.starts_with("--- ") || l.starts_with("+++ ")) {
-            // O `+++ b/…` diz o nome; num arquivo apagado ele é /dev/null, e
-            // vale o `--- a/…` que veio antes.
+            // `+++ b/…` gives the name; for a deleted file it is /dev/null, and
+            // the `--- a/…` that came before counts.
             if let Some(p) = l[4..].strip_prefix("a/").or_else(|| l[4..].strip_prefix("b/")) {
                 caminho = Some(format!("{}/{}", raiz.trim_end_matches('/'), p));
             }
@@ -553,16 +553,16 @@ fn arquivos_do_patch(texto: &str) -> Vec<serde_json::Value> {
     arquivos
 }
 
-/// Um `/comando` que o Claude Code aceita além dos que já vêm nele: os comandos
-/// e as skills do usuário, do projeto e dos plugins instalados.
+/// A `/command` Claude Code accepts beyond its built-in ones: the user's,
+/// the project's and the installed plugins' commands and skills.
 #[derive(serde::Serialize)]
 struct Comando {
     nome: String,
     descricao: String,
 }
 
-/// A `description:` do cabeçalho de um comando ou de uma skill. Só o começo do
-/// arquivo é lido, e só a primeira linha dela interessa: é o que cabe na lista.
+/// The `description:` in a command's or skill's header. Only the start of the
+/// file is read, and only its first line matters: it is what fits in the list.
 fn descricao_de(arquivo: &std::path::Path) -> String {
     let mut texto = String::new();
     let Ok(f) = std::fs::File::open(arquivo) else { return texto };
@@ -578,8 +578,8 @@ fn descricao_de(arquivo: &std::path::Path) -> String {
         .unwrap_or_default()
 }
 
-/// Os `.md` de uma pasta de comandos. Subpasta vira prefixo, como no Claude
-/// Code: `commands/git/commit.md` é o `/git:commit`.
+/// The `.md` files of a commands folder. A subfolder becomes a prefix, like in Claude
+/// Code: `commands/git/commit.md` is `/git:commit`.
 fn comandos_da_pasta(dir: &std::path::Path, prefixo: &str, fundo: u8, saida: &mut Vec<Comando>) {
     let Ok(itens) = std::fs::read_dir(dir) else { return };
     for item in itens.flatten() {
@@ -595,7 +595,7 @@ fn comandos_da_pasta(dir: &std::path::Path, prefixo: &str, fundo: u8, saida: &mu
     }
 }
 
-/// As skills de uma pasta: cada subpasta com um `SKILL.md` é uma.
+/// The skills of a folder: each subfolder with a `SKILL.md` is one.
 fn skills_da_pasta(dir: &std::path::Path, prefixo: &str, saida: &mut Vec<Comando>) {
     let Ok(itens) = std::fs::read_dir(dir) else { return };
     for item in itens.flatten() {
@@ -607,19 +607,19 @@ fn skills_da_pasta(dir: &std::path::Path, prefixo: &str, saida: &mut Vec<Comando
     }
 }
 
-/// O que dá para chamar com `/` na sessão que roda em `pasta`, fora os
-/// comandos embutidos do Claude Code (esses a webview já conhece). O projeto
-/// vem antes do usuário, e o usuário antes dos plugins: é a ordem em que a
-/// lista mostra, e o que é do projeto é o que mais se usa nele.
+/// What can be called with `/` in the session running in `pasta`, besides
+/// Claude Code's built-in commands (the webview already knows those). The project
+/// comes before the user, and the user before plugins: it is the order the
+/// list shows, and the project's are the most used in it.
 #[tauri::command]
 fn comandos_listar(pasta: Option<String>) -> Vec<Comando> {
     let mut saida = Vec::new();
     if let Some(pasta) = pasta {
-        // Subindo a partir da pasta da sessão, como o Claude Code faz: a sessão
-        // aberta numa subpasta ainda enxerga o `.claude` da raiz do projeto.
+        // Going up from the session's folder, as Claude Code does: a session
+        // opened in a subfolder still sees the project root's `.claude`.
         for dir in std::path::Path::new(&pasta).ancestors() {
             let claude = dir.join(".claude");
-            // O `~/.claude` é o do usuário, e entra logo abaixo.
+            // `~/.claude` is the user's, and comes right below.
             if dir_claude().is_some_and(|d| d == claude) {
                 break;
             }
@@ -631,7 +631,7 @@ fn comandos_listar(pasta: Option<String>) -> Vec<Comando> {
     comandos_da_pasta(&base.join("commands"), "", 3, &mut saida);
     skills_da_pasta(&base.join("skills"), "", &mut saida);
 
-    // Cada plugin instalado traz os seus, chamados como `/plugin:nome`.
+    // Each installed plugin brings its own, called as `/plugin:name`.
     let plugins = std::fs::read_to_string(base.join("plugins/installed_plugins.json"))
         .ok()
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
@@ -649,15 +649,15 @@ fn comandos_listar(pasta: Option<String>) -> Vec<Comando> {
     saida
 }
 
-/// As perguntas do Claude (`AskUserQuestion`) esperando resposta do modo chat:
-/// a conexão do hook fica aberta aqui, por um número dado a ela ao chegar (o
-/// `PermissionRequest` não traz o `tool_use_id`), até o chat responder
-/// (`pergunta_responder`) ou desistir dela (`pergunta_largar`).
+/// Claude's questions (`AskUserQuestion`) waiting for an answer from chat mode:
+/// the hook's connection stays open here, under a number given to it on arrival (the
+/// `PermissionRequest` doesn't carry the `tool_use_id`), until the chat answers
+/// (`pergunta_responder`) or gives it up (`pergunta_largar`).
 #[derive(Default)]
 struct Pendentes(Mutex<HashMap<String, std::os::unix::net::UnixStream>>);
 
-/// Devolve ao hook a decisão que o chat montou, e fecha a conexão: o que for
-/// escrito aqui é a saída do hook, e o Claude Code a lê como a resposta.
+/// Returns to the hook the decision the chat built, and closes the connection: what is
+/// written here is the hook's output, and Claude Code reads it as the answer.
 #[tauri::command]
 fn pergunta_responder(pendentes: State<'_, Pendentes>, id: String, resposta: String) -> Result<(), String> {
     let Some(mut fluxo) = pendentes.0.lock().unwrap().remove(&id) else {
@@ -666,42 +666,42 @@ fn pergunta_responder(pendentes: State<'_, Pendentes>, id: String, resposta: Str
     fluxo.write_all(resposta.as_bytes()).map_err(|e| e.to_string())
 }
 
-/// Fecha a conexão sem resposta: o hook sai calado e a pergunta fica com o
-/// terminal. É o que acontece quando ela foi respondida lá.
+/// Closes the connection without an answer: the hook exits quietly and the question stays with the
+/// terminal. That is what happens when it was answered there.
 #[tauri::command]
 fn pergunta_largar(pendentes: State<'_, Pendentes>, id: String) {
     pendentes.0.lock().unwrap().remove(&id);
 }
 
-/// Escuta os eventos que os hooks do Claude Code mandam e entrega pra webview.
-/// Um socket unix, uma conexão por evento: o hook escreve um JSON e fecha. A
-/// exceção é a pergunta do Claude: ela chega com `"espera":true` e uma quebra
-/// de linha no fim, e a conexão fica aberta esperando a resposta (ver
+/// Listens to the events Claude Code's hooks send and hands them to the webview.
+/// A unix socket, one connection per event: the hook writes a JSON and closes. The
+/// exception is Claude's question: it arrives with `"espera":true` and a trailing
+/// newline, and the connection stays open waiting for the answer (see
 /// `Pendentes`).
 ///
-/// Por que socket e não sequência de escape pela própria saída do painel: a
-/// segunda seria mais elegante (a identidade do painel viria de graça), mas o
-/// hook e o Claude Code escrevem no mesmo tty ao mesmo tempo, e um `delta` de
-/// alguns KB passa do tamanho em que a escrita deixa de ser atômica — o risco é
-/// picar uma sequência do próprio Claude e sujar a tela.
+/// Why a socket and not an escape sequence through the panel's own output: the
+/// latter would be more elegant (the panel's identity would come for free), but the
+/// hook and Claude Code write to the same tty at the same time, and a `delta` of
+/// a few KB exceeds the size at which writes stop being atomic — the risk is
+/// chopping one of Claude's own sequences and garbling the screen.
 fn ouvir_hooks(app: AppHandle, caminho: PathBuf) {
     let _ = std::fs::remove_file(&caminho);
     limpar_sockets_orfaos(&caminho);
     let ouvinte = match UnixListener::bind(&caminho) {
         Ok(l) => l,
-        Err(e) => return eprintln!("[termiau] não consegui abrir {caminho:?}: {e}"),
+        Err(e) => return eprintln!("[termiau] couldn't open {caminho:?}: {e}"),
     };
 
     std::thread::spawn(move || {
         for conexao in ouvinte.incoming() {
             let Ok(fluxo) = conexao else { continue };
             let app = app.clone();
-            // Uma thread por evento: um hook lento não pode segurar a fila dos outros.
+            // One thread per event: a slow hook must not hold up the others' queue.
             std::thread::spawn(move || {
                 use std::io::BufRead;
                 let mut texto = String::new();
-                // Até a quebra de linha ou o fim, o que vier antes. Teto pra um
-                // payload absurdo não virar memória sem fim.
+                // Up to the newline or the end, whichever comes first. A ceiling so an
+                // absurd payload doesn't turn into endless memory.
                 let Ok(leitor) = fluxo.try_clone() else { return };
                 if std::io::BufReader::new(leitor.take(256 * 1024)).read_line(&mut texto).is_err() {
                     return;
@@ -709,8 +709,8 @@ fn ouvir_hooks(app: AppHandle, caminho: PathBuf) {
                 if texto.trim().is_empty() {
                     return;
                 }
-                // A pergunta ganha um número, que vai junto para a webview: é
-                // por ele que a resposta volta para esta conexão.
+                // The question gets a number, which goes along to the webview: it is
+                // how the answer comes back to this connection.
                 let texto = match pergunta_em_espera(&texto) {
                     Some(mut v) => {
                         static PROXIMA: AtomicU64 = AtomicU64::new(1);
@@ -727,25 +727,25 @@ fn ouvir_hooks(app: AppHandle, caminho: PathBuf) {
     });
 }
 
-/// O evento, já lido, se for uma pergunta que espera resposta.
+/// The event, already read, if it is a question that expects an answer.
 fn pergunta_em_espera(texto: &str) -> Option<serde_json::Value> {
     let v: serde_json::Value = serde_json::from_str(texto.trim()).ok()?;
     (v["espera"].as_bool() == Some(true)).then_some(v)
 }
 
-// ---------- o visor: um arquivo mostrado dentro do painel ----------
+// ---------- the viewer: a file shown inside the panel ----------
 
-/// O comando que o Claude (ou você) roda para abrir um arquivo no painel:
-/// `termiau ver arquivo:linha`. Ele só fala com o socket, como o hook.
+/// The command Claude (or you) runs to open a file in the panel:
+/// `termiau ver file:line`. It only talks to the socket, like the hook.
 const CLI: &str = include_str!("../../hooks/termiau");
 
 fn dir_cli() -> Option<PathBuf> {
     dirs_home().map(|h| PathBuf::from(h).join(".termiau/bin"))
 }
 
-/// Escreve o `termiau` em ~/.termiau/bin a cada abertura do app, se mudou. Fica
-/// fora do bundle porque o shell do painel precisa achá-lo por um caminho fixo,
-/// e é por esse caminho que o hook o ensina ao Claude.
+/// Writes `termiau` to ~/.termiau/bin every time the app opens, if it changed. It
+/// lives outside the bundle because the panel's shell needs to find it at a fixed path,
+/// and that path is how the hook teaches it to Claude.
 fn instalar_cli() {
     use std::os::unix::fs::PermissionsExt;
     let Some(dir) = dir_cli() else { return };
@@ -757,18 +757,18 @@ fn instalar_cli() {
         .and_then(|_| std::fs::write(&destino, CLI))
         .and_then(|_| std::fs::set_permissions(&destino, std::fs::Permissions::from_mode(0o755)));
     if let Err(e) = feito {
-        eprintln!("[termiau] não consegui instalar {destino:?}: {e}");
+        eprintln!("[termiau] couldn't install {destino:?}: {e}");
     }
 }
 
-/// Acima disto o visor não abre: é um arquivo para ler, não um log de gigas.
+/// Above this the viewer won't open: it is a file to read, not a log of gigabytes.
 const VISOR_MAX: u64 = 5 * 1024 * 1024;
 
 #[derive(serde::Serialize)]
 struct Arquivo {
     linhas: Vec<String>,
-    /// Muda quando o arquivo muda no disco: é o que o visor compara para se
-    /// redesenhar enquanto o Claude edita. Vazio numa versão do git, que não muda.
+    /// Changes when the file changes on disk: it is what the viewer compares to
+    /// redraw while Claude edits. Empty for a git version, which doesn't change.
     carimbo: String,
 }
 
@@ -782,7 +782,7 @@ fn texto_do_visor(bytes: Vec<u8>) -> Result<Vec<String>, String> {
     if bytes.len() as u64 > VISOR_MAX {
         return Err(tr("arquivo grande demais para o visor (mais de 5 MB)", "file too large for the viewer (over 5 MB)").into());
     }
-    // O mesmo palpite do git: um NUL no começo é arquivo binário.
+    // Same guess as git: a NUL at the start means a binary file.
     if bytes.iter().take(8000).any(|&b| b == 0) {
         return Err(tr("é um arquivo binário", "it's a binary file").into());
     }
@@ -791,8 +791,8 @@ fn texto_do_visor(bytes: Vec<u8>) -> Result<Vec<String>, String> {
     Ok(texto.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l).to_string()).collect())
 }
 
-/// O arquivo inteiro, em linhas. Com `rf`, como ele está naquele commit ou
-/// branch (`git show <rf>:./<arquivo>`), e não no disco — é o "como era na main".
+/// The whole file, as lines. With `rf`, as it is at that commit or
+/// branch (`git show <rf>:./<file>`), not on disk — it is "how it was on main".
 #[tauri::command(async)]
 fn arquivo_ler(caminho: String, rf: Option<String>) -> Result<Arquivo, String> {
     let p = std::path::Path::new(&caminho);
@@ -806,12 +806,12 @@ fn arquivo_ler(caminho: String, rf: Option<String>) -> Result<Arquivo, String> {
         let bytes = std::fs::read(p).map_err(|e| e.to_string())?;
         return Ok(Arquivo { linhas: texto_do_visor(bytes)?, carimbo: carimbo(p).unwrap_or_default() });
     };
-    // Uma ref que começa com `-` viraria opção do git.
+    // A ref starting with `-` would become a git option.
     if rf.starts_with('-') || rf.contains(char::is_whitespace) {
         return Err(format!("{}: {rf}", tr("ref inválida", "invalid ref")));
     }
-    let pasta = p.parent().ok_or("caminho sem pasta")?;
-    let nome = p.file_name().ok_or("caminho sem nome")?.to_string_lossy();
+    let pasta = p.parent().ok_or("path has no folder")?;
+    let nome = p.file_name().ok_or("path has no name")?.to_string_lossy();
     let out = std::process::Command::new("git")
         .arg("-C")
         .arg(pasta)
@@ -826,15 +826,15 @@ fn arquivo_ler(caminho: String, rf: Option<String>) -> Result<Arquivo, String> {
     Ok(Arquivo { linhas: texto_do_visor(out.stdout)?, carimbo: String::new() })
 }
 
-/// Barato o bastante para o visor perguntar a cada segundo: só o `stat`.
+/// Cheap enough for the viewer to ask every second: just a `stat`.
 #[tauri::command]
 fn arquivo_carimbo(caminho: String) -> Option<String> {
     carimbo(std::path::Path::new(&caminho))
 }
 
-/// Quais destes caminhos (relativos a `base`, absolutos ou com `~`) são arquivos
-/// que existem, já absolutos. É o que separa um `user_repository.dart:103` de
-/// verdade de um `e.g.` qualquer na saída do terminal.
+/// Which of these paths (relative to `base`, absolute or with `~`) are files
+/// that exist, already absolute. It is what tells a real `user_repository.dart:103`
+/// apart from any `e.g.` in the terminal output.
 #[tauri::command(async)]
 fn arquivos_existem(base: String, candidatos: Vec<String>) -> Vec<Option<String>> {
     let home = dirs_home().unwrap_or_default();
@@ -851,12 +851,12 @@ fn arquivos_existem(base: String, candidatos: Vec<String>) -> Vec<Option<String>
         .collect()
 }
 
-/// Abre o arquivo no editor, na linha. `comando` é o das Preferências, com
-/// `{arquivo}` e `{linha}`, rodado num shell interativo de login: é o que lê o
-/// .zshrc, onde moram os aliases (um `work='codium .'`) e o PATH do `cursor`,
-/// do `zed` e do `code`. Roda na raiz do repositório do arquivo, para um `.`
-/// no alias ser o projeto, e não a pasta do app. Sem ele, o VS Code pelo `vscode://`, que
-/// pula para a linha mesmo com o editor já aberto e não precisa do `code`.
+/// Opens the file in the editor, at the line. `comando` is the one from Preferences, with
+/// `{arquivo}` and `{linha}`, run in an interactive login shell: that is what reads
+/// .zshrc, where the aliases live (a `work='codium .'`) and the PATH for `cursor`,
+/// `zed` and `code`. It runs at the file's repository root, so a `.` in the
+/// alias is the project, not the app's folder. Without it, VS Code through `vscode://`, which
+/// jumps to the line even with the editor already open and doesn't need `code`.
 #[tauri::command(async)]
 fn abrir_no_editor(caminho: String, linha: Option<u32>, comando: Option<String>) -> Result<(), String> {
     if !std::path::Path::new(&caminho).is_absolute() {
@@ -864,8 +864,8 @@ fn abrir_no_editor(caminho: String, linha: Option<u32>, comando: Option<String>)
     }
     let linha = linha.unwrap_or(1);
     let Some(comando) = comando.map(|c| c.trim().to_string()).filter(|c| !c.is_empty()) else {
-        // Percent-encoding do que não é seguro numa URL: o espaço de um
-        // "/Volumes/External MacOS" quebraria o link.
+        // Percent-encode what isn't safe in a URL: the space in a
+        // "/Volumes/External MacOS" would break the link.
         let codificado: String = caminho
             .bytes()
             .map(|b| match b {
@@ -897,8 +897,8 @@ fn abrir_no_editor(caminho: String, linha: Option<u32>, comando: Option<String>)
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| e.to_string())?;
-    // O `code -g` volta na hora; um editor que fica preso ao terminal (`--wait`)
-    // não pode segurar o botão. Até 5 s para saber se deu erro, depois solta.
+    // `code -g` returns right away; an editor that stays attached to the terminal (`--wait`)
+    // must not hold the button. Up to 5 s to find out whether it failed, then let go.
     for _ in 0..50 {
         match filho.try_wait().map_err(|e| e.to_string())? {
             Some(st) if st.success() => return Ok(()),
@@ -907,8 +907,8 @@ fn abrir_no_editor(caminho: String, linha: Option<u32>, comando: Option<String>)
                 if let Some(mut e) = filho.stderr.take() {
                     let _ = e.read_to_string(&mut erro);
                 }
-                // A última linha: as primeiras são do .zshrc (o prompt, avisos de
-                // plugin), e o erro do comando vem depois delas.
+                // The last line: the first ones are from .zshrc (the prompt, plugin
+                // warnings), and the command's error comes after them.
                 let ultima = erro.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").to_string();
                 return Err(if ultima.is_empty() { format!("{} {st}", tr("o comando saiu com", "the command exited with")) } else { ultima });
             }
@@ -921,12 +921,12 @@ fn abrir_no_editor(caminho: String, linha: Option<u32>, comando: Option<String>)
     Ok(())
 }
 
-/// O comando das Preferências com o arquivo e a linha no lugar. O caminho vai
-/// entre aspas simples (um espaço no nome não parte o argumento); sem
-/// `{arquivo}` no comando, ele vai no fim.
+/// The Preferences command with the file and line filled in. The path goes
+/// in single quotes (a space in the name doesn't split the argument); without
+/// `{arquivo}` in the command, it goes at the end.
 fn comando_do_editor(comando: &str, caminho: &str, linha: u32) -> String {
     let citado = format!("'{}'", caminho.replace('\'', "'\\''"));
-    // `{file}` e `{line}` são os nomes da interface em inglês; os dois valem.
+    // `{file}` and `{line}` are the names in the English UI; both work.
     let comando = comando.replace("{file}", "{arquivo}");
     let com_linha = comando.replace("{line}", "{linha}").replace("{linha}", &linha.to_string());
     if com_linha.contains("{arquivo}") {
@@ -936,11 +936,11 @@ fn comando_do_editor(comando: &str, caminho: &str, linha: u32) -> String {
     }
 }
 
-// ---------- hooks: a instalação, de dentro do app ----------
+// ---------- hooks: installing them from inside the app ----------
 
-/// O hook vai dentro do binário: quem baixou só o app não tem o repositório de
-/// onde rodar o `hooks/instalar.sh`. Aquele script continua valendo e faz o
-/// mesmo que o `hooks_instalar` daqui.
+/// The hook ships inside the binary: someone who downloaded only the app doesn't have the
+/// repository to run `hooks/instalar.sh` from. That script still works and does
+/// the same as `hooks_instalar` here.
 const HOOK: &str = include_str!("../../hooks/termiau-evento.sh");
 const HOOK_EVENTOS: &[&str] = &[
     "SessionStart",
@@ -954,17 +954,17 @@ const HOOK_EVENTOS: &[&str] = &[
     "PostToolUseFailure",
 ];
 
-/// Como o nosso hook fica registrado em cada evento.
+/// How our hook is registered on each event.
 ///
-/// Os de ferramenta só interessam no Bash — a foto de antes e de depois de um
-/// comando, para o diff que o Claude Code não grava (ver `diff_do_bash` no
-/// hook) — e, depois dela, na pergunta do Claude: é o aviso de que ela foi
-/// respondida no terminal e o cartão do chat pode sair. Sem o matcher, o hook
-/// rodaria a cada Read.
+/// Tool events only matter for Bash — the snapshot before and after a
+/// command, for the diff Claude Code doesn't store (see `diff_do_bash` in the
+/// hook) — and, after it, for Claude's question: it is the notice that it was
+/// answered in the terminal and the chat card can go. Without the matcher, the hook
+/// would run on every Read.
 ///
-/// O `PermissionRequest` tem uma hora: numa pergunta do Claude, o hook fica
-/// esperando a resposta do chat (ver `Pendentes`). Nos outros pedidos ele
-/// devolve na hora, como os demais.
+/// `PermissionRequest` has an hour: on a Claude question, the hook keeps
+/// waiting for the chat's answer (see `Pendentes`). On other requests it
+/// returns right away, like the rest.
 fn grupo_do_evento(evento: &str, comando: &str) -> serde_json::Value {
     let timeout = if evento == "PermissionRequest" { 3600 } else { 5 };
     let mut grupo = serde_json::json!({
@@ -986,10 +986,10 @@ fn hook_nosso(h: &serde_json::Value) -> bool {
     h["command"].as_str().is_some_and(|c| c.contains("termiau-evento"))
 }
 
-/// A `statusLine` passa pelo mesmo hook, com o argumento `status`: é por ela
-/// que o app recebe o contexto da sessão e o uso do Claude (ver o começo do
-/// termiau-evento.sh). Uma status line que não é a nossa fica onde está —
-/// quem a pôs ali quis outra coisa.
+/// `statusLine` goes through the same hook, with the `status` argument: it is how
+/// the app gets the session's context and Claude's usage (see the start of
+/// termiau-evento.sh). A status line that isn't ours stays where it is —
+/// whoever put it there wanted something else.
 fn status_line_em_dia(settings: &serde_json::Value) -> bool {
     let s = &settings["statusLine"];
     s.is_object() && !hook_nosso(s) || s["command"].as_str().is_some_and(|c| c.ends_with(" status"))
@@ -999,9 +999,9 @@ fn status_line(comando: &str) -> serde_json::Value {
     serde_json::json!({ "type": "command", "command": format!("{comando} status"), "padding": 0 })
 }
 
-/// O settings.json já chama o nosso hook em todos os eventos, e do jeito que
-/// esta versão o registra: um matcher ou um timeout que mudou também pede a
-/// reinstalação.
+/// settings.json already calls our hook on every event, and the way
+/// this version registers it: a changed matcher or timeout also calls for
+/// reinstalling.
 fn hooks_registrados(settings: &serde_json::Value) -> bool {
     status_line_em_dia(settings) && HOOK_EVENTOS.iter().all(|e| {
         settings["hooks"][*e].as_array().is_some_and(|grupos| {
@@ -1016,9 +1016,9 @@ fn hooks_registrados(settings: &serde_json::Value) -> bool {
     })
 }
 
-/// Em que pé está a ligação com o Claude Code: `sem-claude` (não há `~/.claude`),
-/// `ausente` (nunca instalado), `desatualizado` (instalado por uma versão
-/// anterior do app) ou `instalado`.
+/// Where the Claude Code link stands: `sem-claude` (no `~/.claude`),
+/// `ausente` (never installed), `desatualizado` (installed by an earlier
+/// version of the app) or `instalado`.
 #[tauri::command]
 fn hooks_estado() -> &'static str {
     let Some(dir) = dir_claude().filter(|d| d.is_dir()) else { return "sem-claude" };
@@ -1034,8 +1034,8 @@ fn hooks_estado() -> &'static str {
     if script_em_dia && registrado { "instalado" } else { "desatualizado" }
 }
 
-/// Copia o hook para `~/.claude/hooks` e o registra no settings.json do Claude
-/// Code. Idempotente, e o settings ganha um backup ao lado antes de ser mexido.
+/// Copies the hook to `~/.claude/hooks` and registers it in Claude Code's
+/// settings.json. Idempotent, and settings gets a backup beside it before being touched.
 #[tauri::command]
 fn hooks_instalar() -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
@@ -1053,8 +1053,8 @@ fn hooks_instalar() -> Result<(), String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(e) => return Err(e.to_string()),
     };
-    // Um settings.json que não dá para ler não é reescrito: melhor ficar sem o
-    // hook do que apagar a configuração de alguém.
+    // A settings.json that can't be read isn't rewritten: better to go without the
+    // hook than to erase someone's configuration.
     let mut settings: serde_json::Value = match texto.as_deref().map(str::trim) {
         None | Some("") => serde_json::json!({}),
         Some(t) => serde_json::from_str(t)
@@ -1075,7 +1075,7 @@ fn hooks_instalar() -> Result<(), String> {
     }
     let hooks = settings["hooks"].as_object_mut().ok_or(tr("o \"hooks\" do settings.json do Claude Code não é um objeto", "the \"hooks\" in Claude Code's settings.json is not an object"))?;
     for evento in HOOK_EVENTOS {
-        // Sai qualquer registro anterior do nosso hook, entra um novo no fim.
+        // Any previous registration of our hook goes out, a new one goes in at the end.
         let mut grupos =
             hooks.get(*evento).and_then(|v| v.as_array()).cloned().unwrap_or_default();
         for g in &mut grupos {
@@ -1097,13 +1097,13 @@ fn hooks_instalar() -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
     let novo = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    // Escrita direta, sem trocar de nome: o settings.json de quem usa dotfiles
-    // é um link, e um `rename` por cima poria um arquivo no lugar dele.
+    // Direct write, no rename: the settings.json of dotfiles users
+    // is a link, and a `rename` over it would put a file in its place.
     std::fs::write(&caminho, novo + "\n").map_err(|e| e.to_string())
 }
 
-/// Sobra um socket por execução que morreu sem sair limpo (um `kill`, um crash).
-/// Como o nome carrega o pid, dá pra saber quais não têm mais dono.
+/// One socket is left over per run that died without exiting cleanly (a `kill`, a crash).
+/// Since the name carries the pid, we can tell which ones no longer have an owner.
 fn limpar_sockets_orfaos(atual: &PathBuf) {
     let Some(dir) = atual.parent() else { return };
     let Ok(entradas) = std::fs::read_dir(dir) else { return };
@@ -1121,23 +1121,23 @@ fn limpar_sockets_orfaos(atual: &PathBuf) {
         else {
             continue;
         };
-        // Sinal 0 não faz nada: só pergunta se o processo ainda existe.
+        // Signal 0 does nothing: it only asks whether the process still exists.
         if unsafe { libc::kill(pid, 0) } != 0 {
             let _ = std::fs::remove_file(&caminho);
         }
     }
 }
 
-// ---------- escuta: transcrição da fala ----------
+// ---------- dictation: speech transcription ----------
 
-/// Equilíbrio recomendado para português — 466 MB. Os outros do catálogo
-/// continuam em `escuta::model` para quando houver uma tela de ajustes.
+/// The recommended balance for Portuguese — 466 MB. The others in the catalog
+/// stay in `escuta::model` for when there is a settings screen.
 const MODELO: &str = "small";
 const IDIOMA: &str = "pt";
 
 #[derive(Default)]
 struct Escuta {
-    /// Marcada para pedir que as três threads da sessão parem.
+    /// Set to ask the session's three threads to stop.
     parar: Mutex<Option<Arc<AtomicBool>>>,
 }
 
@@ -1145,8 +1145,8 @@ fn dir_dados(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_data_dir().map_err(|e| format!("{}: {e}", tr("sem diretório de dados", "no data directory")))
 }
 
-/// Onde está o modelo. Procura primeiro o nosso e depois o do app Escuta, que
-/// era um projeto à parte: quem já baixou 466 MB lá não precisa baixar de novo.
+/// Where the model is. Looks for ours first and then the Escuta app's, which
+/// was a separate project: whoever already downloaded 466 MB there needn't download again.
 fn caminho_modelo(app: &AppHandle) -> Result<PathBuf, String> {
     let nosso = escuta::model::path_for(&dir_dados(app)?, MODELO);
     if nosso.exists() {
@@ -1158,7 +1158,7 @@ fn caminho_modelo(app: &AppHandle) -> Result<PathBuf, String> {
         .map(|d| d.join(format!("ggml-{MODELO}.bin")));
     match herdado {
         Some(p) if p.exists() => Ok(p),
-        _ => Ok(nosso), // não existe ainda; o caminho é onde o download vai cair
+        _ => Ok(nosso), // doesn't exist yet; the path is where the download will land
     }
 }
 
@@ -1167,7 +1167,7 @@ fn escuta_modelo_pronto(app: AppHandle) -> Result<bool, String> {
     Ok(caminho_modelo(&app)?.exists())
 }
 
-/// Baixa o modelo, contando o progresso em `escuta://progresso` (0 a 1).
+/// Downloads the model, reporting progress on `escuta://progresso` (0 to 1).
 #[tauri::command]
 async fn escuta_baixar_modelo(app: AppHandle) -> Result<(), String> {
     let dir = dir_dados(&app)?;
@@ -1184,13 +1184,13 @@ async fn escuta_baixar_modelo(app: AppHandle) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Liga o microfone. Três threads: captura, medidor de nível e transcrição —
-/// o `cpal::Stream` tem que viver inteiro na thread que o abriu.
+/// Turns on the microphone. Three threads: capture, level meter and transcription —
+/// the `cpal::Stream` must live entirely on the thread that opened it.
 #[tauri::command]
 fn escuta_comecar(app: AppHandle, state: State<'_, Escuta>) -> Result<(), String> {
     let mut guarda = state.parar.lock().unwrap();
-    // Uma sessão que morreu sozinha (microfone sumiu, modelo corrompido) deixa
-    // a marca para trás; limpa antes de decidir se ainda estamos escutando.
+    // A session that died on its own (microphone gone, corrupted model) leaves
+    // the flag behind; clear it before deciding whether we are still listening.
     if guarda.as_ref().is_some_and(|p| p.load(Ordering::Relaxed)) {
         *guarda = None;
     }
@@ -1207,7 +1207,7 @@ fn escuta_comecar(app: AppHandle, state: State<'_, Escuta>) -> Result<(), String
     let (audio_tx, audio_rx) = std::sync::mpsc::channel::<Vec<f32>>();
     let (nivel_tx, nivel_rx) = std::sync::mpsc::channel::<f32>();
 
-    // 1) captura
+    // 1) capture
     {
         let parar = parar.clone();
         let app = app.clone();
@@ -1220,8 +1220,8 @@ fn escuta_comecar(app: AppHandle, state: State<'_, Escuta>) -> Result<(), String
         });
     }
 
-    // 2) medidor: agrega o pico e emite ~20x por segundo, senão seria um evento
-    //    por buffer de áudio.
+    // 2) meter: aggregates the peak and emits ~20x per second, otherwise it would be one event
+    //    per audio buffer.
     {
         let parar = parar.clone();
         let app = app.clone();
@@ -1241,7 +1241,7 @@ fn escuta_comecar(app: AppHandle, state: State<'_, Escuta>) -> Result<(), String
         });
     }
 
-    // 3) transcrição
+    // 3) transcription
     {
         let parar = parar.clone();
         let app = app.clone();
@@ -1276,19 +1276,19 @@ fn escuta_parar(state: State<'_, Escuta>) {
     }
 }
 
-// ---------- sessão: as abas que voltam na próxima abertura ----------
+// ---------- session: the tabs that come back on the next launch ----------
 
-/// Um arquivo só, na pasta de dados do app: as abas abertas, o layout de cada
-/// uma e a sessão do Claude de cada painel. Quem monta e quem lê é a webview —
-/// daqui só sai e entra texto. Em arquivo, e não no localStorage: a webview
-/// grava o dela quando bem entende, e o app sai por `_exit` (ver `run`).
+/// A single file, in the app's data folder: the open tabs, each one's
+/// layout and each panel's Claude session. The webview builds and reads it —
+/// only text goes in and out here. In a file, not localStorage: the webview
+/// writes its own whenever it pleases, and the app exits through `_exit` (see `run`).
 fn arquivo_sessao(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir_dados(app)?.join("sessao.json"))
 }
 
-/// Voltar com as abas é escolha de quem usa (TermIAu ▸ Restaurar Abas ao
-/// Abrir), e nasce desligada. A escolha é a existência deste arquivo: o menu é
-/// montado aqui no Rust, antes de a webview existir para dizer qualquer coisa.
+/// Coming back with the tabs is the user's choice (TermIAu ▸ Restore Tabs on
+/// Open), and starts off. The choice is this file's existence: the menu is
+/// built here in Rust, before the webview exists to say anything.
 fn marca_restaurar(app: &AppHandle) -> Option<PathBuf> {
     Some(dir_dados(app).ok()?.join("restaurar-abas"))
 }
@@ -1298,8 +1298,8 @@ fn restaurar_ligado(app: AppHandle) -> bool {
     marca_restaurar(&app).is_some_and(|m| m.exists())
 }
 
-/// O clique no item do menu. O visto quem troca é o próprio macOS; daqui sai a
-/// marca no disco e o aviso para a webview.
+/// The click on the menu item. macOS itself toggles the checkmark; from here go the
+/// flag on disk and the notice to the webview.
 fn alternar_restaurar(app: &AppHandle) {
     let Some(marca) = marca_restaurar(app) else { return };
     let ligado = !marca.exists();
@@ -1309,14 +1309,14 @@ fn alternar_restaurar(app: &AppHandle) {
         std::fs::remove_file(&marca)
     };
     if let Err(e) = feito {
-        eprintln!("[termiau] não consegui guardar a escolha de restaurar abas: {e}");
+        eprintln!("[termiau] couldn't save the restore-tabs choice: {e}");
     }
     let _ = app.emit("menu://restaurar", marca.exists());
 }
 
-/// Desligado, não há o que trazer: a webview abre uma aba nova. A sessão
-/// continua sendo gravada do mesmo jeito — ligar no meio do dia já vale para a
-/// próxima abertura.
+/// Off, there is nothing to bring back: the webview opens a new tab. The session
+/// keeps being saved just the same — turning it on midday already counts for the
+/// next launch.
 #[tauri::command]
 fn sessao_ler(app: AppHandle) -> Option<String> {
     if !restaurar_ligado(app.clone()) {
@@ -1331,24 +1331,24 @@ fn sessao_salvar(app: AppHandle, dados: String) -> Result<(), String> {
     if let Some(dir) = destino.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
-    // Escreve ao lado e troca de nome: um app morto no meio da escrita deixa o
-    // arquivo anterior inteiro, e não meio JSON.
+    // Write alongside and rename: an app killed mid-write leaves the
+    // previous file whole, not half a JSON.
     let rascunho = destino.with_extension("json.tmp");
     std::fs::write(&rascunho, dados).map_err(|e| e.to_string())?;
     std::fs::rename(&rascunho, &destino).map_err(|e| e.to_string())
 }
 
-/// Encerra o app. Quem chama é a webview, depois de o usuário confirmar e de a
-/// sessão estar salva.
+/// Quits the app. The webview calls it, after the user confirms and the
+/// session is saved.
 #[tauri::command]
 fn sair(app: AppHandle) {
     app.exit(0);
 }
 
-/// O menu padrão do Tauri reserva ⌘W para "Close Window" e o menu do macOS
-/// consome o atalho antes da webview — a aba nunca via a tecla. Trocamos o menu
-/// inteiro para que ⌘T e ⌘W pertençam às abas; os itens nativos de Editar
-/// continuam ali porque é deles que ⌘C/⌘V dependem.
+/// Tauri's default menu reserves ⌘W for "Close Window" and the macOS menu
+/// consumes the shortcut before the webview — the tab never saw the key. We replace the
+/// whole menu so ⌘T and ⌘W belong to the tabs; the native Edit items
+/// stay there because ⌘C/⌘V depend on them.
 fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
     let sobre = Submenu::with_items(
         app,
@@ -1357,11 +1357,11 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
         &[
             &PredefinedMenuItem::about(app, Some(tr("Sobre o TermIAu", "About TermIAu")), Some(AboutMetadata::default()))?,
             &PredefinedMenuItem::separator(app)?,
-            // ⌘, é onde todo app do macOS guarda isto — e, sendo item de menu,
-            // a tecla nem chega na webview: o menu fica com ela antes.
+            // ⌘, is where every macOS app keeps this — and, being a menu item,
+            // the key never even reaches the webview: the menu takes it first.
             &MenuItem::with_id(app, "preferencias", tr("Preferências…", "Preferences…"), true, Some("CmdOrCtrl+,"))?,
-            // Ligar instala também os hooks do Claude Code, que é de onde vem a
-            // sessão a retomar em cada painel.
+            // Turning it on also installs Claude Code's hooks, which is where the
+            // session to resume in each panel comes from.
             &CheckMenuItem::with_id(
                 app,
                 "restaurar",
@@ -1370,7 +1370,7 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
                 restaurar_ligado(app.clone()),
                 None::<&str>,
             )?,
-            // Os hooks sozinhos, para quem quer só o aviso de "esperando" nas abas.
+            // The hooks alone, for those who only want the "waiting" notice on the tabs.
             &MenuItem::with_id(app, "hooks", tr("Ligar ao Claude Code…", "Connect to Claude Code…"), true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::services(app, Some(tr("Serviços", "Services")))?,
@@ -1378,9 +1378,9 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
             &PredefinedMenuItem::hide(app, Some(tr("Ocultar TermIAu", "Hide TermIAu")))?,
             &PredefinedMenuItem::hide_others(app, Some(tr("Ocultar Outros", "Hide Others")))?,
             &PredefinedMenuItem::separator(app)?,
-            // Item nosso, e não o `quit` pronto: aquele encerra o app na hora, e
-            // um ⌘Q esbarrado leva embora todos os shells. Este só avisa a
-            // webview, que pergunta antes (ver `pedirSair` no main.ts).
+            // Our own item, not the ready-made `quit`: that one quits the app at once, and
+            // a stray ⌘Q takes away all the shells. This one only tells the
+            // webview, which asks first (see `pedirSair` in main.ts).
             &MenuItem::with_id(app, "sair", tr("Sair do TermIAu", "Quit TermIAu"), true, Some("CmdOrCtrl+Q"))?,
         ],
     )?;
@@ -1391,8 +1391,8 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
         true,
         &[
             &MenuItem::with_id(app, "nova-aba", tr("Nova Aba", "New Tab"), true, Some("CmdOrCtrl+T"))?,
-            // Como no navegador: traz de volta a última aba fechada, com o layout
-            // dela e as sessões do Claude retomadas.
+            // Like in the browser: brings back the last closed tab, with its
+            // layout and Claude sessions resumed.
             &MenuItem::with_id(
                 app,
                 "reabrir-aba",
@@ -1409,7 +1409,7 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
                 true,
                 Some("CmdOrCtrl+Shift+D"),
             )?,
-            // Alterna: maximiza o painel em foco ou devolve os outros à tela.
+            // Toggles: maximizes the focused panel or brings the others back on screen.
             &MenuItem::with_id(
                 app,
                 "maximizar",
@@ -1418,7 +1418,7 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
                 Some("CmdOrCtrl+Shift+Enter"),
             )?,
             &PredefinedMenuItem::separator(app)?,
-            // Fecha o painel em foco; com um só painel, é a aba inteira que vai.
+            // Closes the focused panel; with a single panel, the whole tab goes.
             &MenuItem::with_id(app, "fechar", tr("Fechar", "Close"), true, Some("CmdOrCtrl+W"))?,
             &PredefinedMenuItem::close_window(app, Some(tr("Fechar Janela", "Close Window")))?,
         ],
@@ -1431,8 +1431,8 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
         &[
             &PredefinedMenuItem::copy(app, Some(tr("Copiar", "Copy")))?,
             &PredefinedMenuItem::paste(app, Some(tr("Colar", "Paste")))?,
-            // O ⌘V cola o nome do arquivo (ou nada, se o Finder não deixou
-            // texto); este cola o caminho, que é o que serve de argumento.
+            // ⌘V pastes the file's name (or nothing, if Finder left no
+            // text); this one pastes the path, which is what works as an argument.
             &MenuItem::with_id(
                 app,
                 "colar-caminho",
@@ -1449,16 +1449,16 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
         tr("Escuta", "Dictation"),
         true,
         &[
-            // ⌘E, e não Ctrl+Espaço: no macOS ele troca de fonte de entrada
-            // quando há mais de uma instalada. ⌘E fica livre — o menu o consome
-            // antes da webview.
+            // ⌘E, not Ctrl+Space: on macOS that switches the input source
+            // when more than one is installed. ⌘E is free — the menu consumes it
+            // before the webview.
             &MenuItem::with_id(app, "escutar", tr("Escutar", "Listen"), true, Some("CmdOrCtrl+E"))?,
         ],
     )?;
 
-    // A rádio do rodapé. O editor fica sem atalho: se abre de vez em quando, e
-    // toda tecla presa aqui é uma tecla a menos para o shell. O play não: é o
-    // que se aperta sem tirar a mão do teclado.
+    // The footer radio. The editor gets no shortcut: it is opened now and then, and
+    // every key taken here is one less key for the shell. Not play: it is
+    // what you press without taking your hand off the keyboard.
     let radio = Submenu::with_items(
         app,
         tr("Rádio", "Radio"),
@@ -1469,9 +1469,9 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
         ],
     )?;
 
-    // Como se vê a sessão do Claude do painel em foco: o terminal dela ou a
-    // conversa em balões. E os saltos entre o que você escreveu, que valem nos
-    // dois modos — ⌘⇧↑ e ⌘⇧↓ são os das marcas do iTerm2.
+    // How the focused panel's Claude session is shown: its terminal or the
+    // conversation in bubbles. And the jumps between what you wrote, which work in
+    // both modes — ⌘⇧↑ and ⌘⇧↓ are iTerm2's mark jumps.
     let exibir = Submenu::with_items(
         app,
         tr("Exibir", "View"),
@@ -1526,8 +1526,8 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
         ],
     )?;
 
-    // A lista de atalhos. ⌘/ é o de ajuda na maioria dos apps; como item de
-    // menu, a tecla fica com o menu e não chega ao shell.
+    // The shortcut list. ⌘/ is the help shortcut in most apps; as a menu
+    // item, the key stays with the menu and doesn't reach the shell.
     let ajuda = Submenu::with_items(
         app,
         tr("Ajuda", "Help"),
@@ -1545,8 +1545,8 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // O differ guarda num JSON, na pasta de dados do app, a branch alvo de
-        // cada repositório e o que já foi revisado.
+        // The differ keeps, in a JSON in the app's data folder, each repository's
+        // target branch and what has already been reviewed.
         .plugin(tauri_plugin_store::Builder::new().build())
         .setup(|app| {
             let cfg = Config::default();
@@ -1557,13 +1557,13 @@ pub fn run() {
             app.manage(Pendentes::default());
             app.manage(differ::Vigia::default());
             app.manage(differ::Perguntas::default());
-            // Sem isto o whisper.cpp despeja o log dele na saída do processo.
+            // Without this whisper.cpp dumps its log onto the process output.
             whisper_rs::install_logging_hooks();
             montar_menu(app.handle())?;
             instalar_cli();
             Ok(())
         })
-        // O menu só sabe que a tecla foi apertada; quem tem as abas é a webview.
+        // The menu only knows the key was pressed; the webview owns the tabs.
         .on_menu_event(|app, ev| match ev.id().as_ref() {
             "nova-aba" => { let _ = app.emit("menu://nova-aba", ()); }
             "reabrir-aba" => { let _ = app.emit("menu://reabrir-aba", ()); }
@@ -1641,21 +1641,21 @@ pub fn run() {
             js_log
         ])
         .build(tauri::generate_context!())
-        .expect("erro ao montar o TermIAu")
+        .expect("error while building TermIAu")
         .run(|app, evento| {
             if let tauri::RunEvent::Exit = evento {
-                // O socket é um arquivo de verdade; sem isto ficaria um por
-                // execução no diretório temporário.
+                // The socket is a real file; without this one would be left per
+                // run in the temp directory.
                 let _ = std::fs::remove_file(&app.state::<Config>().socket);
 
-                // E saímos sem passar pelos destrutores estáticos do C++. O
-                // ggml libera o device de Metal num deles e aborta no próprio
-                // assert quando sobra qualquer resource set vivo — e sobra,
-                // porque a thread do whisper ainda está de pé com o contexto na
-                // mão quando a janela fecha. Fechar o app imprimia um abort e 20
-                // linhas de backtrace (ggml-metal-device.m:608, llama.cpp#17869).
-                // Aqui não fica nada para limpar: o socket já saiu, e os shells
-                // recebem SIGHUP quando o kernel fecha os pty com o processo.
+                // And we exit without going through C++ static destructors. ggml
+                // frees the Metal device in one of them and aborts on its own
+                // assert when any resource set is still alive — and one is,
+                // because the whisper thread is still up holding the context
+                // when the window closes. Quitting the app printed an abort and 20
+                // lines of backtrace (ggml-metal-device.m:608, llama.cpp#17869).
+                // Nothing is left to clean up here: the socket is already gone, and the shells
+                // get SIGHUP when the kernel closes the ptys along with the process.
                 unsafe { libc::_exit(0) };
             }
         });
@@ -1703,7 +1703,7 @@ Binary files a/img.png and b/img.png differ\n";
         let caminhos: Vec<_> = a.iter().map(|f| f["caminho"].as_str().unwrap()).collect();
         assert_eq!(caminhos, ["/repo/novo.txt", "/repo/x.txt", "/repo/apagado.txt"]);
         assert_eq!(a[0]["hunks"][0]["newStart"], 1);
-        // Dentro de um trecho, `--- velho` é uma linha removida, não um cabeçalho.
+        // Inside a hunk, `--- velho` is a removed line, not a header.
         assert_eq!(a[1]["hunks"][1]["lines"], serde_json::json!(["--- velho", "+++ novo"]));
         assert_eq!(a[1]["hunks"][0]["oldStart"], 1);
     }

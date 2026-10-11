@@ -2,12 +2,12 @@ import { useEffect } from "react";
 import { T } from "../../i18n/differ";
 import { Icon } from "./Icons";
 
-/// O repositório mexeu enquanto a aba estava aberta — commit, rebase, checkout,
-/// fetch. Pergunta em vez de recarregar sozinho: recarregar fecha os arquivos
-/// que você abriu e desfaz o lugar onde você estava lendo, e fazer isso no meio
-/// de uma revisão é pior do que mostrar diff de um minuto atrás.
-/// Escondida atrás de um terminal, a aba não pega o foco: o `autoFocus` puxaria
-/// o teclado para dentro do iframe, e o shell que rodou o git pararia de digitar.
+/// The repository changed while the tab was open — commit, rebase, checkout,
+/// fetch. Asks instead of reloading on its own: reloading closes the files
+/// you opened and loses the place where you were reading, and doing that in the
+/// middle of a review is worse than showing a diff from a minute ago.
+/// Hidden behind a terminal, the tab doesn't take focus: `autoFocus` would pull
+/// the keyboard into the iframe, and the shell that ran git would stop typing.
 export function Mudou({ onReload, onDismiss, visivel }: { onReload(): void; onDismiss(): void; visivel: boolean }) {
   useEffect(() => {
     const tecla = (e: KeyboardEvent) => {

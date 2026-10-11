@@ -1,6 +1,6 @@
-//! Thin wrapper around the `git` CLI. Todas as leituras passam pelo `run`, que
-//! recusa o lock do índice; as três escritas que existem — pôr no índice, tirar
-//! do índice e commitar — passam pelo `run_write`, que precisa dele.
+//! Thin wrapper around the `git` CLI. All reads go through `run`, which refuses
+//! the index lock; the three writes that exist — staging, unstaging and
+//! committing — go through `run_write`, which needs it.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -38,15 +38,15 @@ impl Repo {
         run(&self.root, args, &[0], false)
     }
 
-    /// Os comandos que mexem no repositório: `git add`, o inverso dele e o
-    /// commit. Ao contrário de todo o resto daqui, precisam do lock do índice.
+    /// The commands that change the repository: `git add`, its inverse and
+    /// commit. Unlike everything else here, they need the index lock.
     pub fn run_write(&self, args: &[&str]) -> Result<Vec<u8>> {
         run(&self.root, args, &[0], true)
     }
 
-    /// Como `run`, mas aceitando também a saída 1. É assim que o
-    /// `git diff --no-index` diz "os dois arquivos são diferentes" — e é
-    /// exatamente o que se espera dele ao diffar um arquivo novo contra o nada.
+    /// Like `run`, but also accepting exit code 1. That is how
+    /// `git diff --no-index` says "the two files differ" — exactly what is
+    /// expected of it when diffing a new file against nothing.
     pub fn run_diff(&self, args: &[&str]) -> Result<Vec<u8>> {
         run(&self.root, args, &[0, 1], false)
     }
@@ -85,17 +85,17 @@ fn run(dir: &Path, args: &[&str], saidas_ok: &[i32], escreve: bool) -> Result<Ve
     }
     cmd.args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
-        // Never take the index lock: we only read. Quem escreve pede o lock.
+        // Never take the index lock when only reading. Writers ask for it.
         .env("GIT_OPTIONAL_LOCKS", if escreve { "1" } else { "0" })
-        // Cinto de segurança do commit: a mensagem já vai pronta no `-m`, e
-        // uma janela de editor esperando texto travaria a aba sem explicação.
+        // Safety belt for commit: the message is already in `-m`, and an
+        // editor window waiting for text would hang the tab with no explanation.
         .env("GIT_EDITOR", "true")
         .env("LC_ALL", "C");
 
     let output = cmd.output()?;
     if !saidas_ok.contains(&output.status.code().unwrap_or(-1)) {
-        // O `git commit` diz "nothing added to commit" pela saída normal, não
-        // pelo erro: sem isto a recusa mais comum chegaria como uma linha vazia.
+        // `git commit` says "nothing added to commit" on stdout, not stderr:
+        // without this the most common refusal would arrive as an empty line.
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let stderr = if stderr.is_empty() {
             String::from_utf8_lossy(&output.stdout).trim().to_string()

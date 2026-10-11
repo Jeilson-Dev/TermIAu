@@ -117,10 +117,10 @@ export interface ReviewDiff {
   files: FileDiff[];
 }
 
-/** Uma sessão do Claude Code deste repositório, que uma pergunta pode mencionar. */
+/** A Claude Code session of this repository, which a question can mention. */
 export interface ClaudeSession {
   id: string;
   title: string;
-  /** Última escrita na sessão, em ms desde a época. */
+  /** Last write to the session, in ms since the epoch. */
   modified: number;
 }

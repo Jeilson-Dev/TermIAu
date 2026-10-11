@@ -1,12 +1,12 @@
-//! O differ: o diff da branch contra a branch alvo, como no GitHub, mas local.
+//! The differ: the branch's diff against the target branch, like on GitHub, but local.
 //!
-//! Veio inteiro do projeto `differ` — os quatro módulos abaixo são cópia dele.
-//! O que muda aqui é só a casca: em vez de um app com janela própria, são
-//! quatro comandos que a aba presa da barra chama pela webview.
+//! It came whole from the `differ` project — the four modules below are copies of it.
+//! Only the shell changes here: instead of an app with its own window, they are
+//! commands the pinned tab in the bar calls through the webview.
 //!
-//! Quase nada aqui escreve no repositório: fora `stage_file`, `unstage_file` e
-//! `commit` — os três da aba do que está para ser commitado —, é tudo `git` de
-//! leitura, e nem o lock do índice os outros tomam (ver `run` em git.rs).
+//! Almost nothing here writes to the repository: apart from `stage_file`,
+//! `unstage_file` and `commit` — the three of the to-be-committed tab —, it is all
+//! read-only `git`, and the others don't even take the index lock (see `run` in git.rs).
 
 mod diff;
 mod error;
@@ -25,8 +25,8 @@ use review::{RepoInfo, ReviewDiff};
 
 pub use pergunta::Perguntas;
 
-/// As chamadas ao git bloqueiam, e as threads do runtime assíncrono são poucas:
-/// um `git diff` de repositório grande seguraria o resto do app junto.
+/// Git calls block, and the async runtime has few threads: a `git diff` on a
+/// large repository would hold up the rest of the app with it.
 async fn blocking<T: Send + 'static>(job: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
     tauri::async_runtime::spawn_blocking(job)
         .await
@@ -43,42 +43,42 @@ pub async fn load_diff(path: PathBuf, target: String) -> Result<ReviewDiff> {
     blocking(move || review::load_diff(&path, &target)).await
 }
 
-/// O que mudou desde um commit revisado: é onde as correções da revisão aparecem.
+/// What changed since a reviewed commit: where the review's fixes show up.
 #[tauri::command]
 pub async fn load_diff_since(path: PathBuf, base: String) -> Result<ReviewDiff> {
     blocking(move || review::load_diff_since(&path, &base)).await
 }
 
-/// O que está para ser commitado: índice, árvore de trabalho e arquivos novos.
+/// What is about to be committed: index, working tree and new files.
 #[tauri::command]
 pub async fn load_diff_working(path: PathBuf) -> Result<ReviewDiff> {
     blocking(move || review::load_diff_working(&path)).await
 }
 
-/// A raiz do repositório que contém a pasta, ou `None` quando não há nenhum. É
-/// o que diz se o botão de diff de um painel leva a algum lugar.
+/// The root of the repository containing the folder, or `None` when there is
+/// none. It tells whether a panel's diff button leads anywhere.
 #[tauri::command]
 pub async fn repo_root(path: PathBuf) -> Result<Option<String>> {
     blocking(move || Ok(git::Repo::open(&path).ok().map(|r| r.root().display().to_string()))).await
 }
 
-/// A branch em que a pasta está, para a barra do painel. `None` fora de um
-/// repositório e com o HEAD solto — aí não há nome para mostrar.
+/// The branch the folder is on, for the panel bar. `None` outside a repository
+/// and with a detached HEAD — then there is no name to show.
 #[tauri::command]
 pub async fn repo_branch(path: PathBuf) -> Result<Option<String>> {
     blocking(move || Ok(git::Repo::open(&path).ok().and_then(|r| r.current_branch()))).await
 }
 
-/// Assinatura do estado da árvore de trabalho, para a aba saber que mudou sem
-/// refazer o diff inteiro a cada batida do relógio.
+/// A signature of the working tree state, so the tab knows it changed without
+/// redoing the whole diff on every clock tick.
 #[tauri::command]
 pub async fn working_stamp(path: PathBuf) -> Result<String> {
     blocking(move || review::working_stamp(&path)).await
 }
 
-/// Põe no índice o `target` — um arquivo, uma pasta ou `.` para o repositório
-/// inteiro. É, com o `unstage` e o `commit`, uma das três únicas coisas que o
-/// differ escreve; todo o resto aqui é leitura.
+/// Stages `target` — a file, a folder or `.` for the whole repository. Along
+/// with `unstage` and `commit`, it is one of the only three things the differ
+/// writes; everything else here is reading.
 #[tauri::command]
 pub async fn stage(path: PathBuf, target: String) -> Result<()> {
     blocking(move || review::stage(&path, &target)).await
@@ -89,14 +89,14 @@ pub async fn unstage(path: PathBuf, target: String) -> Result<()> {
     blocking(move || review::unstage(&path, &target)).await
 }
 
-/// Commita o que está no índice e devolve o sha do commit novo.
+/// Commits what is in the index and returns the new commit's sha.
 #[tauri::command]
 pub async fn commit(path: PathBuf, message: String) -> Result<String> {
     blocking(move || review::commit(&path, &message)).await
 }
 
-/// O arquivo como está no disco. O lado novo do diff da árvore de trabalho não
-/// tem blob para ler: o conteúdo ainda não passou pelo git.
+/// The file as it is on disk. The new side of the working tree diff has no
+/// blob to read: the content hasn't gone through git yet.
 #[tauri::command]
 pub async fn read_worktree(path: PathBuf, file: String) -> Result<Vec<String>> {
     blocking(move || review::read_worktree(&path, &file)).await
@@ -107,16 +107,17 @@ pub async fn read_blob(path: PathBuf, oid: String) -> Result<Vec<String>> {
     blocking(move || review::read_blob(&path, &oid)).await
 }
 
-/// O vigia do repositório aberto na aba do diff. Um só, porque a aba mostra um
-/// repositório por vez. Guardá-lo aqui é o que o mantém vivo: um watcher largado
-/// se desliga, e trocar de repositório aposenta o anterior exatamente assim.
+/// The watcher of the repository open in the diff tab. Just one, because the tab
+/// shows one repository at a time. Keeping it here is what keeps it alive: a
+/// dropped watcher shuts down, and switching repositories retires the previous one
+/// exactly that way.
 #[derive(Default)]
 pub struct Vigia(Mutex<Option<RecommendedWatcher>>);
 
-/// Só estas partes do .git mexem no que a aba mostra. O diff é de trabalho
-/// commitado, então `git add` e edição de arquivo não mudam nada — e o
-/// `objects/` ferve durante um fetch, milhares de eventos que terminam numa
-/// atualização de ref só, que é justamente a que interessa.
+/// Only these parts of .git affect what the tab shows. The diff is of committed
+/// work, so `git add` and file edits change nothing — and `objects/` boils
+/// during a fetch, thousands of events ending in a single ref update, which is
+/// precisely the one that matters.
 fn interessa(caminho: &Path) -> bool {
     let p = caminho.to_string_lossy();
     if p.ends_with(".lock") {
@@ -128,12 +129,12 @@ fn interessa(caminho: &Path) -> bool {
         || p.contains("/logs/")
 }
 
-/// Passa a vigiar o .git deste repositório, avisando a webview quando ele mexer.
-/// Quem decide o que fazer com o aviso é a aba — aqui só se constata a mudança.
+/// Starts watching this repository's .git, notifying the webview when it changes.
+/// The tab decides what to do with the notice — here we only detect the change.
 #[tauri::command]
 pub async fn watch_repo(app: AppHandle, path: PathBuf) -> Result<()> {
-    // `--absolute-git-dir` em vez de `<raiz>/.git`: em worktree e em submódulo o
-    // .git é um arquivo apontando para outro lugar, e é o outro lugar que muda.
+    // `--absolute-git-dir` instead of `<root>/.git`: in a worktree or submodule
+    // .git is a file pointing elsewhere, and it is the elsewhere that changes.
     let (raiz, gitdir) = blocking(move || {
         let repo = git::Repo::open(&path)?;
         let gitdir = repo.run_string(&["rev-parse", "--absolute-git-dir"])?;
@@ -144,7 +145,7 @@ pub async fn watch_repo(app: AppHandle, path: PathBuf) -> Result<()> {
     let aviso = app.clone();
     let mut vigia = notify::recommended_watcher(move |ev: notify::Result<Event>| {
         let Ok(ev) = ev else { return };
-        // Ler o .git não é mexer nele — e nós mesmos o lemos a cada `git diff`.
+        // Reading .git is not changing it — and we read it ourselves on every `git diff`.
         if matches!(ev.kind, EventKind::Access(_)) {
             return;
         }
@@ -161,30 +162,30 @@ pub async fn watch_repo(app: AppHandle, path: PathBuf) -> Result<()> {
     Ok(())
 }
 
-/// Bytes crus (binário, não JSON) para as imagens poderem ser desenhadas.
+/// Raw bytes (binary, not JSON) so images can be drawn.
 #[tauri::command]
 pub async fn read_blob_bytes(path: PathBuf, oid: String) -> Result<tauri::ipc::Response> {
     let bytes = blocking(move || review::read_blob_bytes(&path, &oid)).await?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
-/// O mesmo, para a imagem que ainda está só no disco.
+/// The same, for an image that is only on disk so far.
 #[tauri::command]
 pub async fn read_worktree_bytes(path: PathBuf, file: String) -> Result<tauri::ipc::Response> {
     let bytes = blocking(move || review::read_worktree_bytes(&path, &file)).await?;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
-/// As sessões do Claude Code abertas neste repositório, para a pergunta poder
-/// mencionar uma delas e responder sabendo do que já foi conversado ali.
+/// The Claude Code sessions open in this repository, so a question can mention
+/// one of them and be answered knowing what was already discussed there.
 #[tauri::command]
 pub async fn claude_sessions(path: PathBuf) -> Result<Vec<pergunta::Sessao>> {
     blocking(move || pergunta::sessoes(&path)).await
 }
 
-/// Pergunta ao Claude sobre um trecho, sem abrir sessão nem salvar nada. `id` é
-/// da webview: é por ele que `cancel_ask` acha o processo. Só conversa, a menos
-/// que `allow_edits` libere a edição dos arquivos do repositório.
+/// Asks Claude about a snippet, without opening a session or saving anything. `id`
+/// comes from the webview: it is how `cancel_ask` finds the process. Conversation
+/// only, unless `allow_edits` permits editing the repository's files.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn ask_claude(
@@ -204,8 +205,8 @@ pub async fn ask_claude(
     .await
 }
 
-/// Volta ao que eram os arquivos que uma pergunta alterou. Devolve os que não
-/// deu para voltar — os que alguém mexeu de novo depois dela.
+/// Restores the files a question changed to what they were. Returns the ones
+/// that couldn't be restored — those someone changed again after it.
 #[tauri::command]
 pub async fn undo_ask(path: PathBuf, changes: Vec<pergunta::Alteracao>) -> Result<Vec<String>> {
     blocking(move || pergunta::desfazer(&path, &changes)).await

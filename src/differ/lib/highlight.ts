@@ -51,7 +51,7 @@ export function tokenize(oid: string, lines: string[], lang: BundledLanguage): P
   return tokens;
 }
 
-/** Tokens sem o cache: o visor do terminal relê o arquivo a cada edição, e cada versão ficaria guardada. */
+/** Tokens without the cache: the terminal's viewer rereads the file on every edit, and every version would be kept. */
 export const tokenizeFresh = (lines: string[], lang: BundledLanguage) => run(lines, lang).catch(() => null);
 
 async function run(lines: string[], lang: BundledLanguage): Promise<Token[][] | null> {

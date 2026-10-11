@@ -55,7 +55,7 @@ interface Props {
   file: FileDiff;
   viewMode: ViewMode;
   viewed: boolean;
-  /** Aba do que está para ser commitado: lá, revisado é estar no índice. */
+  /** The to-be-committed tab: there, reviewed means being in the index. */
   staging?: boolean;
   /** The file keyboard shortcuts act on. */
   active: boolean;
@@ -101,7 +101,7 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pick, setPick] = useState<CommentOffer | null>(null);
-  // Fora do componente: a aba pendente o remonta quando o disco muda, e a conversa tem de ficar.
+  // Outside the component: the pending tab remounts it when the disk changes, and the conversation must stay.
   const asks = askStore.useAsks(file.path);
   const pendingFocus = useRef<FocusTarget | null>(null);
 
@@ -321,7 +321,7 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
     cancelDraft();
   }
 
-  // A decisão tomada com o Claude vira o marcador — ou reescreve aquele de onde a pergunta saiu.
+  // The decision made with Claude becomes the bookmark — or rewrites the one the question came from.
   async function decide(ask: AskState, note: string) {
     if (ask.bookmarkId) onUpdateBookmark(ask.bookmarkId, note);
     else await addBookmark(ask, note);
@@ -332,8 +332,8 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
     <AskBox key={a.id} root={root} file={file} ask={a} onDecide={(note) => decide(a, note)} />
   );
 
-  // Uma alteração pode tirar do diff a linha em que a pergunta estava presa. Ela não some por
-  // isso: vai para o topo do arquivo, onde a conversa (e o desfazer) continuam à mão.
+  // An edit may remove from the diff the line the question was pinned to. It doesn't vanish
+  // because of that: it moves to the top of the file, where the conversation (and undo) stay at hand.
   const orphans = useMemo(() => {
     if (!asks.length || !rows.length) return [];
     const anchors = new Set<string>();

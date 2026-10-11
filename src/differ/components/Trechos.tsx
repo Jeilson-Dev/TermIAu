@@ -1,6 +1,6 @@
 import type { Trecho } from "../../i18n/differ";
 
-/** Um texto do dicionário com código no meio: cada `{ codigo }` vira um `<code>`. */
+/** A dictionary text with code in it: each `{ codigo }` becomes a `<code>`. */
 export function Trechos({ de }: { de: Trecho[] }) {
   return (
     <>

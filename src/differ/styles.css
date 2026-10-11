@@ -575,10 +575,10 @@ code {
   transform: rotate(-90deg);
 }
 
-/* Abrir e fechar pasta e grupo, com a mesma técnica do corpo de um arquivo: a
-   linha do grid vai de 0fr a 1fr e o filho corta o que sobra. Animar `height`
-   exigiria medir a lista; isto anima a altura que o conteúdo já tem.
-   Mais curto que os 0,44s do diff — aqui são três linhas, não um arquivo. */
+/* Opening and closing a folder or group, with the same technique as a file's body: the
+   grid row goes from 0fr to 1fr and the child clips the rest. Animating `height`
+   would require measuring the list; this animates the height the content already has.
+   Shorter than the diff's 0.44s — here it is three rows, not a file. */
 .tree-dobra {
   display: grid;
   grid-template-rows: 0fr;
@@ -629,11 +629,11 @@ code {
   padding: 8px 12px;
 }
 
-/* ---------- índice e commit (só na aba do que está para ser commitado) ---------- */
+/* ---------- index and commit (only in the to-be-committed tab) ---------- */
 
-/* A caixa fica acima das abas da lateral, e não dentro da lista: ela é do
-   repositório inteiro, não de um arquivo — e continua à vista com os marcadores
-   abertos. */
+/* The box sits above the sidebar tabs, not inside the list: it belongs to the
+   whole repository, not to a file — and stays in view with the bookmarks
+   open. */
 .commit-box {
   display: flex;
   flex: none;
@@ -651,8 +651,8 @@ code {
   background: var(--bg);
   color: var(--fg);
   font: inherit;
-  /* Mensagem de commit tem título e corpo: cresce um pouco, mas não empurra a
-     lista de arquivos para fora da tela. */
+  /* A commit message has a title and a body: it grows a little, but doesn't push the
+     file list off the screen. */
   min-height: 42px;
   max-height: 160px;
   resize: vertical;
@@ -683,8 +683,8 @@ code {
   cursor: default;
 }
 
-/* A recusa do git — hook que barrou, identidade não configurada, índice vazio —
-   fica junto da mensagem digitada, que não se perde. */
+/* Git's refusal — a hook that blocked it, identity not configured, empty index —
+   stays beside the typed message, which isn't lost. */
 .commit-erro {
   margin: 0;
   color: var(--red);
@@ -692,8 +692,8 @@ code {
   white-space: pre-wrap;
 }
 
-/* A colada única da revisão inteira, no alto da lista de marcadores: o gesto é
-   de todos de uma vez, então o botão fica escrito, e não só um ícone. */
+/* The single paste of the whole review, at the top of the bookmark list: the gesture is
+   for all of them at once, so the button is spelled out, not just an icon. */
 .bookmark-tudo {
   display: flex;
   padding: 8px 8px 4px;
@@ -722,8 +722,8 @@ code {
   color: var(--green);
 }
 
-/* O cabeçalho de cada grupo da lista — "No índice" e "Fora do índice" — com a
-   conta do que há dentro e o botão que leva ou tira o repositório inteiro. */
+/* The header of each list group — "Staged" and "Unstaged" — with the
+   count of what is inside and the button that stages or unstages the whole repository. */
 .tree-grupo {
   display: flex;
   align-items: center;
@@ -731,8 +731,8 @@ code {
   padding: 12px 6px 4px 4px;
 }
 
-/* O cabeçalho inteiro é o gesto de abrir e fechar o grupo; o botão do índice,
-   ao lado, é irmão dele — dentro, o clique de um viraria o do outro. */
+/* The whole header is the gesture to open and close the group; the index button
+   beside it is its sibling — inside, a click on one would become a click on the other. */
 .tree-grupo-botao {
   display: flex;
   flex: 1;
@@ -760,14 +760,14 @@ code {
   white-space: nowrap;
 }
 
-/* O botão do grupo não some como o das linhas: ele é o gesto de "tudo de uma
-   vez", e procurá-lo com o ponteiro seria mais trabalho do que o gesto vale. */
+/* The group's button doesn't hide like the rows' do: it is the "all at once"
+   gesture, and hunting for it with the pointer would be more work than the gesture is worth. */
 .tree-grupo .stage-btn {
   flex: none;
 }
 
-/* A linha do arquivo com os botões do índice ao lado: eles são irmãos do botão
-   que seleciona, e não filhos dele. */
+/* The file row with the index buttons beside it: they are siblings of the button
+   that selects, not its children. */
 .tree-file-linha {
   display: flex;
   align-items: center;
@@ -783,9 +783,9 @@ code {
   flex: none;
   gap: 2px;
   padding-right: 6px;
-  /* Escondidos até o ponteiro chegar na linha — um par de botões em cada
-     arquivo competiria com o nome, que é o que se lê. O que já está no índice
-     mostra o seu sempre: é o sinal de que ele vai no commit. */
+  /* Hidden until the pointer reaches the row — a pair of buttons on each
+     file would compete with the name, which is what gets read. A file already in the index
+     always shows its own: it is the sign that it goes in the commit. */
   opacity: 0;
 }
 
@@ -813,7 +813,7 @@ code {
   color: var(--fg);
 }
 
-/* Verde é "está no índice, vai no commit"; o menos que o tira fica neutro. */
+/* Green is "in the index, goes in the commit"; the minus that removes it stays neutral. */
 .stage-acoes.staged .stage-btn,
 .stage-acoes.partial .stage-btn.tirar {
   color: var(--green);
@@ -893,9 +893,9 @@ code {
   color: var(--green);
 }
 
-/* O "copiado" do GitHub: o ícone vira ✓ com um pulinho, e um balão diz o que
-   aconteceu. O `key` do ícone no componente é o que faz o pulo rodar a cada
-   cópia, e não só na primeira. */
+/* GitHub's "copied": the icon becomes ✓ with a little hop, and a bubble says what
+   happened. The icon's `key` in the component is what makes the hop run on every
+   copy, not just the first. */
 .icon-btn.copied {
   position: relative;
 }
@@ -906,7 +906,7 @@ code {
 
 .copiado-balao {
   position: absolute;
-  /* Embaixo, não em cima: o cabeçalho gruda no topo da rolagem e cortaria o balão. */
+  /* Below, not above: the header sticks to the top of the scroll and would clip the bubble. */
   top: calc(100% + 6px);
   left: 50%;
   z-index: 30;
@@ -1601,7 +1601,7 @@ tr.gap {
   user-select: none;
 }
 
-/* ---------- Pergunta ao Claude ---------- */
+/* ---------- Asking Claude ---------- */
 
 .bookmark.ask {
   border-left-color: var(--orange);
@@ -2141,10 +2141,10 @@ tr.gap {
   font-size: 11px;
 }
 
-/* ---------- preferências (⌘,) ---------- */
+/* ---------- preferences (⌘,) ---------- */
 
-/* Sobre tudo, inclusive a barra de ferramentas: o ⌘, pode chegar com nenhum
-   repositório aberto, quando a barra nem existe. */
+/* Above everything, including the toolbar: ⌘, may arrive with no
+   repository open, when the bar doesn't even exist. */
 .prefs-fundo {
   position: fixed;
   inset: 0;
@@ -2158,7 +2158,7 @@ tr.gap {
 
 .prefs {
   width: min(460px, calc(100vw - 32px));
-  /* Mais alta que a janela, rola por dentro: o fundo começa a 14vh do topo. */
+  /* Taller than the window, it scrolls inside: the backdrop starts 14vh from the top. */
   max-height: calc(86vh - 16px);
   overflow-y: auto;
   padding: 16px 18px 18px;
@@ -2224,8 +2224,8 @@ tr.gap {
   color: var(--comment);
 }
 
-/* O nome do repositório em revisão. É rótulo, não botão: escolher projeto é
-   coisa do terminal, pelo botão de diff de cada painel. */
+/* The name of the repository under review. It is a label, not a button: picking a project is
+   the terminal's job, through each panel's diff button. */
 .repo-nome {
   display: flex;
   align-items: center;
@@ -2240,10 +2240,10 @@ tr.gap {
   color: var(--purple);
 }
 
-/* ---------- aviso de repositório mexido ---------- */
+/* ---------- repository-changed notice ---------- */
 
-/* Encostado no alto, não centralizado: ele interrompe uma leitura, e o texto
-   que a pessoa estava lendo continua visível embaixo enquanto ela decide. */
+/* Pinned to the top, not centered: it interrupts a reading, and the text
+   the person was reading stays visible below while they decide. */
 .mudou-fundo {
   position: fixed;
   inset: 0;
@@ -2291,7 +2291,7 @@ tr.gap {
   gap: 8px;
 }
 
-/* Sinal de que o diff está sendo refeito, no lugar onde ficava o botão. */
+/* Sign that the diff is being redone, where the button used to be. */
 .recarregando {
   display: flex;
   align-items: center;
@@ -2301,7 +2301,7 @@ tr.gap {
   color: var(--fg-dim);
 }
 
-/* Os dois limites do contexto lado a lado, cada um com a cor que acende. */
+/* The two context limits side by side, each with the color it lights up. */
 .prefs-limites {
   display: flex;
   flex-wrap: wrap;

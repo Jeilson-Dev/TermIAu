@@ -1,6 +1,6 @@
 use serde::{Serialize, Serializer};
 
-/// Errors surfaced to the UI. Messages are user-facing (pt-BR).
+/// Errors surfaced to the UI. Messages are user-facing, in the app's language.
 #[derive(Debug)]
 pub enum Error {
     NotARepo(String),
@@ -12,7 +12,7 @@ pub enum Error {
     Io(std::io::Error),
     /// The blob is a Git LFS pointer whose content was never downloaded.
     LfsMissing,
-    /// A pergunta ao Claude falhou; a mensagem já vem pronta para mostrar.
+    /// The question to Claude failed; the message is ready to show.
     Claude(String),
     Internal(String),
 }

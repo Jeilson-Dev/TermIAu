@@ -1,4 +1,4 @@
-//! Catálogo e download dos modelos ggml do whisper.cpp.
+//! Catalog and download of the whisper.cpp ggml models.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -16,11 +16,11 @@ pub struct ModelInfo {
 }
 
 const CATALOG: &[(&str, &str, &str, u32)] = &[
-    ("tiny",           "Tiny",       "mais rápido, qualidade fraca",        75),
-    ("base",           "Base",       "rápido, qualidade razoável",         142),
-    ("small",          "Small",      "bom equilíbrio — recomendado",       466),
-    ("medium",         "Medium",     "melhor, mais pesado",              1_500),
-    ("large-v3-turbo", "Large v3 Turbo", "melhor qualidade, rápido em Apple Silicon", 1_620),
+    ("tiny",           "Tiny",       "fastest, poor quality",             75),
+    ("base",           "Base",       "fast, fair quality",               142),
+    ("small",          "Small",      "good balance — recommended",       466),
+    ("medium",         "Medium",     "better, heavier",                1_500),
+    ("large-v3-turbo", "Large v3 Turbo", "best quality, fast on Apple Silicon", 1_620),
 ];
 
 pub fn dir(app_data: &Path) -> PathBuf {
@@ -44,11 +44,11 @@ pub fn catalog(app_data: &Path) -> Vec<ModelInfo> {
         .collect()
 }
 
-/// Baixa o modelo, informando o progresso (0..1) em `on_progress`.
+/// Downloads the model, reporting progress (0..1) through `on_progress`.
 ///
-/// Grava em `.part` e só move para o destino no fim, para nunca deixar um
-/// modelo pela metade parecendo pronto. Se já existe um `.part`, retoma de
-/// onde parou via `Range` — são arquivos de centenas de MB.
+/// Writes to `.part` and only moves it into place at the end, so a half
+/// model never looks ready. If a `.part` already exists, resumes where it
+/// stopped via `Range` — these files are hundreds of MB.
 pub fn download(
     app_data: &Path,
     id: &str,
@@ -73,7 +73,7 @@ pub fn download(
     }
     let resp = req.call().map_err(|e| anyhow::anyhow!("{}: {e}", tr("download falhou", "download failed")))?;
 
-    // 206 = servidor aceitou retomar; qualquer outra coisa recomeça do zero
+    // 206 = the server accepted resuming; anything else starts over
     let resumed = resp.status().as_u16() == 206;
     let header = |k: &str| {
         resp.headers()
@@ -84,7 +84,7 @@ pub fn download(
     let len: u64 = header("content-length")
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    // com 206, o tamanho total vem no Content-Range: "bytes 100-999/1000"
+    // with 206, the total size comes in Content-Range: "bytes 100-999/1000"
     let total = if resumed {
         header("content-range")
             .and_then(|v| v.rsplit('/').next().and_then(|t| t.parse().ok()))
@@ -112,7 +112,7 @@ pub fn download(
         }
         file.write_all(&buf[..n])?;
         done += n as u64;
-        // reporta a cada ~2 MB para não inundar a interface
+        // report every ~2 MB so as not to flood the UI
         if done - last_report > 2 << 20 {
             last_report = done;
             on_progress(frac(done, total), done, total);

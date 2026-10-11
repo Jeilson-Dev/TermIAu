@@ -26,10 +26,10 @@ export function bookmarkReference(
 }
 
 /**
- * Todos os comentários num texto só, na ordem em que a lista os mostra — para
- * colar a revisão inteira de uma vez num prompt. Cada um sai exatamente como o
- * `bookmarkReference` o escreve, separados por linha em branco; os já resolvidos
- * vão marcados, porque num prompt eles mudam o pedido em vez de somar a ele.
+ * Every comment in a single text, in the order the list shows them — to
+ * paste the whole review into a prompt at once. Each one comes out exactly as
+ * `bookmarkReference` writes it, separated by a blank line; resolved ones
+ * are marked, because in a prompt they change the request instead of adding to it.
  */
 export function bookmarksReference(
   bookmarks: Bookmark[],

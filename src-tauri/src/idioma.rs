@@ -1,11 +1,11 @@
-//! O idioma do app, o mesmo do `src/i18n/index.ts`: português quando a primeira
-//! língua do macOS é português, inglês para todo o resto. O menu nativo é
-//! montado aqui no Rust, antes de a webview existir, então a conta é refeita
-//! deste lado.
+//! The app's language, same as `src/i18n/index.ts`: Portuguese when the first
+//! macOS language is Portuguese, English for everything else. The native menu
+//! is built here in Rust, before the webview exists, so the check is redone
+//! on this side.
 
 use std::sync::OnceLock;
 
-/// Só a primeira língua da lista decide.
+/// Only the first language in the list decides.
 pub fn portugues_de<S: AsRef<str>>(tags: &[S]) -> bool {
     tags.first().is_some_and(|t| t.as_ref().to_lowercase().starts_with("pt"))
 }
@@ -25,7 +25,7 @@ fn do_sistema() -> Vec<String> {
     Vec::new()
 }
 
-/// O texto no idioma do app.
+/// The text in the app's language.
 pub fn tr(pt: &'static str, en: &'static str) -> &'static str {
     if portugues() { pt } else { en }
 }

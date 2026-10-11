@@ -1,9 +1,9 @@
-//! Perguntar ao Claude sobre um trecho do diff sem sair da revisão.
+//! Asking Claude about a snippet of the diff without leaving the review.
 //!
-//! É o `claude -p` da linha de comando: responde e sai. Nada fica salvo — nem a
-//! pergunta rápida nem a que menciona uma sessão, que roda numa cópia dela
-//! (`--fork-session`) jogada fora no fim. A sessão mencionada continua como
-//! estava, e o `/resume` não se enche de perguntas avulsas.
+//! It is the command-line `claude -p`: answers and exits. Nothing is saved —
+//! neither the quick question nor one that mentions a session, which runs in a
+//! copy of it (`--fork-session`) thrown away at the end. The mentioned session
+//! stays as it was, and `/resume` doesn't fill up with one-off questions.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -18,14 +18,14 @@ use super::error::{Error, Result};
 use super::git::Repo;
 use crate::idioma::tr;
 
-/// O pid de cada pergunta em andamento, pelo id que a webview deu a ela. É o
-/// que deixa o botão de cancelar matar o processo certo.
+/// The pid of each question in progress, by the id the webview gave it. It is
+/// what lets the cancel button kill the right process.
 #[derive(Default)]
 pub struct Perguntas(pub Mutex<HashMap<String, u32>>);
 
-/// Quantas sessões a lista oferece: as mais recentes são as que interessam.
+/// How many sessions the list offers: the most recent ones are what matter.
 const SESSOES_MAX: usize = 20;
-/// O título vive no fim do arquivo, que chega a vários MB. Basta ler o rabo.
+/// The title lives at the end of the file, which reaches several MB. Reading the tail is enough.
 const RABO_BYTES: u64 = 512 * 1024;
 
 const INSTRUCOES_PT: &str = "Você está sendo consultado de dentro de uma ferramenta de revisão de código \
@@ -51,15 +51,15 @@ ele pedir. Diga no fim o que alterou.";
 const COM_ALTERACOES_EN: &str = " The reviewer allowed edits: you may edit the repository's files when \
 they ask. Say at the end what you changed.";
 
-/// O que cada modo pode fazer. `--tools` diz quais ferramentas existem, não
-/// quais estão liberadas — então as configurações do usuário (um modo auto, um
-/// `allow` de Edit) não têm como devolver a escrita a uma pergunta só de
-/// conversa. Sem Bash em nenhum dos dois: o diff já vem no contexto.
+/// What each mode can do. `--tools` says which tools exist, not which are
+/// allowed — so the user's settings (an auto mode, an Edit `allow`) have no way
+/// to give writing back to a conversation-only question. No Bash in either:
+/// the diff already comes in the context.
 ///
-/// E sem `SendMessage`, que é o que mais importa: uma pergunta que menciona a
-/// sessão de um orquestrador herda o papel dele. Com a ferramenta à mão, ela já
-/// tratou a dúvida do revisor como ordem e despachou "decisão do usuário" para
-/// os agentes da equipe — que aplicaram, sem ninguém ter decidido nada.
+/// And no `SendMessage`, which matters most: a question that mentions an
+/// orchestrator's session inherits its role. With the tool at hand, it once
+/// treated the reviewer's doubt as an order and dispatched a "user decision" to
+/// the team's agents — who applied it, with nobody having decided anything.
 const FERRAMENTAS_LEITURA: &str = "Read,Grep,Glob";
 const FERRAMENTAS_ESCRITA: &str = "Read,Grep,Glob,Edit,Write";
 
@@ -68,13 +68,13 @@ const FERRAMENTAS_ESCRITA: &str = "Read,Grep,Glob,Edit,Write";
 pub struct Sessao {
     pub id: String,
     pub title: String,
-    /// Última escrita no arquivo da sessão, em ms desde a época.
+    /// Last write to the session file, in ms since the epoch.
     pub modified: u64,
 }
 
-/// O binário do `claude`. O app aberto pelo Finder herda um PATH mínimo, sem o
-/// `~/.local/bin` do instalador — então procura nos lugares de sempre e, no
-/// fim, pergunta ao shell de login do usuário, que tem o PATH de verdade.
+/// The `claude` binary. The app opened from Finder inherits a minimal PATH,
+/// without the installer's `~/.local/bin` — so it looks in the usual places and,
+/// last, asks the user's login shell, which has the real PATH.
 fn binario() -> Result<&'static Path> {
     static BIN: OnceLock<Option<PathBuf>> = OnceLock::new();
     BIN.get_or_init(|| {
@@ -104,8 +104,8 @@ fn binario() -> Result<&'static Path> {
     .ok_or_else(|| Error::Claude(tr("não encontrei o `claude` instalado nesta máquina.", "couldn't find `claude` installed on this machine.").into()))
 }
 
-/// Onde o Claude Code guarda as sessões iniciadas nesta pasta: o caminho vira
-/// nome de diretório trocando tudo que não é letra ou número por `-`.
+/// Where Claude Code keeps the sessions started in this folder: the path becomes
+/// a directory name by replacing everything that isn't a letter or digit with `-`.
 fn pasta_sessoes(root: &Path) -> Option<PathBuf> {
     let base = match std::env::var_os("CLAUDE_CONFIG_DIR") {
         Some(dir) => PathBuf::from(dir),
@@ -119,8 +119,8 @@ fn pasta_sessoes(root: &Path) -> Option<PathBuf> {
     Some(base.join("projects").join(nome))
 }
 
-/// O título de uma sessão: o que o usuário deu, senão o que o Claude deu, senão
-/// o último prompt. `None` para uma sessão sem conversa nenhuma.
+/// A session's title: the one the user gave, else the one Claude gave, else the
+/// last prompt. `None` for a session with no conversation at all.
 fn titulo(arquivo: &Path) -> Option<String> {
     let mut f = std::fs::File::open(arquivo).ok()?;
     let tamanho = f.metadata().ok()?.len();
@@ -129,7 +129,7 @@ fn titulo(arquivo: &Path) -> Option<String> {
     f.read_to_end(&mut bytes).ok()?;
 
     let (mut dado, mut gerado, mut prompt) = (None, None, None);
-    // A primeira linha pode ter sido cortada no meio; o parse dela só falha.
+    // The first line may have been cut in the middle; parsing it just fails.
     for linha in String::from_utf8_lossy(&bytes).lines() {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(linha) else { continue };
         let texto = |campo: &str| v.get(campo).and_then(|t| t.as_str()).map(str::to_owned);
@@ -145,8 +145,8 @@ fn titulo(arquivo: &Path) -> Option<String> {
     Some(if t.chars().count() > 90 { format!("{}…", t.chars().take(90).collect::<String>()) } else { t.to_owned() })
 }
 
-/// As sessões do Claude Code abertas na raiz deste repositório, da mais recente
-/// para a mais antiga.
+/// The Claude Code sessions open at this repository's root, from newest
+/// to oldest.
 pub fn sessoes(root: &Path) -> Result<Vec<Sessao>> {
     let Some(pasta) = pasta_sessoes(root) else { return Ok(Vec::new()) };
     let Ok(entradas) = std::fs::read_dir(&pasta) else { return Ok(Vec::new()) };
@@ -173,16 +173,16 @@ pub fn sessoes(root: &Path) -> Result<Vec<Sessao>> {
         .collect())
 }
 
-/// Um arquivo que o Claude mexeu numa pergunta com alterações liberadas: como
-/// estava e como ficou. `None` é "não existia" (antes) ou "apagado" (depois).
+/// A file Claude touched in a question with edits allowed: how it was and how
+/// it ended up. `None` means "didn't exist" (before) or "deleted" (after).
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Alteracao {
     pub path: String,
     pub before: Option<String>,
     pub after: Option<String>,
-    /// Dá para voltar ao `before` com segurança. Não dá quando não se sabe como
-    /// o arquivo estava (ignorado pelo git, grande demais) ou quando é binário.
+    /// It can be safely restored to `before`. Not when it's unknown how the file
+    /// was (ignored by git, too large) or when it is binary.
     pub undoable: bool,
 }
 
@@ -193,14 +193,14 @@ pub struct Resposta {
     pub changes: Vec<Alteracao>,
 }
 
-/// Arquivo não rastreado maior que isto não entra na foto: desfazer a edição
-/// dele fica indisponível, em vez de a foto custar memória à toa.
+/// An untracked file larger than this stays out of the snapshot: undoing its
+/// edit becomes unavailable, rather than the snapshot wasting memory.
 const FOTO_MAX_ARQUIVO: u64 = 1024 * 1024;
 const FOTO_MAX_TOTAL: u64 = 32 * 1024 * 1024;
 
-/// Como a árvore de trabalho estava antes da pergunta. Os rastreados cabem num
-/// commit solto do `git stash create` — que não mexe em ref, índice nem disco —
-/// e os não rastreados, que ele não pega, vão copiados.
+/// How the working tree was before the question. Tracked files fit in a loose
+/// commit from `git stash create` — which touches no ref, index or disk — and
+/// the untracked ones, which it doesn't pick up, are copied.
 struct Foto {
     base: Option<String>,
     nao_rastreados: HashSet<String>,
@@ -251,14 +251,14 @@ impl Foto {
                 return Antes::Conteudo(bytes);
             }
         }
-        // Nem rastreado nem novo: ou não existia, ou o git ignora — e aí não há foto.
+        // Neither tracked nor new: either it didn't exist, or git ignores it — then there is no snapshot.
         let ignorado = repo.run(&["check-ignore", "-q", "--", nome]).is_ok();
         if ignorado { Antes::Desconhecido } else { Antes::NaoExistia }
     }
 }
 
-/// O caminho que o Claude usou, relativo à raiz. Ele escreve caminhos absolutos,
-/// e às vezes pelo outro lado de um link (`/tmp` e `/private/tmp`, no macOS).
+/// The path Claude used, relative to the root. It writes absolute paths, and
+/// sometimes through the other side of a link (`/tmp` and `/private/tmp`, on macOS).
 fn relativo(raiz: &Path, caminho: &str) -> Option<String> {
     let p = Path::new(caminho);
     let p = if p.is_absolute() { p.to_path_buf() } else { raiz.join(p) };
@@ -273,7 +273,7 @@ fn relativo(raiz: &Path, caminho: &str) -> Option<String> {
     real.strip_prefix(&raiz).ok().map(|r| r.to_string_lossy().into_owned())
 }
 
-/// Os arquivos em que o Claude usou uma ferramenta de escrita, na ordem.
+/// The files on which Claude used a writing tool, in order.
 fn editados(linhas: &[serde_json::Value]) -> Vec<String> {
     let mut vistos = Vec::new();
     for v in linhas {
@@ -309,7 +309,7 @@ fn alteracao(repo: &Repo, foto: &Foto, nome: String) -> Alteracao {
         Antes::NaoExistia => (None, true),
         Antes::Desconhecido => (None, false),
     };
-    // Binário não se mostra nem se desfaz daqui: fica só o nome, para saber que mexeu.
+    // Binaries are neither shown nor undone from here: only the name stays, to know it was touched.
     let texto = |b: Option<Vec<u8>>| b.map(String::from_utf8).transpose();
     match (texto(antes), texto(depois)) {
         (Ok(before), Ok(after)) => Alteracao { path: nome, before, after, undoable: conhecido },
@@ -317,9 +317,9 @@ fn alteracao(repo: &Repo, foto: &Foto, nome: String) -> Alteracao {
     }
 }
 
-/// Roda a pergunta e devolve a resposta — e, com alterações liberadas, o que
-/// mudou em cada arquivo mexido, para o revisor ver e poder desfazer. `contexto`
-/// vai pelo stdin: é o trecho, o diff e a conversa até aqui.
+/// Runs the question and returns the answer — and, with edits allowed, what
+/// changed in each touched file, for the reviewer to see and be able to undo.
+/// `contexto` goes through stdin: the snippet, the diff and the conversation so far.
 #[allow(clippy::too_many_arguments)]
 pub fn perguntar(
     root: &Path,
@@ -334,7 +334,7 @@ pub fn perguntar(
     let (ferramentas, modo, regra) = if alterar {
         (FERRAMENTAS_ESCRITA, "acceptEdits", tr(COM_ALTERACOES_PT, COM_ALTERACOES_EN))
     } else {
-        // `dontAsk` nega o que não foi liberado, em vez de ficar esperando alguém responder.
+        // `dontAsk` denies what wasn't allowed, instead of waiting for someone to answer.
         (FERRAMENTAS_LEITURA, "dontAsk", tr(SO_CONVERSA_PT, SO_CONVERSA_EN))
     };
     let repo = Repo::open(root)?;
@@ -342,12 +342,12 @@ pub fn perguntar(
 
     let mut cmd = Command::new(binario()?);
     cmd.current_dir(root)
-        // `stream-json` em vez de `json`: é nele que aparecem as ferramentas usadas,
-        // e é por elas que se sabe quais arquivos foram mexidos.
+        // `stream-json` instead of `json`: it is where the tools used show up,
+        // and they are how we know which files were touched.
         .args(["-p", pergunta, "--output-format", "stream-json", "--verbose", "--no-session-persistence"])
         .args(["--append-system-prompt", &format!("{}{regra}", tr(INSTRUCOES_PT, INSTRUCOES_EN))])
         .args(["--tools", ferramentas, "--permission-mode", modo])
-        // Os servidores MCP do usuário trazem ferramentas de escrita próprias (criar ticket, mandar mensagem).
+        // The user's MCP servers bring their own writing tools (create a ticket, send a message).
         .arg("--strict-mcp-config")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -362,8 +362,8 @@ pub fn perguntar(
     let mut filho = cmd.spawn().map_err(|err| Error::Claude(format!("{}: {err}", tr("não deu para rodar o `claude`", "couldn't run `claude`"))))?;
     pids.0.lock().unwrap().insert(id.to_owned(), filho.id());
 
-    // Numa thread à parte: um contexto grande enche o pipe antes de o claude
-    // começar a ler, e escrever tudo daqui travaria esperando a saída.
+    // On a separate thread: a large context fills the pipe before claude starts
+    // reading, and writing it all from here would block waiting for the output.
     let mut entrada = filho.stdin.take();
     let contexto = contexto.to_owned();
     std::thread::spawn(move || {
@@ -380,8 +380,8 @@ pub fn perguntar(
         .lines()
         .filter_map(|l| serde_json::from_str(l).ok())
         .collect();
-    // Cancelada ou com erro, a pergunta pode ter editado arquivos antes de parar.
-    // Aí o que mudou não pode se perder no erro: volta como resposta, com o aviso.
+    // Cancelled or failed, the question may have edited files before stopping.
+    // Then what changed must not get lost in the error: it comes back as the answer, with the notice.
     let changes = match &foto {
         Some(foto) => editados(&linhas)
             .iter()
@@ -411,9 +411,9 @@ pub fn perguntar(
     Ok(Resposta { answer: texto, changes })
 }
 
-/// Volta os arquivos ao que eram antes da pergunta. Só mexe no arquivo que
-/// continua exatamente como o Claude deixou: se alguém o editou depois, desfazer
-/// apagaria esse trabalho — ele fica, e volta na lista do que não deu.
+/// Restores the files to what they were before the question. Only touches a file
+/// that is still exactly as Claude left it: if someone edited it afterwards,
+/// undoing would erase that work — it stays, and comes back in the list of failures.
 pub fn desfazer(root: &Path, alteracoes: &[Alteracao]) -> Result<Vec<String>> {
     let repo = Repo::open(root)?;
     let raiz = repo.root().canonicalize()?;
@@ -440,8 +440,8 @@ pub fn desfazer(root: &Path, alteracoes: &[Alteracao]) -> Result<Vec<String>> {
     Ok(ficaram)
 }
 
-/// Mata a pergunta em andamento. Tirar o pid do mapa antes é o que avisa a
-/// `perguntar` que a saída vazia foi cancelamento, não falha.
+/// Kills the question in progress. Removing the pid from the map first is what
+/// tells `perguntar` that the empty output was a cancellation, not a failure.
 pub fn cancelar(pids: &Perguntas, id: &str) {
     if let Some(pid) = pids.0.lock().unwrap().remove(id) {
         unsafe {

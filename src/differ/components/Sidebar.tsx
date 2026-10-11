@@ -7,19 +7,19 @@ import type { Bookmark, FileDiff, StagedState } from "../types";
 import { CopyAllButton, CopyReferenceButton, FixBadge, ResolveButton } from "./BookmarkBox";
 import { Icon, StatusIcon } from "./Icons";
 
-/** Uma seção da lista de arquivos: no índice e fora dele, como no VS Code. */
+/** A section of the file list: in the index and out of it, like in VS Code. */
 export interface GrupoArquivos {
   chave: string;
   titulo: string;
   tree: TreeNode[];
-  /** O que o botão do cabeçalho faz com o repositório inteiro. */
+  /** What the header button does to the whole repository. */
   poeTudo: boolean;
   vazio: string;
 }
 
 interface Props {
   tree: TreeNode[];
-  /** Quando há grupos, a lista é dividida por eles; sem eles, é a árvore inteira. */
+  /** When there are groups, the list is split by them; without them, it is the whole tree. */
   grupos: GrupoArquivos[] | null;
   files: FileDiff[];
   viewedPaths: Set<string>;
@@ -28,12 +28,12 @@ interface Props {
   outdated: Set<string>;
   placements: Map<string, FixPlacement> | null;
   referenceOf(bookmark: Bookmark): string;
-  /// Só na aba do que está para ser commitado: nas outras não há índice nem commit.
+  /// Only in the to-be-committed tab: the others have no index or commit.
   staging: boolean;
-  /// Quantos arquivos têm algo no índice — é o que o botão de commit vai levar.
+  /// How many files have something in the index — it is what the commit button will take.
   noIndice: number;
   onStage(path: string, dentro: boolean): void;
-  /// Deixa o erro do git subir: quem o mostra é a caixa, junto do texto digitado.
+  /// Lets git's error propagate: the box shows it, along with the typed text.
   onCommit(message: string): Promise<void>;
   onSelectFile(path: string): void;
   onSelectBookmark(bookmark: Bookmark): void;
@@ -79,7 +79,7 @@ export function Sidebar(props: Props) {
   );
 }
 
-/** A mensagem e o botão que commita o que está no índice, em cima da lista de arquivos. */
+/** The message and the button that commits what is in the index, above the file list. */
 function CommitBox({ noIndice, onCommit }: { noIndice: number; onCommit(m: string): Promise<void> }) {
   const [mensagem, setMensagem] = useState("");
   const [enviando, setEnviando] = useState(false);
@@ -94,8 +94,8 @@ function CommitBox({ noIndice, onCommit }: { noIndice: number; onCommit(m: strin
       await onCommit(mensagem);
       setMensagem("");
     } catch (err) {
-      // A recusa do git é a resposta mais útil que existe aqui — hook que barrou,
-      // identidade não configurada, nada no índice. Vai inteira para a tela.
+      // Git's refusal is the most useful answer there is here — a hook that blocked it,
+      // identity not configured, nothing in the index. It goes to the screen whole.
       setErro(String(err));
     } finally {
       setEnviando(false);
@@ -104,9 +104,9 @@ function CommitBox({ noIndice, onCommit }: { noIndice: number; onCommit(m: strin
 
   return (
     <div className="commit-box">
-      {/* Mensagem de commit é cheia de nome de arquivo, de flag e de identificador:
-          corretor e maiúscula automática só atrapalham, e a autocorreção do macOS
-          ainda troca o traço do `--staged` por travessão. */}
+      {/* A commit message is full of file names, flags and identifiers:
+          spellcheck and auto-capitalization only get in the way, and macOS autocorrect
+          even turns the dashes of `--staged` into an em dash. */}
       <textarea
         className="commit-msg"
         rows={2}
@@ -130,7 +130,7 @@ function CommitBox({ noIndice, onCommit }: { noIndice: number; onCommit(m: strin
   );
 }
 
-/** O + e o − de um arquivo: o `git add` e o inverso dele, sem sair da lista. */
+/** A file's + and −: `git add` and its inverse, without leaving the list. */
 function StageButtons({
   path,
   staged,
@@ -142,7 +142,7 @@ function StageButtons({
   onStage(path: string, dentro: boolean): void;
   pasta?: boolean;
 }) {
-  // Pela metade no índice, os dois cabem: um leva o resto, o outro tira tudo.
+  // Half in the index, both fit: one takes the rest, the other removes everything.
   const por = staged !== "staged";
   const tirar = staged !== "unstaged";
   return (
@@ -203,7 +203,7 @@ function FileTree({
   );
   const filtering = query.trim() !== "";
 
-  /** Toda pasta que está na lista, para o botão que recolhe de uma vez só. */
+  /** Every folder in the list, for the button that collapses all at once. */
   const todasPastas = useMemo(() => {
     const nomes: string[] = [];
     const visitar = (nodes: TreeNode[]) => {
@@ -217,8 +217,8 @@ function FileTree({
     return nomes;
   }, [grupos, tree]);
 
-  // O botão alterna em vez de só recolher: quem recolheu tudo para achar um
-  // arquivo quer o caminho de volta na mesma tecla.
+  // The button toggles instead of only collapsing: whoever collapsed everything to find a
+  // file wants the way back on the same key.
   const tudoRecolhido = todasPastas.length > 0 && todasPastas.every((p) => closed.has(p));
   const alternarTudo = () => {
     setClosed(tudoRecolhido ? new Set() : new Set(todasPastas));
@@ -258,8 +258,8 @@ function FileTree({
           {isViewed && <Icon name="check" className="viewed-mark" size={14} />}
         </button>
       );
-      // Os botões do índice são irmãos da linha, não filhos: botão dentro de
-      // botão não é HTML válido, e o clique de um viraria o clique do outro.
+      // The index buttons are siblings of the row, not children: a button inside a
+      // button isn't valid HTML, and a click on one would become a click on the other.
       if (!onStage || !staged) return <Fragment key={path}>{linha}</Fragment>;
       return (
         <div key={path} className="tree-file-linha">
@@ -272,8 +272,8 @@ function FileTree({
     const staged = onStage ? dirStaged(node) : null;
     const linhaDir = (
       <button className="tree-dir" style={indent} title={node.path} onClick={() => toggle(node.path)}>
-        {/* Sempre o mesmo chevron, girando: trocar o ícone no meio do caminho
-            cortaria a volta dele. */}
+        {/* Always the same chevron, rotating: swapping the icon midway
+            would cut its turn short. */}
         <Icon
           name="chevron-down"
           className={open ? "tree-chevron" : "tree-chevron fechado"}
@@ -286,9 +286,9 @@ function FileTree({
     return (
       <Fragment key={`dir:${node.path}`}>
         {onStage && staged ? (
-          // A pasta inteira de uma vez: `git add` aceita o caminho dela como
-          // aceita o de um arquivo, e leva junto o que foi apagado e o que ainda
-          // não é rastreado lá dentro.
+          // The whole folder at once: `git add` accepts its path just as it
+          // accepts a file's, and takes along what was deleted and what still
+          // isn't tracked in there.
           <div className="tree-file-linha">
             {linhaDir}
             <StageButtons path={node.path} staged={staged} onStage={onStage} pasta />
@@ -296,8 +296,8 @@ function FileTree({
         ) : (
           linhaDir
         )}
-        {/* O que está dentro fica montado e vai sendo cortado pela altura: é o que
-            permite animar nos dois sentidos, e são linhas baratas. */}
+        {/* What is inside stays mounted and gets clipped by height: that is what
+            allows animating both ways, and the rows are cheap. */}
         <div className={open ? "tree-dobra aberta" : "tree-dobra"}>
           <div className="tree-dobra-clip">
             {node.children.map((child) => renderNode(child, depth + 1))}
@@ -329,8 +329,8 @@ function FileTree({
       <div className="tree-items" ref={listRef}>
         {gruposVisiveis
           ? gruposVisiveis.map((g) => {
-              // Filtrando, o grupo se abre sozinho: esconder o resultado da
-              // busca atrás de um grupo fechado seria dizer que não há nada.
+              // While filtering, the group opens on its own: hiding the search
+              // result behind a closed group would be saying there is nothing.
               const aberto = filtering || !gruposFechados.has(g.chave);
               return (
                 <Fragment key={g.chave}>
@@ -406,8 +406,8 @@ function BookmarkList({
     return [...byPath];
   }, [bookmarks, files]);
 
-  // Da lista já ordenada, e não do array cru: o texto colado sai na mesma ordem
-  // em que a revisão é lida na tela, arquivo por arquivo, linha por linha.
+  // From the already sorted list, not the raw array: the pasted text comes out in the same order
+  // the review is read on screen, file by file, line by line.
   const tudo = useMemo(
     () => bookmarksReference(groups.flatMap(([, items]) => items), referenceOf),
     [groups, referenceOf],

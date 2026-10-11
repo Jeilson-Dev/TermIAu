@@ -1,7 +1,7 @@
-// As perguntas ao Claude moram aqui, e não na visão do arquivo. A aba pendente se
-// refaz sozinha quando o disco muda — e uma pergunta com alterações liberadas
-// muda o disco. Se a conversa morasse no componente, ela sumiria (e o processo
-// morreria) no meio da própria alteração que se queria ver.
+// The questions to Claude live here, not in the file view. The pending tab
+// redoes itself when the disk changes — and a question with edits allowed
+// changes the disk. If the conversation lived in the component, it would vanish (and the process
+// would die) in the middle of the very change one wanted to see.
 
 import { T } from "../../i18n/differ";
 import { useSyncExternalStore } from "react";
@@ -10,7 +10,7 @@ import type { FileDiff, Side } from "../types";
 import { getBlob } from "./blobs";
 import { rangeLabel } from "./bookmarks";
 
-/** Onde a pergunta está presa e de onde ela veio. */
+/** Where the question is pinned and where it came from. */
 export interface Ask {
   id: string;
   path: string;
@@ -18,22 +18,22 @@ export interface Ask {
   start: number;
   end: number;
   quote?: string;
-  /** Pergunta feita a partir de um marcador: a decisão reescreve o comentário dele. */
+  /** A question asked from a bookmark: the decision rewrites its comment. */
   bookmarkId?: string;
-  /** O comentário do marcador, que entra no contexto. */
+  /** The bookmark's comment, which goes into the context. */
   note?: string;
 }
 
 export interface Turn {
   question: string;
-  /** Feita com alterações liberadas. */
+  /** Asked with edits allowed. */
   edits?: boolean;
   answer?: string;
   error?: string;
-  /** O que o Claude mexeu nos arquivos nesta vez, para ver e poder desfazer. */
+  /** What Claude changed in the files this time, to see and be able to undo. */
   changes?: AskChange[];
   undone?: boolean;
-  /** Arquivos que não deu para desfazer (alguém mexeu de novo depois). */
+  /** Files that couldn't be undone (someone changed them again afterwards). */
   undoKept?: string[];
 }
 
@@ -43,17 +43,17 @@ export interface AskState extends Ask {
   model: string;
   session: string;
   allowEdits: boolean;
-  /** Id do processo em andamento (pergunta ou elaboração do marcador). */
+  /** Id of the process in progress (question or bookmark drafting). */
   running: string | null;
-  /** O que o revisor diz que decidiu, em poucas palavras. */
+  /** What the reviewer says they decided, in a few words. */
   decision: string | null;
-  /** O marcador que o modelo escreveu a partir da decisão, editável antes de salvar. */
+  /** The bookmark the model wrote from the decision, editable before saving. */
   draft: string | null;
   noteError: string | null;
 }
 
 const MODEL_KEY = "differ.ask.model";
-/** O diff do arquivo vai no contexto até este tanto de linhas; depois disso, só o trecho. */
+/** The file's diff goes into the context up to this many lines; beyond that, only the snippet. */
 const DIFF_MAX_LINES = 600;
 
 let asks: AskState[] = [];
@@ -72,7 +72,7 @@ function subscribe(l: () => void) {
 
 const NONE: AskState[] = [];
 
-/** As perguntas de um arquivo; a mesma lista enquanto nada nelas muda. */
+/** A file's questions; the same list as long as nothing in them changes. */
 function asksOf(path: string): AskState[] {
   let list = byPath.get(path);
   if (!list) {
@@ -108,7 +108,7 @@ export function setModel(id: string, model: string) {
   try {
     localStorage.setItem(MODEL_KEY, model);
   } catch {
-    // Só não fica lembrado para a próxima.
+    // It just isn't remembered for next time.
   }
 }
 
@@ -123,7 +123,7 @@ export function open(ask: Omit<Ask, "id">, question = "") {
       input: question,
       model: savedModel(),
       session: "",
-      // Nunca lembrado entre caixas: cada pergunta começa só conversando.
+      // Never remembered across boxes: every question starts as conversation only.
       allowEdits: false,
       running: null,
       decision: null,
@@ -134,7 +134,7 @@ export function open(ask: Omit<Ask, "id">, question = "") {
   emit();
 }
 
-/** Fecha a caixa. Só aqui (e no cancelar) o processo em andamento morre. */
+/** Closes the box. Only here (and on cancel) does the process in progress die. */
 export function close(id: string) {
   const a = get(id);
   if (a?.running) cancelAsk(a.running).catch(() => {});
@@ -152,7 +152,7 @@ function diffText(file: FileDiff): string | null {
   return out.join("\n");
 }
 
-/** O que vai pelo stdin: onde o trecho está, o que ele diz, o diff em volta e a conversa até aqui. */
+/** What goes through stdin: where the snippet is, what it says, the surrounding diff and the conversation so far. */
 async function buildContext(root: string, file: FileDiff, ask: AskState, turns: Turn[]): Promise<string> {
   const parts: string[] = [];
   const version = ask.side === "old" ? T.versaoAnteriorAntes : T.versaoNova;
@@ -166,7 +166,7 @@ async function buildContext(root: string, file: FileDiff, ask: AskState, turns: 
       parts.push(lines.map((l, i) => `${ask.start + i} | ${l}`).join("\n"));
     }
   } catch {
-    // Sem o conteúdo, o Claude ainda tem o caminho e as linhas para ler sozinho.
+    // Without the content, Claude still has the path and the lines to read on its own.
   }
   if (ask.quote) parts.push(`${T.trechoSelecionado}\n${ask.quote}`);
   if (ask.note) parts.push(`${T.comentarioJaFeito}\n${ask.note}`);
@@ -190,16 +190,16 @@ async function buildContext(root: string, file: FileDiff, ask: AskState, turns: 
 }
 
 /**
- * O pedido para escrever o marcador. A decisão é do revisor; a conversa só entra para dar precisão
- * ao texto — é o que impede o agente final de receber de volta uma discussão já encerrada.
+ * The request to write the bookmark. The decision is the reviewer's; the conversation only comes in to make
+ * the text precise — it is what keeps the final agent from getting back an already settled discussion.
  */
 function decisionPrompt(decision: string): string {
   return T.pedidoDoMarcador(decision);
 }
 
 /**
- * Manda a pergunta digitada. `file` é a versão do arquivo que está na tela agora: o contexto sai
- * dela, e o resto roda sem depender de componente nenhum estar montado.
+ * Sends the typed question. `file` is the version of the file on screen now: the context comes
+ * from it, and the rest runs without depending on any component being mounted.
  */
 export async function send(id: string, root: string, file: FileDiff) {
   const a = get(id);
@@ -218,7 +218,7 @@ export async function send(id: string, root: string, file: FileDiff) {
   } catch (err) {
     result = { question, edits, error: String(err) };
   }
-  // Fechada ou cancelada enquanto rodava: a resposta não tem mais onde ir.
+  // Closed or cancelled while running: the answer has nowhere to go anymore.
   if (get(id)?.running !== run) return;
   update(id, { running: null, turns: [...history, result] });
 }
@@ -227,12 +227,12 @@ export function cancel(id: string) {
   const a = get(id);
   if (!a?.running) return;
   cancelAsk(a.running).catch(() => {});
-  // Cancelar a elaboração do marcador não mexe na conversa; cancelar a pergunta tira ela.
+  // Cancelling the bookmark drafting doesn't touch the conversation; cancelling the question removes it.
   const drafting = a.running.endsWith(":decisao");
   update(id, { running: null, turns: drafting ? a.turns : a.turns.slice(0, -1) });
 }
 
-// A conversa já vai inteira no contexto, então o texto sai sem mencionar sessão: mais rápido e barato.
+// The whole conversation already goes in the context, so the text goes out without mentioning a session: faster and cheaper.
 export async function draftNote(id: string, root: string, file: FileDiff) {
   const a = get(id);
   const said = a?.decision?.trim();

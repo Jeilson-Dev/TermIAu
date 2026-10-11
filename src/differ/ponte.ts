@@ -1,9 +1,9 @@
-// O differ roda dentro de um <iframe>, e o Tauri injeta o IPC no documento de
-// cima. Como os dois são da mesma origem (tauri://localhost em produção,
-// localhost:1420 no dev), dá para pegar o objeto emprestado do pai: as funções
-// são dele, então o `invoke` sai do documento que o Tauri já conhece. Vale para
-// tudo que fala com o Rust, inclusive os plugins de diálogo e de store, que
-// buscam este mesmo global.
+// The differ runs inside an <iframe>, and Tauri injects the IPC into the top
+// document. Since both share the same origin (tauri://localhost in production,
+// localhost:1420 in dev), we can borrow the object from the parent: the functions
+// are its own, so `invoke` goes out from the document Tauri already knows. This holds for
+// everything that talks to Rust, including the dialog and store plugins, which
+// look up this same global.
 
 import { nossoAtalho } from "../atalhos";
 
@@ -17,12 +17,12 @@ if (!window.__TAURI_INTERNALS__ && window.parent !== window) {
   window.__TAURI_INTERNALS__ = window.parent.__TAURI_INTERNALS__;
 }
 
-// As teclas apertadas aqui dentro não sobem para o documento de cima, e é lá
-// que moram o ⌘`, o ⌘1..⌘9 e o ⌘⇧[ / ⌘⇧]. Sem este reenvio, entrar na aba do diff
-// seria entrar num lugar de onde o teclado não sai.
+// Keys pressed in here don't bubble up to the top document, and that is where
+// ⌘`, ⌘1..⌘9 and ⌘⇧[ / ⌘⇧] live. Without this forwarding, entering the diff tab
+// would be entering a place the keyboard can't leave.
 //
-// Na fase de captura, e só para as teclas que são do TermIAu: o ⌘C que copia
-// uma linha de código continua sendo do differ, e nem é olhado aqui.
+// In the capture phase, and only for TermIAu's keys: the ⌘C that copies
+// a line of code still belongs to the differ, and isn't even looked at here.
 window.addEventListener(
   "keydown",
   (e) => {
@@ -35,9 +35,9 @@ window.addEventListener(
   true,
 );
 
-// O TermIAu manda abrir o repositório do painel de onde o botão de diff foi
-// apertado. Sai daqui como evento comum do documento, para o App não precisar
-// saber que existe um iframe em volta dele.
+// TermIAu asks to open the repository of the panel whose diff button was
+// pressed. It goes out from here as a plain document event, so the App doesn't need
+// to know there is an iframe around it.
 window.addEventListener("message", (e) => {
   if (e.source !== window.parent) return;
   const dado = e.data as {
@@ -49,9 +49,9 @@ window.addEventListener("message", (e) => {
   if (typeof dado?.termiauRepo === "string") {
     window.dispatchEvent(new CustomEvent("termiau:repo", { detail: dado.termiauRepo }));
   }
-  // ⌘, no menu do TermIAu: as preferências são daqui, então é aqui que abrem.
+  // ⌘, in TermIAu's menu: the preferences live here, so this is where they open.
   if (dado?.termiauPrefs) window.dispatchEvent(new Event("termiau:prefs"));
-  // Escondida atrás de um terminal, a aba não precisa vigiar nada.
+  // Hidden behind a terminal, the tab doesn't need to watch anything.
   if (typeof dado?.termiauVisivel === "boolean") {
     window.dispatchEvent(new CustomEvent("termiau:visivel", { detail: dado.termiauVisivel }));
   }

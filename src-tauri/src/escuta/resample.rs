@@ -1,16 +1,16 @@
-//! Reamostragem por sinc janelado (Blackman). Qualquer razão de taxas,
-//! qualidade muito acima do que se precisa aqui, sem dependências.
+//! Windowed-sinc (Blackman) resampling. Any rate ratio, quality far above
+//! what is needed here, no dependencies.
 //!
-//! Serve o microfone descendo da taxa nativa da placa para os 16 kHz do
-//! Whisper.
+//! Takes the microphone down from the device's native rate to Whisper's
+//! 16 kHz.
 
-const TAPS: isize = 24; // meia-largura do kernel
+const TAPS: isize = 24; // kernel half-width
 
 pub struct Resampler {
-    ratio: f64,   // in_rate / out_rate — passo no espaço de entrada
-    cutoff: f64,  // frequência de corte normalizada (Nyquist da menor taxa)
+    ratio: f64,   // in_rate / out_rate — step in input space
+    cutoff: f64,  // normalized cutoff frequency (Nyquist of the lower rate)
     hist: Vec<f32>,
-    pos: f64,     // posição de leitura, em amostras de entrada, dentro de `hist`
+    pos: f64,     // read position, in input samples, within `hist`
 }
 
 impl Resampler {
@@ -24,7 +24,7 @@ impl Resampler {
         }
     }
 
-    /// Consome amostras mono e devolve as amostras já na taxa de saída.
+    /// Consumes mono samples and returns samples at the output rate.
     pub fn process(&mut self, input: &[f32]) -> Vec<f32> {
         self.hist.extend_from_slice(input);
 
@@ -53,7 +53,7 @@ impl Resampler {
             self.pos += self.ratio;
         }
 
-        // descarta o histórico já consumido, mantendo margem para o kernel
+        // drop the consumed history, keeping margin for the kernel
         let keep_from = (self.pos.floor() as isize - TAPS).max(0) as usize;
         if keep_from > 0 {
             self.hist.drain(..keep_from);
@@ -77,7 +77,7 @@ fn blackman(x: f64) -> f64 {
     if x.abs() > n {
         return 0.0;
     }
-    // janela de Blackman centrada em 0, largura 2n
+    // Blackman window centered on 0, width 2n
     let t = std::f64::consts::PI * (x + n) / n;
     0.42 - 0.5 * (t).cos() + 0.08 * (2.0 * t).cos()
 }
@@ -86,7 +86,7 @@ fn blackman(x: f64) -> f64 {
 mod tests {
     use super::*;
 
-    /// Um seno de 440 Hz reamostrado 48k→16k deve continuar sendo um seno de 440 Hz.
+    /// A 440 Hz sine resampled 48k→16k must still be a 440 Hz sine.
     #[test]
     fn preserva_tom_puro() {
         let mut r = Resampler::new(48_000, 16_000);
@@ -95,11 +95,11 @@ mod tests {
             .collect();
         let out = r.process(&input);
 
-        // ~1s de áudio a 16 kHz (com folga do kernel)
+        // ~1s of audio at 16 kHz (minus kernel slack)
         assert!(out.len() > 15_900 && out.len() <= 16_000, "len = {}", out.len());
 
-        // A leitura começa em `TAPS` amostras de entrada (o kernel precisa de
-        // histórico), o que dá uma latência fixa de TAPS/ratio amostras na saída.
+        // Reading starts at `TAPS` input samples (the kernel needs history),
+        // which gives a fixed latency of TAPS/ratio output samples.
         let lag = TAPS as f64 / 3.0; // 48k->16k
         let start = 200;
         let err: f64 = out[start..out.len() - 200]
@@ -112,10 +112,10 @@ mod tests {
             })
             .sum::<f64>()
             / (out.len() - 400) as f64;
-        assert!(err < 0.02, "erro médio {err}");
+        assert!(err < 0.02, "mean error {err}");
     }
 
-    /// Chamadas em blocos pequenos devem dar o mesmo resultado que um bloco só.
+    /// Calls in small blocks must give the same result as a single block.
     #[test]
     fn streaming_bate_com_lote() {
         let input: Vec<f32> = (0..9_600)

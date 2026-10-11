@@ -5,22 +5,22 @@ import type { Bookmark, ReviewCheckpoint, Scope, ViewMode } from "../types";
 
 export interface Settings {
   viewMode: ViewMode;
-  /** Palpite de branch alvo para um repositório visto pela primeira vez. */
+  /** Target branch guess for a repository seen for the first time. */
   defaultTarget: string;
-  /** Branch inteira ou só o que mudou desde a última revisão completa. */
+  /** The whole branch or only what changed since the last complete review. */
   scope: Scope;
   /**
-   * O "Abrir no editor" do visor do terminal: um comando com `{arquivo}` e `{linha}`, rodado no
-   * seu shell. Vazio é o VS Code, pelo `vscode://`, que não depende do `code` estar no PATH.
+   * The terminal viewer's "Open in editor": a command with `{arquivo}` and `{linha}`, run in
+   * your shell. Empty means VS Code, through `vscode://`, which doesn't depend on `code` being on PATH.
    */
   editor: string;
-  /** O contexto da sessão do Claude, em %: a pílula fica amarela a partir deste. */
+  /** The Claude session's context, in %: the pill turns yellow from this one. */
   contextoAtencao: number;
-  /** E vermelha a partir deste, com o painel contornado de vermelho, pulsando. */
+  /** And red from this one, with the panel outlined in pulsing red. */
   contextoPerigo: number;
-  /** Manda o `/compact` sozinho quando o contexto chega em `autoCompactEm`. Desligado por padrão. */
+  /** Sends `/compact` on its own when the context reaches `autoCompactEm`. Off by default. */
   autoCompact: boolean;
-  /** O % do auto-compact. Tem de passar do vermelho: abaixo dele, vale o vermelho mais um. */
+  /** The auto-compact %. Must exceed red: below it, red plus one applies. */
   autoCompactEm: number;
 }
 
@@ -74,14 +74,14 @@ export async function loadSettings(): Promise<Settings> {
 export const saveSettings = (settings: Settings) => write("settings", settings);
 
 /**
- * Unificado ou lado a lado vale para o app inteiro: o diff do chat do TermIAu lê e grava o
- * mesmo `settings.viewMode` daqui. Gravar só o modo preserva o resto das preferências.
+ * Unified or side by side applies to the whole app: TermIAu's chat diff reads and writes the
+ * same `settings.viewMode` as here. Writing only the mode preserves the rest of the preferences.
  */
 export async function saveViewMode(viewMode: ViewMode): Promise<void> {
   await saveSettings({ ...(await loadSettings()), viewMode });
 }
 
-/** Avisa quando as preferências mudam — inclusive quando quem mudou foi a outra página. */
+/** Notifies when the preferences change — including when the other page changed them. */
 export async function onSettings(cb: (settings: Settings) => void): Promise<() => void> {
   return (await getStore()).onKeyChange<Partial<Settings>>("settings", (v) => cb({ ...DEFAULT_SETTINGS, ...v }));
 }

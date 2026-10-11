@@ -1,5 +1,5 @@
-//! Motor de transcrição: recebe áudio 16 kHz mono e emite trechos
-//! parciais (provisórios) e finais (confirmados).
+//! Transcription engine: takes 16 kHz mono audio and emits partial
+//! (provisional) and final (confirmed) segments.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
@@ -11,27 +11,27 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextPar
 
 pub const SAMPLE_RATE: usize = 16_000;
 
-/// Whisper exige pelo menos 1 s de áudio.
+/// Whisper requires at least 1 s of audio.
 const MIN_SAMPLES: usize = SAMPLE_RATE;
-/// Reavalia o parcial a cada tanto.
+/// Re-evaluates the partial every so often.
 const PARTIAL_EVERY: Duration = Duration::from_millis(800);
-/// Silêncio contínuo que fecha um trecho.
+/// Continuous silence that closes a segment.
 const SILENCE_TO_COMMIT: Duration = Duration::from_millis(700);
-/// Mesmo falando sem parar, fecha o trecho neste limite.
+/// Even with nonstop speech, the segment closes at this limit.
 const MAX_SEGMENT: usize = SAMPLE_RATE * 14;
-/// Abaixo disso consideramos silêncio.
+/// Below this we consider it silence.
 const SILENCE_RMS: f32 = 0.006;
-/// Quadro de 20 ms: a unidade em que perguntamos "tem voz aqui?".
+/// 20 ms frame: the unit in which we ask "is there voice here?".
 const QUADRO: usize = SAMPLE_RATE / 50;
-/// Fração mínima do trecho com energia de fala para valer rodar o modelo.
-/// Era só o RMS do trecho inteiro, e é por isso que a alucinação passava: 14 s
-/// de silêncio com uma batida de tecla no meio têm média acima do limiar, e o
-/// Whisper preenche o vazio com o que mais viu no treino — legenda de YouTube
-/// pedindo like e inscrição.
+/// Minimum fraction of the segment with speech energy for the model to be worth
+/// running. It used to be just the RMS of the whole segment, which is why the
+/// hallucination got through: 14 s of silence with one keystroke in the middle
+/// average above the threshold, and Whisper fills the void with what it saw most
+/// in training — YouTube captions asking for likes and subscriptions.
 const MIN_FRACAO_FALA: f32 = 0.08;
-/// E um piso absoluto: menos de 250 ms de voz não é palavra nenhuma.
+/// And an absolute floor: less than 250 ms of voice is no word at all.
 const MIN_MS_FALA: usize = 250;
-/// Folga que fica em volta da fala ao cortar as pontas, em quadros.
+/// Slack kept around the speech when trimming the ends, in frames.
 const FOLGA_QUADROS: usize = 3;
 
 pub enum Event {
@@ -66,10 +66,10 @@ impl Engine {
         } else {
             p.set_detect_language(true);
         }
-        p.set_no_context(true);       // cada janela é independente: evita loops de alucinação
+        p.set_no_context(true);       // each window is independent: avoids hallucination loops
         p.set_single_segment(false);
         p.set_suppress_blank(true);
-        p.set_suppress_nst(true);     // suprime tokens não-fala
+        p.set_suppress_nst(true);     // suppresses non-speech tokens
         p.set_temperature(0.0);
         p.set_no_speech_thold(0.6);
         p.set_print_special(false);
@@ -80,7 +80,7 @@ impl Engine {
     }
 
     fn transcribe(&self, audio: &[f32]) -> anyhow::Result<String> {
-        // padding até 1 s, senão o whisper.cpp recusa
+        // pad to 1 s, otherwise whisper.cpp refuses
         let mut buf;
         let audio = if audio.len() < MIN_SAMPLES {
             buf = vec![0.0; MIN_SAMPLES];
@@ -100,7 +100,7 @@ impl Engine {
 
         let mut out = String::new();
         for seg in state.as_iter() {
-            // descarta segmentos que o próprio modelo considera silêncio
+            // drop segments the model itself considers silence
             if seg.no_speech_probability() > 0.75 {
                 continue;
             }
@@ -112,9 +112,9 @@ impl Engine {
     }
 }
 
-/// Dobra acento e caixa e joga fora pontuação: a alucinação chega enfeitada e
-/// diferente a cada vez ("Não se esqueça de se inscrever no canal!"), então a
-/// comparação tem que ser sobre uma forma só.
+/// Folds accents and case and drops punctuation: the hallucination arrives
+/// decorated and different every time ("Não se esqueça de se inscrever no canal!"),
+/// so the comparison has to be on a single form.
 fn normalizar(s: &str) -> String {
     let mut fora = String::with_capacity(s.len());
     let mut espaco = true;
@@ -140,11 +140,11 @@ fn normalizar(s: &str) -> String {
     fora.trim().to_string()
 }
 
-/// Remove marcadores ([MÚSICA], (risos)) e alucinações típicas de silêncio.
+/// Removes markers ([MÚSICA], (risos)) and typical silence hallucinations.
 fn clean(s: &str) -> String {
     let mut t = s.trim().to_string();
 
-    // marcadores curtos entre colchetes ou parênteses
+    // short markers in brackets or parentheses
     loop {
         let Some(a) = t.find(['[', '(']) else { break };
         let Some(b) = t[a..].find([']', ')']).map(|i| a + i) else { break };
@@ -157,8 +157,8 @@ fn clean(s: &str) -> String {
     let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
     let key = normalizar(&t);
 
-    // Frase curta e sozinha: o Whisper devolve estas quando ouve só silêncio.
-    // Igualdade exata, porque "obrigado" no meio de uma frase é fala de verdade.
+    // Short standalone phrases: Whisper returns these when it hears only silence.
+    // Exact equality, because "obrigado" in the middle of a sentence is real speech.
     const LIXO: [&str; 9] = [
         "you", "thank you", "obrigado", "obrigada", "tchau",
         "legendas pela comunidade amara org", "amara org",
@@ -168,12 +168,12 @@ fn clean(s: &str) -> String {
         return String::new();
     }
 
-    // O treino do Whisper em português é cheio de legenda de YouTube, e o vídeo
-    // médio termina pedindo like e inscrição. Estas ele inventa em cima de
-    // silêncio e de ruído de ventilador, sempre com uma redação diferente —
-    // por isso casamos por conteúdo, não por igualdade. O preço é não dar para
-    // ditar estas frases de propósito, e ditar "deixa o like" para um shell não
-    // é caso de uso que exista.
+    // Whisper's Portuguese training is full of YouTube captions, and the average
+    // video ends asking for likes and subscriptions. It makes these up over
+    // silence and fan noise, always worded differently — so we match by
+    // content, not equality. The price is that these phrases can't be dictated
+    // on purpose, and dictating "deixa o like" to a shell is not a use case
+    // that exists.
     const ISCAS: [&str; 24] = [
         "inscreva se no canal", "se inscreva no canal", "inscrever no canal",
         "se inscrever no canal", "nao se esqueca de se inscrever",
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn a_isca_do_youtube_nao_passa() {
-        // Todas estas o Whisper entregou em cima de silêncio, em algum momento.
+        // Whisper produced every one of these over silence at some point.
         for frase in [
             "Se inscreva no canal e deixe o seu like!",
             "Não se esqueça de se inscrever no canal.",
@@ -206,7 +206,7 @@ mod tests {
             "Obrigado por assistir, até o próximo vídeo!",
             "deixa o like aí galera",
         ] {
-            assert_eq!(clean(frase), "", "passou: {frase}");
+            assert_eq!(clean(frase), "", "got through: {frase}");
         }
     }
 
@@ -230,7 +230,7 @@ mod tests {
     fn preserva_fala_de_verdade() {
         let s = "obrigado pela ajuda, vou revisar hoje";
         assert_eq!(clean(s), s);
-        // "like" e "canal" fora do bordão continuam passando.
+        // "like" and "canal" outside the catchphrase still get through.
         let s = "gostei do canal de áudio novo";
         assert_eq!(clean(s), s);
     }
@@ -240,12 +240,12 @@ mod tests {
 mod portao {
     use super::*;
 
-    /// Trecho de `ms` milissegundos, com fala nos milissegundos de `fala`.
+    /// A segment of `ms` milliseconds, with speech in the milliseconds of `fala`.
     fn trecho(ms: usize, fala: std::ops::Range<usize>) -> Vec<f32> {
         (0..SAMPLE_RATE * ms / 1000)
             .map(|i| {
                 let t = i * 1000 / SAMPLE_RATE;
-                // Onda bem acima do limiar onde há fala; zero no resto.
+                // A wave well above the threshold where there is speech; zero elsewhere.
                 if fala.contains(&t) { if i % 2 == 0 { 0.3 } else { -0.3 } } else { 0.0 }
             })
             .collect()
@@ -253,10 +253,10 @@ mod portao {
 
     #[test]
     fn silencio_com_um_estalo_nao_abre_o_portao() {
-        // O caso da alucinação: 14 s de nada com 40 ms de barulho no meio.
+        // The hallucination case: 14 s of nothing with 40 ms of noise in the middle.
         let a = trecho(14_000, 7_000..7_040);
-        assert!(super::rms(&a) >= SILENCE_RMS, "o portão antigo abriria aqui");
-        assert!(!tem_fala(&a), "o portão novo tem que fechar");
+        assert!(super::rms(&a) >= SILENCE_RMS, "the old gate would open here");
+        assert!(!tem_fala(&a), "the new gate must stay closed");
     }
 
     #[test]
@@ -274,11 +274,11 @@ mod portao {
     fn recorte_tira_as_pontas_e_guarda_a_fala() {
         let a = trecho(5_000, 2_000..2_500);
         let corte = recortar(&a);
-        // Sobra a fala mais a folga das duas pontas, não os 5 s.
+        // What remains is the speech plus the slack at both ends, not the 5 s.
         let esperado = SAMPLE_RATE * 500 / 1000 + 2 * FOLGA_QUADROS * QUADRO;
-        assert!(corte.len() <= esperado, "cortou de menos: {}", corte.len());
-        assert!(corte.len() >= SAMPLE_RATE * 500 / 1000, "cortou fala: {}", corte.len());
-        // E o que sobrou ainda é fala aos olhos do portão.
+        assert!(corte.len() <= esperado, "trimmed too little: {}", corte.len());
+        assert!(corte.len() >= SAMPLE_RATE * 500 / 1000, "trimmed speech: {}", corte.len());
+        // And what remains is still speech as far as the gate is concerned.
         assert!(tem_fala(corte));
     }
 }
@@ -290,9 +290,9 @@ fn rms(x: &[f32]) -> f32 {
     (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt()
 }
 
-/// Vale rodar o modelo neste trecho? Conta quadros com voz em vez de olhar o
-/// RMS da média: um estalo de 40 ms perdido em silêncio levanta a média o
-/// bastante para o portão antigo abrir, e o que sai de lá é alucinação.
+/// Is it worth running the model on this segment? Counts voiced frames instead
+/// of the average RMS: a stray 40 ms click in silence raises the average enough
+/// for the old gate to open, and what comes out of that is hallucination.
 fn tem_fala(audio: &[f32]) -> bool {
     let total = audio.len() / QUADRO;
     if total == 0 {
@@ -302,10 +302,10 @@ fn tem_fala(audio: &[f32]) -> bool {
     com_voz * 20 >= MIN_MS_FALA && com_voz as f32 / total as f32 >= MIN_FRACAO_FALA
 }
 
-/// Corta o silêncio das pontas, deixando uma folga. O rabo de silêncio é o
-/// convite para a alucinação: o modelo segue "transcrevendo" o que não tem, e
-/// preenche com legenda de vídeo. O silêncio do meio fica — é pausa entre
-/// palavras, e tirá-lo colaria frases que não foram ditas juntas.
+/// Trims the silence at the ends, leaving some slack. A trailing silence is an
+/// invitation to hallucinate: the model keeps "transcribing" what isn't there,
+/// and fills it with video captions. Silence in the middle stays — it is a pause
+/// between words, and removing it would glue together phrases not said together.
 fn recortar(audio: &[f32]) -> &[f32] {
     let voz: Vec<bool> = audio.chunks_exact(QUADRO).map(|q| rms(q) >= SILENCE_RMS).collect();
     let Some(a) = voz.iter().position(|&v| v) else { return &[] };
@@ -315,7 +315,7 @@ fn recortar(audio: &[f32]) -> &[f32] {
     &audio[ini..fim]
 }
 
-/// Laço principal: consome áudio até o sinal de parada.
+/// Main loop: consumes audio until the stop signal.
 pub fn run(
     engine: Engine,
     audio_rx: Receiver<Vec<f32>>,
@@ -330,7 +330,7 @@ pub fn run(
     emit(Event::Status("escutando".into()));
 
     while !stop.load(Ordering::Relaxed) {
-        // drena tudo que chegou
+        // drain everything that arrived
         match audio_rx.recv_timeout(Duration::from_millis(120)) {
             Ok(chunk) => {
                 let level = rms(&chunk);
@@ -360,7 +360,7 @@ pub fn run(
             || pending.len() >= MAX_SEGMENT;
 
         if commit {
-            // só roda o modelo se houve fala de verdade no trecho
+            // only run the model if there was real speech in the segment
             if tem_fala(&pending) {
                 match engine.transcribe(recortar(&pending)) {
                     Ok(t) if !t.is_empty() => emit(Event::Final(t)),
@@ -387,7 +387,7 @@ pub fn run(
         }
     }
 
-    // fecha o que sobrou no buffer
+    // close whatever is left in the buffer
     if pending.len() >= MIN_SAMPLES / 2 && tem_fala(&pending) {
         if let Ok(t) = engine.transcribe(recortar(&pending)) {
             if !t.is_empty() {
@@ -403,25 +403,25 @@ pub fn run(
 mod integracao {
     use super::*;
 
-    /// Transcreve um áudio conhecido com um modelo real.
-    /// Pulado se o modelo `tiny` ainda não foi baixado.
+    /// Transcribes a known audio with a real model.
+    /// Skipped if the `tiny` model hasn't been downloaded yet.
     #[test]
     fn transcreve_audio_real() {
         let modelo = dirs_modelo_tiny();
         let wav = std::path::Path::new("/tmp/jfk.wav");
         if !modelo.exists() || !wav.exists() {
-            eprintln!("pulando: modelo ou áudio de teste ausente");
+            eprintln!("skipping: model or test audio missing");
             return;
         }
 
         let audio = ler_wav_16k_mono(wav);
-        assert!(audio.len() > SAMPLE_RATE, "áudio curto demais");
+        assert!(audio.len() > SAMPLE_RATE, "audio too short");
 
-        let eng = Engine::load(modelo.to_str().unwrap(), "en").expect("carregar modelo");
-        let texto = eng.transcribe(&audio).expect("transcrever").to_lowercase();
+        let eng = Engine::load(modelo.to_str().unwrap(), "en").expect("load model");
+        let texto = eng.transcribe(&audio).expect("transcribe").to_lowercase();
 
-        eprintln!("transcrito: {texto}");
-        assert!(texto.contains("ask not what your country"), "saiu: {texto}");
+        eprintln!("transcribed: {texto}");
+        assert!(texto.contains("ask not what your country"), "got: {texto}");
     }
 
     fn dirs_modelo_tiny() -> std::path::PathBuf {
@@ -429,9 +429,9 @@ mod integracao {
             .join("Library/Application Support/ai.dimenso.escuta/models/ggml-tiny.bin")
     }
 
-    /// Leitor mínimo de WAV PCM 16-bit mono a 16 kHz.
+    /// Minimal reader for 16-bit PCM mono 16 kHz WAV.
     fn ler_wav_16k_mono(p: &std::path::Path) -> Vec<f32> {
-        let b = std::fs::read(p).expect("ler wav");
+        let b = std::fs::read(p).expect("read wav");
         assert_eq!(&b[0..4], b"RIFF");
         assert_eq!(&b[8..12], b"WAVE");
 
@@ -444,7 +444,7 @@ mod integracao {
                 let ch = u16::from_le_bytes(body[2..4].try_into().unwrap());
                 let sr = u32::from_le_bytes(body[4..8].try_into().unwrap());
                 let bits = u16::from_le_bytes(body[14..16].try_into().unwrap());
-                assert_eq!((ch, sr, bits), (1, 16_000, 16), "esperava mono 16k 16-bit");
+                assert_eq!((ch, sr, bits), (1, 16_000, 16), "expected mono 16k 16-bit");
             } else if id == b"data" {
                 return body
                     .chunks_exact(2)
@@ -453,6 +453,6 @@ mod integracao {
             }
             i += 8 + sz + (sz & 1);
         }
-        panic!("chunk 'data' não encontrado");
+        panic!("chunk 'data' not found");
     }
 }

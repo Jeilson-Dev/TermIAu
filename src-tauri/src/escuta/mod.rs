@@ -1,16 +1,16 @@
-//! Transcrição de fala, local. Veio do app Escuta, que era um projeto à parte:
-//! aqui o terminal é o único dono do microfone e da tela.
+//! Local speech transcription. It came from the Escuta app, a separate project:
+//! here the terminal is the sole owner of the microphone and the screen.
 //!
 //! ```text
-//! cpal (microfone, taxa nativa)
-//!   -> downmix para mono
-//!   -> resample  (sinc janelado -> 16 kHz)
-//!   -> stt       (VAD por energia + whisper.cpp com Metal)
-//!   -> pty_write no painel em foco
+//! cpal (microphone, native rate)
+//!   -> downmix to mono
+//!   -> resample  (windowed sinc -> 16 kHz)
+//!   -> stt       (energy VAD + whisper.cpp with Metal)
+//!   -> pty_write into the focused panel
 //! ```
-// O catálogo de modelos e a lista de microfones ainda não têm tela que os use.
-// Ficam porque são a superfície de uns Ajustes, e apagar para ressuscitar depois
-// é pior do que deixar o aviso desligado aqui.
+// The model catalog and the microphone list have no screen using them yet.
+// They stay because they are the surface of a future Settings, and deleting them
+// to bring them back later is worse than silencing the warning here.
 #![allow(dead_code)]
 
 pub mod audio;

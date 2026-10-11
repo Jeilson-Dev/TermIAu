@@ -14,10 +14,10 @@ const MODELS = [
   { id: "sonnet", label: "Sonnet" },
   { id: "opus", label: T.opusCuidadoso },
 ];
-/** Linhas de diff mostradas por arquivo alterado; o resto se vê na aba pendente. */
+/** Diff lines shown per changed file; the rest is seen in the pending tab. */
 const PATCH_MAX_LINES = 300;
 
-// Uma lista por repositório, refeita depois de um tempo: sessões novas aparecem sem reabrir a aba.
+// One list per repository, refreshed after a while: new sessions show up without reopening the tab.
 const sessionsCache = new Map<string, { at: number; list: Promise<ClaudeSession[]> }>();
 function sessionsOf(root: string): Promise<ClaudeSession[]> {
   const hit = sessionsCache.get(root);
@@ -37,7 +37,7 @@ function ago(ms: number): string {
   return T.haDias(Math.round(h / 24));
 }
 
-/** Markdown só o bastante para a resposta ler bem: blocos de código, `código` e **negrito**. */
+/** Just enough Markdown for the answer to read well: code blocks, `code` and **bold**. */
 function Answer({ text }: { text: string }) {
   const blocks = text.split(/```[^\n]*\n?/);
   return (
@@ -63,7 +63,7 @@ function inline(text: string): ReactNode[] {
   });
 }
 
-/** O diff de um arquivo que o Claude mexeu, recolhível, com as contas de linhas no cabeçalho. */
+/** The diff of a file Claude touched, collapsible, with the line counts in the header. */
 function ChangeView({ change }: { change: AskChange }) {
   const [open, setOpen] = useState(true);
   const patch = useMemo(() => {
@@ -168,10 +168,10 @@ export function AskBox({
   onDecide,
 }: {
   root: string;
-  /** A versão do arquivo na tela agora: é dela que sai o contexto de cada pergunta. */
+  /** The version of the file on screen now: each question's context comes from it. */
   file: FileDiff;
   ask: AskState;
-  /** Vira marcador (ou reescreve o do qual a pergunta saiu) com o que ficou decidido. */
+  /** Becomes a bookmark (or rewrites the one the question came from) with what was decided. */
   onDecide(note: string): void | Promise<void>;
 }) {
   const [sessions, setSessions] = useState<ClaudeSession[] | null>(null);

@@ -1,4 +1,4 @@
-//! Captura do microfone via cpal, convertida para mono 16 kHz f32.
+//! Microphone capture via cpal, converted to mono 16 kHz f32.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -51,11 +51,11 @@ fn pick(name: Option<&str>) -> anyhow::Result<cpal::Device> {
         .ok_or_else(|| anyhow::anyhow!(tr("nenhum microfone disponível", "no microphone available")))
 }
 
-/// Abre o microfone e alimenta `audio_tx` com blocos mono a 16 kHz.
-/// `level_tx` recebe o nível (0..1) para o medidor da interface.
+/// Opens the microphone and feeds `audio_tx` with mono 16 kHz blocks.
+/// `level_tx` receives the level (0..1) for the UI meter.
 ///
-/// O `cpal::Stream` não é `Send`, então precisa nascer e morrer nesta thread:
-/// a função bloqueia até `stop` virar true.
+/// `cpal::Stream` is not `Send`, so it must be born and die on this thread:
+/// the function blocks until `stop` becomes true.
 pub fn capture(
     device_name: Option<String>,
     audio_tx: Sender<Vec<f32>>,
@@ -74,7 +74,7 @@ pub fn capture(
 
     let mut resampler = Resampler::new(in_rate, SAMPLE_RATE as u32);
 
-    // Downmix para mono, reamostra e envia. Roda dentro do callback de áudio.
+    // Downmix to mono, resample and send. Runs inside the audio callback.
     let mut feed = move |samples: &[f32]| {
         let mono: Vec<f32> = if channels <= 1 {
             samples.to_vec()
@@ -96,7 +96,7 @@ pub fn capture(
         }
     };
 
-    let err_fn = |e| eprintln!("[audio] erro no stream: {e}");
+    let err_fn = |e| eprintln!("[audio] stream error: {e}");
 
     let stream = match sample_format {
         SampleFormat::F32 => device.build_input_stream(
@@ -137,7 +137,7 @@ pub fn capture(
     while !stop.load(Ordering::Relaxed) {
         std::thread::sleep(Duration::from_millis(100));
     }
-    drop(stream); // fecha o dispositivo aqui, na thread dona
+    drop(stream); // closes the device here, on the owning thread
     Ok(())
 }
 
@@ -145,26 +145,26 @@ pub fn capture(
 mod tests {
     use super::*;
 
-    /// Enumera microfones reais pelo CoreAudio e confere que o padrão aparece.
+    /// Lists real microphones through CoreAudio and checks the default shows up.
     #[test]
     fn lista_microfones() {
         let devs = list_devices();
         for d in &devs {
-            eprintln!("mic: {} {}", d.name, if d.default { "(padrão)" } else { "" });
+            eprintln!("mic: {} {}", d.name, if d.default { "(default)" } else { "" });
             assert!(!d.name.is_empty());
         }
         if !devs.is_empty() {
-            assert_eq!(devs.iter().filter(|d| d.default).count(), 1, "esperava um padrão");
+            assert_eq!(devs.iter().filter(|d| d.default).count(), 1, "expected one default");
         }
     }
 
-    /// A escolha por nome deve achar o dispositivo; nome inexistente cai no padrão.
+    /// Picking by name must find the device; an unknown name falls back to the default.
     #[test]
     fn escolhe_por_nome() {
         let devs = list_devices();
         let Some(first) = devs.first() else { return };
-        let d = pick(Some(&first.name)).expect("achar por nome");
+        let d = pick(Some(&first.name)).expect("find by name");
         assert_eq!(device_name(&d), first.name);
-        assert!(pick(Some("microfone que não existe")).is_ok(), "deveria cair no padrão");
+        assert!(pick(Some("microphone that does not exist")).is_ok(), "should fall back to the default");
     }
 }

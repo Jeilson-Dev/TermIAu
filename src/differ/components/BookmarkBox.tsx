@@ -41,7 +41,7 @@ export function ResolveButton({ resolved, size, onToggle }: { resolved: boolean;
 }
 
 /** Copies the bookmark as a prompt-ready reference, confirming with a check for a moment. */
-/** O "copiado" que pisca por um instante e volta ao normal, dos dois botões de copiar. */
+/** The "copied" that flashes for a moment and goes back to normal, for both copy buttons. */
 function useCopiar(texto: string): [boolean, (e: { stopPropagation(): void }) => void] {
   const [copied, setCopied] = useState(false);
 
@@ -72,7 +72,7 @@ export function CopyReferenceButton({ reference, size }: { reference: string; si
   );
 }
 
-/** O caminho do arquivo, no cabeçalho do diff. O ✓ e o "Copiado!" são o aviso. */
+/** The file's path, in the diff header. The ✓ and the "Copied!" are the notice. */
 export function CopyPathButton({ path }: { path: string }) {
   const [copied, copiar] = useCopiar(path);
 
@@ -93,7 +93,7 @@ export function CopyPathButton({ path }: { path: string }) {
   );
 }
 
-/** O mesmo, para a revisão inteira: todos os comentários numa colada só. */
+/** The same, for the whole review: every comment in a single paste. */
 export function CopyAllButton({ reference, count }: { reference: string; count: number }) {
   const [copied, copiar] = useCopiar(reference);
 
@@ -124,7 +124,7 @@ export function BookmarkBox({
   onEdit(): void;
   onRemove(): void;
   onToggleResolved(): void;
-  /** Tirar a dúvida com o Claude antes de decidir o que o marcador diz. */
+  /** Clear up a doubt with Claude before deciding what the bookmark says. */
   onAsk?(): void;
 }) {
   return (
@@ -168,7 +168,7 @@ export function BookmarkEditor({
   initial?: string;
   onSave(note: string): void | Promise<void>;
   onCancel(): void;
-  /** Em vez de anotar, perguntar ao Claude — levando o que já foi escrito como pergunta. */
+  /** Instead of writing a note, ask Claude — taking what was already written as the question. */
   onAsk?(text: string): void;
 }) {
   const [note, setNote] = useState(initial);

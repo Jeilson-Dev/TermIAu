@@ -10,31 +10,31 @@ export const loadDiff = (path: string, target: string) =>
 export const loadDiffSince = (path: string, base: string) =>
   invoke<ReviewDiff>("load_diff_since", { path, base });
 
-/** Assinatura barata do estado do disco: muda quando muda o que a aba pendente mostra. */
+/** Cheap signature of the disk state: changes when what the pending tab shows changes. */
 export const workingStamp = (path: string) => invoke<string>("working_stamp", { path });
 
-/** O que está para ser commitado: índice, árvore de trabalho e arquivos que o git não rastreia. */
+/** What is about to be committed: index, working tree and files git doesn't track. */
 export const loadDiffWorking = (path: string) => invoke<ReviewDiff>("load_diff_working", { path });
 
 /**
- * As três únicas chamadas que escrevem no repositório. O alvo é um arquivo, uma
- * pasta ou "." para tudo o que há no repositório.
+ * The only three calls that write to the repository. The target is a file, a
+ * folder or "." for everything in the repository.
  */
 export const stage = (path: string, target: string) => invoke<void>("stage", { path, target });
 
 export const unstage = (path: string, target: string) => invoke<void>("unstage", { path, target });
 
-/** Commita o que está no índice e devolve o sha do commit novo. */
+/** Commits what is in the index and returns the new commit's sha. */
 export const commitIndex = (path: string, message: string) =>
   invoke<string>("commit", { path, message });
 
 export const readBlob = (path: string, oid: string) => invoke<string[]>("read_blob", { path, oid });
 
-/** O arquivo como está no disco: o lado novo do diff da árvore de trabalho não tem blob. */
+/** The file as it is on disk: the new side of the working tree diff has no blob. */
 export const readWorktree = (path: string, file: string) =>
   invoke<string[]>("read_worktree", { path, file });
 
-/** Passa a vigiar o .git deste repositório; o aviso volta em `differ://mudou`. */
+/** Starts watching this repository's .git; the notice comes back on `differ://mudou`. */
 export const watchRepo = (path: string) => invoke<void>("watch_repo", { path });
 
 export const readBlobBytes = (path: string, oid: string) =>
@@ -43,13 +43,13 @@ export const readBlobBytes = (path: string, oid: string) =>
 export const readWorktreeBytes = (path: string, file: string) =>
   invoke<ArrayBuffer>("read_worktree_bytes", { path, file });
 
-/** As sessões do Claude Code abertas neste repositório, da mais recente para a mais antiga. */
+/** The Claude Code sessions open in this repository, newest first. */
 export const claudeSessions = (path: string) => invoke<ClaudeSession[]>("claude_sessions", { path });
 
 /**
- * Pergunta ao Claude (`claude -p`) sem salvar sessão nenhuma. `context` vai pelo stdin; `session`
- * faz a pergunta rodar numa cópia dessa sessão, sabendo do que já foi conversado nela. Só conversa:
- * editar os arquivos do repositório só com `allowEdits`.
+ * Asks Claude (`claude -p`) without saving any session. `context` goes through stdin; `session`
+ * makes the question run in a copy of that session, knowing what was already discussed in it. Conversation
+ * only: editing the repository's files only with `allowEdits`.
  */
 export const askClaude = (
   path: string,
@@ -61,22 +61,22 @@ export const askClaude = (
   allowEdits = false,
 ) => invoke<AskResult>("ask_claude", { path, id, question, context, model, session, allowEdits });
 
-/** Um arquivo que o Claude mexeu: como estava e como ficou (`null`: não existia / foi apagado). */
+/** A file Claude touched: how it was and how it ended up (`null`: didn't exist / was deleted). */
 export interface AskChange {
   path: string;
   before: string | null;
   after: string | null;
-  /** Dá para voltar ao `before`. Sem ele (binário, ignorado pelo git), só se sabe que mexeu. */
+  /** Can be restored to `before`. Without it (binary, ignored by git), we only know it was touched. */
   undoable: boolean;
 }
 
 export interface AskResult {
   answer: string;
-  /** Só com alterações liberadas; vazio quando ele não mexeu em nada. */
+  /** Only with edits allowed; empty when it touched nothing. */
   changes: AskChange[];
 }
 
-/** Volta os arquivos ao que eram antes da pergunta; devolve os que não deu (mexidos de novo depois). */
+/** Restores the files to what they were before the question; returns the ones it couldn't (changed again since). */
 export const undoAsk = (path: string, changes: AskChange[]) => invoke<string[]>("undo_ask", { path, changes });
 
 export const cancelAsk = (id: string) => invoke<void>("cancel_ask", { id });

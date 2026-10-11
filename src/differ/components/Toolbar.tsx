@@ -109,9 +109,9 @@ export function Toolbar(props: Props) {
       )}
       <span className="spacer" />
       {diff && fileCount > 0 && <ReviewProgress viewed={props.viewedCount} total={fileCount} />}
-      {/* Sem botão de atualizar: o diff avisa sozinho quando o repositório
-          mexe. Sobrou só o sinal de que ele está sendo refeito — recarregar sem
-          nada piscando parece que nada aconteceu. */}
+      {/* No refresh button: the diff notices on its own when the repository
+          changes. All that's left is the sign that it is being redone — reloading with
+          nothing flashing looks like nothing happened. */}
       {props.loading && (
         <span className="recarregando">
           <Icon name="refresh" size={14} className="spin" />

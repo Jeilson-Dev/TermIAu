@@ -5,13 +5,13 @@ import { Icon } from "./Icons";
 
 type Limites = { atencao: number; perigo: number; autoCompact: boolean; autoCompactEm: number };
 
-/// As preferências do TermIAu, abertas pelo ⌘, do menu.
+/// TermIAu's preferences, opened by the menu's ⌘,.
 ///
-/// O palpite de branch alvo está aqui porque é só o que não pertence a um
-/// repositório: o alvo de cada um fica guardado com ele, e escolher à mão no
-/// seletor da barra continua valendo mais do que isto. O editor é o do botão
-/// "Abrir no editor" do visor de arquivos do terminal. Os limites do contexto
-/// são os da pílula na barra de cada painel do terminal.
+/// The target branch guess is here because it is the only thing that doesn't belong
+/// to a repository: each one's target is stored with it, and picking by hand in the
+/// bar's selector still outweighs this. The editor is the one for the "Open in
+/// editor" button in the terminal's file viewer. The context limits are the
+/// ones for the pill on each terminal panel's bar.
 export function Prefs({
   defaultTarget,
   onDefaultTarget,
@@ -31,11 +31,11 @@ export function Prefs({
 }) {
   const campo = useRef<HTMLInputElement>(null);
 
-  // Abriu por atalho: o teclado já está aqui, e o cursor tem de estar também.
-  // Numa montagem só, e em efeito separado do de baixo de propósito: `onClose`
-  // é uma função nova a cada render, então um efeito que dependesse dela
-  // refazia isto a cada tecla — a letra digitada virava seleção e a seguinte a
-  // substituía, deixando sempre uma letra no campo.
+  // Opened by shortcut: the keyboard is already here, and the cursor must be too.
+  // On mount only, and in an effect separate from the one below on purpose: `onClose`
+  // is a new function on every render, so an effect depending on it
+  // redid this on every keystroke — the typed letter became a selection and the next
+  // one replaced it, always leaving a single letter in the field.
   useEffect(() => {
     campo.current?.focus();
     campo.current?.select();
@@ -51,7 +51,7 @@ export function Prefs({
 
   return (
     <div className="prefs-fundo" onMouseDown={onClose}>
-      {/* O clique de fora fecha; o de dentro não pode vazar para ele. */}
+      {/* A click outside closes; a click inside must not leak to it. */}
       <div className="prefs" onMouseDown={(e) => e.stopPropagation()}>
         <header className="prefs-topo">
           <h2>{T.preferencias}</h2>

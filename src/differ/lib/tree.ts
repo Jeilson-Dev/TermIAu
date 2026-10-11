@@ -57,8 +57,8 @@ export function flattenTree(nodes: TreeNode[]): FileDiff[] {
 }
 
 /**
- * Como a pasta está no índice, olhando o que há dentro dela: tudo lá, nada lá ou
- * uma parte. É o que decide quais botões a linha da pasta mostra.
+ * How the folder stands in the index, looking at what is inside it: all there, nothing there or
+ * part of it. It decides which buttons the folder's row shows.
  */
 export function dirStaged(node: DirNode): StagedState | null {
   const estados = flattenTree(node.children).map((f) => f.staged);

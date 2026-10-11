@@ -45,7 +45,7 @@ export function loadImage(root: string, oid: string, path: string): Promise<Load
 }
 
 async function decode(root: string, oid: string, type: string): Promise<LoadedImage> {
-  // A imagem ainda não commitada está no disco, não no banco de objetos.
+  // An image not committed yet is on disk, not in the object database.
   const file = worktreePath(oid);
   const bytes = file === null ? await readBlobBytes(root, oid) : await readWorktreeBytes(root, file);
   const url = URL.createObjectURL(new Blob([bytes], { type }));

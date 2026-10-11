@@ -1,21 +1,21 @@
-//! A área de transferência do macOS, do jeito que um terminal precisa dela.
+//! The macOS clipboard, the way a terminal needs it.
 //!
-//! O ⌘V comum é do sistema (um item de menu, ver `montar_menu`) e cola texto.
-//! Mas quando o que está na área é *arquivo* — um ⌘C no Finder — não há texto
-//! nenhum: o que há é uma lista de URLs `file://`, uma por item. Quem lê essa
-//! lista é este módulo, e é ela que o ⌘⇧V vira caminho na linha de comando.
+//! Plain ⌘V belongs to the system (a menu item, see `montar_menu`) and pastes text.
+//! But when the clipboard holds *files* — a ⌘C in Finder — there is no text at
+//! all: there is a list of `file://` URLs, one per item. This module reads that
+//! list, and ⌘⇧V turns it into paths on the command line.
 
 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeFileURL, NSPasteboardTypeString};
 use objc2_foundation::NSURL;
 use serde::Serialize;
 
-/// O que havia na área no momento do ⌘⇧V.
+/// What the clipboard held at the moment of ⌘⇧V.
 #[derive(Serialize)]
 pub struct Colagem {
-    /// Caminhos POSIX, já sem o `file://` e sem os `%20`.
+    /// POSIX paths, already without the `file://` and the `%20`s.
     arquivos: Vec<String>,
-    /// Só vem quando não há arquivo nenhum — aí o ⌘⇧V age como um ⌘V comum,
-    /// em vez de não fazer nada e parecer que a tecla não funciona.
+    /// Only set when there are no files — then ⌘⇧V acts as a plain ⌘V,
+    /// instead of doing nothing and looking like the key is broken.
     texto: Option<String>,
 }
 
@@ -26,15 +26,15 @@ pub fn area_colar() -> Colagem {
     let mut arquivos = Vec::new();
     if let Some(itens) = area.pasteboardItems() {
         for item in itens {
-            // Um item por arquivo, e o tipo file-URL é o que o Finder escreve.
-            // Ler o item, e não a área inteira, é o que faz copiar três
-            // arquivos devolver três caminhos em vez de só o primeiro.
+            // One item per file, and file-URL is the type Finder writes.
+            // Reading each item, not the whole clipboard, is what makes copying
+            // three files return three paths instead of only the first.
             let Some(url) = item.stringForType(unsafe { NSPasteboardTypeFileURL }) else {
                 continue;
             };
-            // `file:///Users/x/uma%20pasta` -> `/Users/x/uma pasta`. Quem desfaz
-            // o percent-encoding é o NSURL: fazendo na mão erraríamos nos
-            // acentos, que chegam decompostos (o "ç" é c + cedilha) e em UTF-8.
+            // `file:///Users/x/a%20folder` -> `/Users/x/a folder`. NSURL undoes
+            // the percent-encoding: doing it by hand would get accents wrong,
+            // since they arrive decomposed (a "ç" is c + cedilla) and in UTF-8.
             if let Some(caminho) = NSURL::URLWithString(&url).and_then(|u| u.path()) {
                 arquivos.push(caminho.to_string());
             }
