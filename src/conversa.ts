@@ -257,9 +257,25 @@ export function ladoALado(linhas: LinhaDiff[]): ParDiff[] {
 export const escapar = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-/// Bold, italic and links in a snippet that no longer has code in it.
+/// Claude Code writes some emoji as GitHub shortcodes (`:bulb: Prompt tip`).
+/// Only the known ones turn into the emoji; any other `:word:` stays as written.
+const EMOJIS: Record<string, string> = {
+  bulb: "💡",
+  warning: "⚠️",
+  information_source: "ℹ️",
+  white_check_mark: "✅",
+  x: "❌",
+  rocket: "🚀",
+  sparkles: "✨",
+  tada: "🎉",
+  memo: "📝",
+  star: "⭐",
+};
+
+/// Bold, italic, links and emoji shortcodes in a snippet that no longer has code in it.
 function enfase(s: string): string {
   return escapar(s)
+    .replace(/:([a-z_]+):/g, (todo, nome: string) => EMOJIS[nome] ?? todo)
     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>')
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*\w])\*([^*\s][^*]*)\*(?!\w)/g, "$1<em>$2</em>");
@@ -355,7 +371,15 @@ export function markdown(texto: string, rebaixar = 2, caixas?: "ver" | "marcar")
       const itens: string[] = [];
       for (; i < linhas.length; i++) {
         const m = /^(\s*)([-*]|\d+[.)])\s+(.*)$/.exec(linhas[i]);
+        const cercaNoItem = /^(\s+)```/.exec(linhas[i]);
         if (m) itens.push(caixas ? itemComCaixa(m[3], i, caixas) : emLinha(m[3]));
+        // An indented fence below an item is a code block inside it.
+        else if (itens.length && cercaNoItem) {
+          const recuo = cercaNoItem[1].length;
+          const codigo: string[] = [];
+          for (i++; i < linhas.length && !/^\s*```\s*$/.test(linhas[i]); i++) codigo.push(linhas[i].replace(new RegExp(`^ {0,${recuo}}`), ""));
+          itens[itens.length - 1] += `<pre><code>${escapar(jsonLegivel(codigo.join("\n")))}</code></pre>`;
+        }
         // An indented line right below an item is its continuation.
         else if (itens.length && /^\s+\S/.test(linhas[i])) itens[itens.length - 1] += `<br>${emLinha(linhas[i].trim())}`;
         else break;
