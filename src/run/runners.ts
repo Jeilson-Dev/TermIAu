@@ -3,53 +3,53 @@
 // (Flutter's hot reload, for example). Supporting a new language means adding a
 // module here: the bar and the run don't change.
 
-import { resolver, type ConfigLaunch, type Contexto } from "./launch";
-import { palavra } from "./shell";
+import { resolver, type ConfigLaunch, type Context } from "./launch";
+import { word } from "./shell";
 import { T } from "../i18n/terminal";
 
 /** A bar button while the app runs: a key sent to the program. */
-export interface Acao {
-  rotulo: string;
-  icone: string;
-  tecla: string;
+export interface Action {
+  label: string;
+  icon: string;
+  keyOf: string;
 }
 
 /** The command ready for the panel. */
-export interface Plano {
+export interface Plan {
   /** What runs, for messages: "Flutter", "Node"... */
-  rotulo: string;
+  label: string;
   cwd: string;
   env: Record<string, string>;
   argv: string[];
-  acoes?: Acao[];
+  actions?: Action[];
   /** Key that quits gracefully (flutter run's `q`). Without it, stop sends Ctrl+C. */
-  sair?: string;
+  quit?: string;
 }
 
-export interface ContextoRunner extends Contexto {
+export interface RunnerContext extends Context {
   /** Whether the Dart project in this folder is Flutter (the pubspec depends on the SDK). */
-  ehFlutter(pasta: string): Promise<boolean>;
+  isFlutter(folder: string): Promise<boolean>;
 }
 
 export interface Runner {
   /** The `type` values this module handles. */
-  tipos: string[];
+  kinds: string[];
   /** Throws an Error with the reason when the configuration asks for something it can't do. */
-  montar(cfg: ConfigLaunch, ctx: ContextoRunner): Promise<Plano>;
+  build(cfg: ConfigLaunch, ctx: RunnerContext): Promise<Plan>;
 }
 
-const texto = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
-const lista = (v: unknown): string[] =>
+const text = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
+const list = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 
 /** What every configuration has in common: cwd, env and only `request: "launch"`. */
-function base(cfg: ConfigLaunch, ctx: Contexto) {
+function base(cfg: ConfigLaunch, ctx: Context) {
   if ((cfg.request ?? "launch") !== "launch") {
-    throw new Error(T.requestNaoSuportado(String(cfg.request)));
+    throw new Error(T.unsupportedRequest(String(cfg.request)));
   }
   const r = (v: string) => resolver(v, ctx);
-  const dir = r(texto(cfg.cwd) ?? ctx.pasta);
-  const cwd = dir.startsWith("/") ? dir : `${ctx.pasta}/${dir}`;
+  const dir = r(text(cfg.cwd) ?? ctx.folder);
+  const cwd = dir.startsWith("/") ? dir : `${ctx.folder}/${dir}`;
   const env: Record<string, string> = {};
   if (typeof cfg.env === "object" && cfg.env !== null) {
     for (const [k, v] of Object.entries(cfg.env)) {
@@ -61,24 +61,24 @@ function base(cfg: ConfigLaunch, ctx: Contexto) {
 }
 
 const dart: Runner = {
-  tipos: ["dart"],
-  async montar(cfg, ctx) {
+  kinds: ["dart"],
+  async build(cfg, ctx) {
     const { r, cwd, env } = base(cfg, ctx);
-    const program = texto(cfg.program) && r(texto(cfg.program)!);
-    const args = lista(cfg.args).map(r);
-    const toolArgs = lista(cfg.toolArgs).map(r);
+    const program = text(cfg.program) && r(text(cfg.program)!);
+    const args = list(cfg.args).map(r);
+    const toolArgs = list(cfg.toolArgs).map(r);
     const flutter =
-      texto(cfg.flutterMode) !== undefined || texto(cfg.deviceId) !== undefined || (await ctx.ehFlutter(cwd));
+      text(cfg.flutterMode) !== undefined || text(cfg.deviceId) !== undefined || (await ctx.isFlutter(cwd));
 
     if (!flutter) {
-      return { rotulo: "Dart", cwd, env, argv: ["dart", "run", ...toolArgs, ...(program ? [program] : []), ...args] };
+      return { label: "Dart", cwd, env, argv: ["dart", "run", ...toolArgs, ...(program ? [program] : []), ...args] };
     }
 
     const argv = ["flutter", "run"];
-    const device = texto(cfg.deviceId);
+    const device = text(cfg.deviceId);
     if (device) argv.push("-d", r(device));
-    const modo = texto(cfg.flutterMode);
-    if (modo && modo !== "debug") argv.push(`--${modo}`);
+    const mode = text(cfg.flutterMode);
+    if (mode && mode !== "debug") argv.push(`--${mode}`);
     argv.push(...toolArgs);
     if (program) argv.push("-t", program);
     // In a Flutter app, the Dart extension sends the `args` to flutter run itself:
@@ -86,72 +86,72 @@ const dart: Runner = {
     // app arguments would make it run in the default environment, without warning.
     argv.push(...args);
     return {
-      rotulo: "Flutter",
+      label: "Flutter",
       cwd,
       env,
       argv,
-      sair: "q",
-      acoes: [
-        { rotulo: "Hot reload", icone: "⚡", tecla: "r" },
-        { rotulo: "Hot restart", icone: "↻", tecla: "R" },
+      quit: "q",
+      actions: [
+        { label: "Hot reload", icon: "⚡", keyOf: "r" },
+        { label: "Hot restart", icon: "↻", keyOf: "R" },
       ],
     };
   },
 };
 
 const node: Runner = {
-  tipos: ["node", "pwa-node"],
-  async montar(cfg, ctx) {
+  kinds: ["node", "pwa-node"],
+  async build(cfg, ctx) {
     const { r, cwd, env } = base(cfg, ctx);
-    const exe = texto(cfg.runtimeExecutable);
-    const program = texto(cfg.program);
-    if (!exe && !program) throw new Error(T.faltaProgramOuExecutable);
+    const exe = text(cfg.runtimeExecutable);
+    const program = text(cfg.program);
+    if (!exe && !program) throw new Error(T.missingProgramOrExecutable);
     const argv = [
       exe ? r(exe) : "node",
-      ...lista(cfg.runtimeArgs).map(r),
+      ...list(cfg.runtimeArgs).map(r),
       ...(program ? [r(program)] : []),
-      ...lista(cfg.args).map(r),
+      ...list(cfg.args).map(r),
     ];
-    return { rotulo: "Node", cwd, env, argv };
+    return { label: "Node", cwd, env, argv };
   },
 };
 
 const python: Runner = {
-  tipos: ["python", "debugpy"],
-  async montar(cfg, ctx) {
+  kinds: ["python", "debugpy"],
+  async build(cfg, ctx) {
     const { r, cwd, env } = base(cfg, ctx);
-    const exe = r(texto(cfg.python) ?? "python3");
-    const args = lista(cfg.args).map(r);
-    const modulo = texto(cfg.module);
-    const program = texto(cfg.program);
-    if (modulo) return { rotulo: "Python", cwd, env, argv: [exe, "-m", r(modulo), ...args] };
-    if (program) return { rotulo: "Python", cwd, env, argv: [exe, r(program), ...args] };
-    throw new Error(T.faltaProgramOuModule);
+    const exe = r(text(cfg.python) ?? "python3");
+    const args = list(cfg.args).map(r);
+    const modulo = text(cfg.module);
+    const program = text(cfg.program);
+    if (modulo) return { label: "Python", cwd, env, argv: [exe, "-m", r(modulo), ...args] };
+    if (program) return { label: "Python", cwd, env, argv: [exe, r(program), ...args] };
+    throw new Error(T.missingProgramOrModule);
   },
 };
 
 const go: Runner = {
-  tipos: ["go"],
-  async montar(cfg, ctx) {
+  kinds: ["go"],
+  async build(cfg, ctx) {
     const { r, cwd, env } = base(cfg, ctx);
-    const program = r(texto(cfg.program) ?? ctx.pasta);
-    const args = lista(cfg.args).map(r);
+    const program = r(text(cfg.program) ?? ctx.folder);
+    const args = list(cfg.args).map(r);
     const sub = cfg.mode === "test" ? "test" : "run";
-    return { rotulo: "Go", cwd, env, argv: ["go", sub, program, ...args] };
+    return { label: "Go", cwd, env, argv: ["go", sub, program, ...args] };
   },
 };
 
 const RUNNERS: Runner[] = [dart, node, python, go];
 
-export function runnerPara(tipo: string): Runner | undefined {
-  return RUNNERS.find((r) => r.tipos.includes(tipo));
+export function runnerFor(kind: string): Runner | undefined {
+  return RUNNERS.find((r) => r.kinds.includes(kind));
 }
 
 /** The line the panel gets: `VAR=value program args`, after the task, if any. */
-export function linhaDeComando(plano: Plano, antes: string | null): string {
-  const env = Object.entries(plano.env)
+export function commandLine(plan: Plan, before: string | null): string {
+  const env = Object.entries(plan.env)
     .filter(([k]) => /^[A-Za-z_]\w*$/.test(k))
-    .map(([k, v]) => `${k}=${palavra(v)}`);
-  const comando = [...env, ...plano.argv.map(palavra)].join(" ");
-  return antes ? `${antes} && ${comando}` : comando;
+    .map(([k, v]) => `${k}=${word(v)}`);
+  const command = [...env, ...plan.argv.map(word)].join(" ");
+  return before ? `${before} && ${command}` : command;
 }

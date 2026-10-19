@@ -79,10 +79,10 @@ interface Props {
 }
 
 function emptyNote(file: FileDiff): string {
-  if (file.binary) return T.arquivoBinario;
-  if (file.status === "renamed") return T.arquivoRenomeado;
-  if (file.oldMode !== file.newMode) return T.permissaoAlterada(file.oldMode, file.newMode);
-  return T.semMudancas;
+  if (file.binary) return T.fileBinary;
+  if (file.status === "renamed") return T.fileRenamed;
+  if (file.oldMode !== file.newMode) return T.permissionChanged(file.oldMode, file.newMode);
+  return T.noChanges;
 }
 
 export const FileDiffView = memo(function FileDiffView(props: Props) {
@@ -446,9 +446,9 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
   } else if (large && !showLarge) {
     body = (
       <div className="file-note">
-        {T.diffGrande(totalLines)}{" "}
+        {T.diffLarge(totalLines)}{" "}
         <button className="link-btn" onClick={() => setShowLarge(true)}>
-          {T.carregarDiff}
+          {T.loadDiff}
         </button>
       </div>
     );
@@ -476,7 +476,7 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
         <button
           className="icon-btn"
           onClick={() => onCollapse(file, !collapsed)}
-          title={collapsed ? T.expandirArquivo : T.recolherArquivo}
+          title={collapsed ? T.expandFile : T.collapseFile}
         >
           <Icon name="chevron-down" className={collapsed ? "file-chevron closed" : "file-chevron"} />
         </button>
@@ -498,24 +498,24 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
         )}
         {outdatedCount > 0 && (
           <span className="badge warn">
-            {T.marcadoresDesatualizados(outdatedCount)}
+            {T.bookmarksOutdated(outdatedCount)}
           </span>
         )}
         <span className="spacer" />
         {image ? (
-          <span className="badge">{T.imagem}</span>
+          <span className="badge">{T.image}</span>
         ) : (
           <DiffStat additions={file.additions} deletions={file.deletions} />
         )}
         <label
           className={viewed ? "viewed-toggle on" : "viewed-toggle"}
           title={
-            (props.staging ? T.revisadoNoIndiceDica : T.marcarRevisado) +
+            (props.staging ? T.reviewedInIndexHint : T.markReviewed) +
             (active ? " (V)" : "")
           }
         >
           <input type="checkbox" checked={viewed} onChange={() => onSetViewed(file, !viewed)} />
-          {T.revisado}
+          {T.reviewed}
           {/* Always rendered so the button keeps its width; only shown on the active file. */}
           <kbd className={active ? undefined : "hidden-hint"} aria-hidden={!active}>
             V
@@ -540,16 +540,16 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
         // Keep the selection alive until the click lands.
         <div className="comment-selection" style={{ top: pick.top, left: pick.left }} onMouseDown={(e) => e.preventDefault()}>
           <button
-            title={T.comentarSelecao(rangeLabel({ side: pick.side, startLine: pick.start, endLine: pick.end }).toLowerCase())}
+            title={T.commentSelection(rangeLabel({ side: pick.side, startLine: pick.start, endLine: pick.end }).toLowerCase())}
             onClick={commentPick}
           >
             <Icon name="bookmark" size={13} />
-            {T.comentar}
+            {T.comment}
           </button>
           <span className="sep" />
-          <button className="ask-pick" title={T.perguntarSelecao} onClick={askPick}>
+          <button className="ask-pick" title={T.askSelection} onClick={askPick}>
             <Icon name="sparkle" size={13} />
-            {T.perguntar}
+            {T.ask}
           </button>
         </div>
       )}

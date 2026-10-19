@@ -8,19 +8,19 @@ import { CopyAllButton, CopyReferenceButton, FixBadge, ResolveButton } from "./B
 import { Icon, StatusIcon } from "./Icons";
 
 /** A section of the file list: in the index and out of it, like in VS Code. */
-export interface GrupoArquivos {
-  chave: string;
-  titulo: string;
+export interface GroupFiles {
+  key: string;
+  title: string;
   tree: TreeNode[];
   /** What the header button does to the whole repository. */
-  poeTudo: boolean;
-  vazio: string;
+  stagesAll: boolean;
+  empty: string;
 }
 
 interface Props {
   tree: TreeNode[];
   /** When there are groups, the list is split by them; without them, it is the whole tree. */
-  grupos: GrupoArquivos[] | null;
+  groups: GroupFiles[] | null;
   files: FileDiff[];
   viewedPaths: Set<string>;
   activePath: string | null;
@@ -31,8 +31,8 @@ interface Props {
   /// Only in the to-be-committed tab: the others have no index or commit.
   staging: boolean;
   /// How many files have something in the index — it is what the commit button will take.
-  noIndice: number;
-  onStage(path: string, dentro: boolean): void;
+  inIndex: number;
+  onStage(path: string, inside: boolean): void;
   /// Lets git's error propagate: the box shows it, along with the typed text.
   onCommit(message: string): Promise<void>;
   onSelectFile(path: string): void;
@@ -45,19 +45,19 @@ export function Sidebar(props: Props) {
   const [tab, setTab] = useState<"files" | "bookmarks">("files");
   return (
     <aside className="sidebar">
-      {props.staging && <CommitBox noIndice={props.noIndice} onCommit={props.onCommit} />}
+      {props.staging && <CommitBox inIndex={props.inIndex} onCommit={props.onCommit} />}
       <div className="tabs" role="tablist">
         <button role="tab" className={tab === "files" ? "active" : ""} onClick={() => setTab("files")}>
-          {T.abaArquivos} <span className="count">{props.files.length}</span>
+          {T.tabFiles} <span className="count">{props.files.length}</span>
         </button>
         <button role="tab" className={tab === "bookmarks" ? "active" : ""} onClick={() => setTab("bookmarks")}>
-          {T.abaMarcadores} <span className="count">{props.bookmarks.length}</span>
+          {T.tabBookmarks} <span className="count">{props.bookmarks.length}</span>
         </button>
       </div>
       {tab === "files" ? (
         <FileTree
           tree={props.tree}
-          grupos={props.grupos}
+          groups={props.groups}
           viewedPaths={props.viewedPaths}
           activePath={props.activePath}
           onSelect={props.onSelectFile}
@@ -80,25 +80,25 @@ export function Sidebar(props: Props) {
 }
 
 /** The message and the button that commits what is in the index, above the file list. */
-function CommitBox({ noIndice, onCommit }: { noIndice: number; onCommit(m: string): Promise<void> }) {
-  const [mensagem, setMensagem] = useState("");
-  const [enviando, setEnviando] = useState(false);
-  const [erro, setErro] = useState<string | null>(null);
-  const pode = noIndice > 0 && mensagem.trim() !== "" && !enviando;
+function CommitBox({ inIndex, onCommit }: { inIndex: number; onCommit(m: string): Promise<void> }) {
+  const [messageText, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const can = inIndex > 0 && messageText.trim() !== "" && !sending;
 
-  const commitar = async () => {
-    if (!pode) return;
-    setEnviando(true);
-    setErro(null);
+  const commit = async () => {
+    if (!can) return;
+    setSending(true);
+    setError(null);
     try {
-      await onCommit(mensagem);
-      setMensagem("");
+      await onCommit(messageText);
+      setMessage("");
     } catch (err) {
       // Git's refusal is the most useful answer there is here — a hook that blocked it,
       // identity not configured, nothing in the index. It goes to the screen whole.
-      setErro(String(err));
+      setError(String(err));
     } finally {
-      setEnviando(false);
+      setSending(false);
     }
   };
 
@@ -114,18 +114,18 @@ function CommitBox({ noIndice, onCommit }: { noIndice: number; onCommit(m: strin
         autoCorrect="off"
         autoCapitalize="off"
         autoComplete="off"
-        placeholder={noIndice > 0 ? T.mensagemDoCommit : T.nadaNoIndice}
-        value={mensagem}
-        onChange={(e) => setMensagem(e.target.value)}
+        placeholder={inIndex > 0 ? T.messageOfCommit : T.nothingStaged}
+        value={messageText}
+        onChange={(e) => setMessage(e.target.value)}
         onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void commitar();
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void commit();
         }}
       />
-      <button className="commit-btn" disabled={!pode} title={T.commitarDica} onClick={() => void commitar()}>
+      <button className="commit-btn" disabled={!can} title={T.commitHint} onClick={() => void commit()}>
         <Icon name="check" size={14} />
-        {enviando ? T.commitando : noIndice > 0 ? T.commitN(noIndice) : T.commit}
+        {sending ? T.committing : inIndex > 0 ? T.commitN(inIndex) : T.commit}
       </button>
-      {erro && <p className="commit-erro">{erro}</p>}
+      {error && <p className="commit-error">{error}</p>}
     </div>
   );
 }
@@ -135,39 +135,39 @@ function StageButtons({
   path,
   staged,
   onStage,
-  pasta = false,
+  folder = false,
 }: {
   path: string;
   staged: StagedState;
-  onStage(path: string, dentro: boolean): void;
-  pasta?: boolean;
+  onStage(path: string, inside: boolean): void;
+  folder?: boolean;
 }) {
   // Half in the index, both fit: one takes the rest, the other removes everything.
   const por = staged !== "staged";
-  const tirar = staged !== "unstaged";
+  const remove = staged !== "unstaged";
   return (
-    <span className={`stage-acoes ${staged}`}>
+    <span className={`stage-actions ${staged}`}>
       {por && (
         <button
           className="stage-btn"
           title={
             staged === "partial"
-              ? pasta
-                ? T.porRestoDaPasta
-                : T.porRestoDoArquivo
-              : pasta
-                ? T.porPasta
-                : T.porArquivo
+              ? folder
+                ? T.byRestOfFolder
+                : T.byRestOfFile
+              : folder
+                ? T.byFolder
+                : T.byFile
           }
           onClick={() => onStage(path, true)}
         >
           <Icon name="plus" size={13} />
         </button>
       )}
-      {tirar && (
+      {remove && (
         <button
-          className="stage-btn tirar"
-          title={pasta ? T.tirarPasta : T.tirarArquivo}
+          className="stage-btn remove"
+          title={folder ? T.removeFolder : T.removeFile}
           onClick={() => onStage(path, false)}
         >
           <Icon name="minus" size={13} />
@@ -179,50 +179,50 @@ function StageButtons({
 
 function FileTree({
   tree,
-  grupos,
+  groups,
   viewedPaths,
   activePath,
   onSelect,
   onStage,
 }: {
   tree: TreeNode[];
-  grupos: GrupoArquivos[] | null;
+  groups: GroupFiles[] | null;
   viewedPaths: Set<string>;
   activePath: string | null;
   onSelect(path: string): void;
-  onStage?(path: string, dentro: boolean): void;
+  onStage?(path: string, inside: boolean): void;
 }) {
   const [query, setQuery] = useState("");
   const [closed, setClosed] = useState<Set<string>>(() => new Set());
-  const [gruposFechados, setGruposFechados] = useState<Set<string>>(() => new Set());
+  const [groupsClosed, setGroupsClosed] = useState<Set<string>>(() => new Set());
   const listRef = useRef<HTMLDivElement>(null);
   const visible = useMemo(() => filterTree(tree, query), [tree, query]);
-  const gruposVisiveis = useMemo(
-    () => grupos?.map((g) => ({ ...g, visible: filterTree(g.tree, query), total: flattenTree(g.tree).length })),
-    [grupos, query],
+  const groupsVisible = useMemo(
+    () => groups?.map((g) => ({ ...g, visible: filterTree(g.tree, query), total: flattenTree(g.tree).length })),
+    [groups, query],
   );
   const filtering = query.trim() !== "";
 
   /** Every folder in the list, for the button that collapses all at once. */
-  const todasPastas = useMemo(() => {
-    const nomes: string[] = [];
-    const visitar = (nodes: TreeNode[]) => {
+  const allFolders = useMemo(() => {
+    const names: string[] = [];
+    const visit = (nodes: TreeNode[]) => {
       for (const node of nodes) {
         if (node.type !== "dir") continue;
-        nomes.push(node.path);
-        visitar(node.children);
+        names.push(node.path);
+        visit(node.children);
       }
     };
-    visitar(grupos ? grupos.flatMap((g) => g.tree) : tree);
-    return nomes;
-  }, [grupos, tree]);
+    visit(groups ? groups.flatMap((g) => g.tree) : tree);
+    return names;
+  }, [groups, tree]);
 
   // The button toggles instead of only collapsing: whoever collapsed everything to find a
   // file wants the way back on the same key.
-  const tudoRecolhido = todasPastas.length > 0 && todasPastas.every((p) => closed.has(p));
-  const alternarTudo = () => {
-    setClosed(tudoRecolhido ? new Set() : new Set(todasPastas));
-    setGruposFechados(new Set());
+  const allCollapsed = allFolders.length > 0 && allFolders.every((p) => closed.has(p));
+  const toggleAll = () => {
+    setClosed(allCollapsed ? new Set() : new Set(allFolders));
+    setGroupsClosed(new Set());
   };
 
   useEffect(() => {
@@ -237,11 +237,11 @@ function FileTree({
       return next;
     });
 
-  const alternarGrupo = (chave: string) =>
-    setGruposFechados((prev) => {
+  const toggleGroup = (key: string) =>
+    setGroupsClosed((prev) => {
       const next = new Set(prev);
-      if (next.has(chave)) next.delete(chave);
-      else next.add(chave);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
 
@@ -251,7 +251,7 @@ function FileTree({
       const { path, status, staged } = node.file;
       const isViewed = viewedPaths.has(path);
       const cls = `tree-file${path === activePath ? " active" : ""}${isViewed ? " viewed" : ""}`;
-      const linha = (
+      const line = (
         <button className={cls} style={indent} title={path} onClick={() => onSelect(path)}>
           <StatusIcon status={status} />
           <span className="tree-name">{node.name}</span>
@@ -260,23 +260,23 @@ function FileTree({
       );
       // The index buttons are siblings of the row, not children: a button inside a
       // button isn't valid HTML, and a click on one would become a click on the other.
-      if (!onStage || !staged) return <Fragment key={path}>{linha}</Fragment>;
+      if (!onStage || !staged) return <Fragment key={path}>{line}</Fragment>;
       return (
-        <div key={path} className="tree-file-linha">
-          {linha}
+        <div key={path} className="tree-file-line">
+          {line}
           <StageButtons path={path} staged={staged} onStage={onStage} />
         </div>
       );
     }
     const open = filtering || !closed.has(node.path);
     const staged = onStage ? dirStaged(node) : null;
-    const linhaDir = (
+    const lineDir = (
       <button className="tree-dir" style={indent} title={node.path} onClick={() => toggle(node.path)}>
         {/* Always the same chevron, rotating: swapping the icon midway
             would cut its turn short. */}
         <Icon
           name="chevron-down"
-          className={open ? "tree-chevron" : "tree-chevron fechado"}
+          className={open ? "tree-chevron" : "tree-chevron closed"}
           size={12}
         />
         <Icon name={open ? "folder-open" : "folder"} className="tree-folder" size={15} />
@@ -289,16 +289,16 @@ function FileTree({
           // The whole folder at once: `git add` accepts its path just as it
           // accepts a file's, and takes along what was deleted and what still
           // isn't tracked in there.
-          <div className="tree-file-linha">
-            {linhaDir}
-            <StageButtons path={node.path} staged={staged} onStage={onStage} pasta />
+          <div className="tree-file-line">
+            {lineDir}
+            <StageButtons path={node.path} staged={staged} onStage={onStage} folder />
           </div>
         ) : (
-          linhaDir
+          lineDir
         )}
         {/* What is inside stays mounted and gets clipped by height: that is what
             allows animating both ways, and the rows are cheap. */}
-        <div className={open ? "tree-dobra aberta" : "tree-dobra"}>
+        <div className={open ? "tree-dobra open" : "tree-dobra"}>
           <div className="tree-dobra-clip">
             {node.children.map((child) => renderNode(child, depth + 1))}
           </div>
@@ -312,64 +312,64 @@ function FileTree({
       <div className="tree-filter">
         <input
           type="search"
-          placeholder={T.filtrarArquivos}
+          placeholder={T.filterFiles}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        {todasPastas.length > 0 && (
+        {allFolders.length > 0 && (
           <button
             className="icon-btn"
-            title={tudoRecolhido ? T.abrirPastas : T.recolherPastas}
-            onClick={alternarTudo}
+            title={allCollapsed ? T.openFolders : T.collapseFolders}
+            onClick={toggleAll}
           >
-            <Icon name={tudoRecolhido ? "chevron-down" : "chevron-right"} size={14} />
+            <Icon name={allCollapsed ? "chevron-down" : "chevron-right"} size={14} />
           </button>
         )}
       </div>
       <div className="tree-items" ref={listRef}>
-        {gruposVisiveis
-          ? gruposVisiveis.map((g) => {
+        {groupsVisible
+          ? groupsVisible.map((g) => {
               // While filtering, the group opens on its own: hiding the search
               // result behind a closed group would be saying there is nothing.
-              const aberto = filtering || !gruposFechados.has(g.chave);
+              const isOpen = filtering || !groupsClosed.has(g.key);
               return (
-                <Fragment key={g.chave}>
-                  <div className="tree-grupo">
-                    <button className="tree-grupo-botao" onClick={() => alternarGrupo(g.chave)}>
+                <Fragment key={g.key}>
+                  <div className="tree-group">
+                    <button className="tree-group-button" onClick={() => toggleGroup(g.key)}>
                       <Icon
                         name="chevron-down"
-                        className={aberto ? "tree-chevron" : "tree-chevron fechado"}
+                        className={isOpen ? "tree-chevron" : "tree-chevron closed"}
                         size={12}
                       />
-                      <span className="tree-grupo-nome">{g.titulo}</span>
+                      <span className="tree-group-name">{g.title}</span>
                       <span className="count">{g.total}</span>
                     </button>
                     {onStage && g.total > 0 && (
                       <button
-                        className={`stage-btn${g.poeTudo ? "" : " tirar"}`}
+                        className={`stage-btn${g.stagesAll ? "" : " remove"}`}
                         title={
-                          g.poeTudo
-                            ? T.porTudo
-                            : T.tirarTudo
+                          g.stagesAll
+                            ? T.byAll
+                            : T.removeAll
                         }
-                        onClick={() => onStage(".", g.poeTudo)}
+                        onClick={() => onStage(".", g.stagesAll)}
                       >
-                        <Icon name={g.poeTudo ? "plus" : "minus"} size={13} />
+                        <Icon name={g.stagesAll ? "plus" : "minus"} size={13} />
                       </button>
                     )}
                   </div>
-                  <div className={aberto ? "tree-dobra aberta" : "tree-dobra"}>
+                  <div className={isOpen ? "tree-dobra open" : "tree-dobra"}>
                     <div className="tree-dobra-clip">
                       {g.visible.map((node) => renderNode(node, 0))}
-                      {g.visible.length === 0 && <p className="muted tree-empty">{g.vazio}</p>}
+                      {g.visible.length === 0 && <p className="muted tree-empty">{g.empty}</p>}
                     </div>
                   </div>
                 </Fragment>
               );
             })
           : visible.map((node) => renderNode(node, 0))}
-        {!gruposVisiveis && visible.length === 0 && (
-          <p className="muted tree-empty">{T.nenhumArquivo}</p>
+        {!groupsVisible && visible.length === 0 && (
+          <p className="muted tree-empty">{T.noFile}</p>
         )}
       </div>
     </div>
@@ -408,7 +408,7 @@ function BookmarkList({
 
   // From the already sorted list, not the raw array: the pasted text comes out in the same order
   // the review is read on screen, file by file, line by line.
-  const tudo = useMemo(
+  const everything = useMemo(
     () => bookmarksReference(groups.flatMap(([, items]) => items), referenceOf),
     [groups, referenceOf],
   );
@@ -417,15 +417,15 @@ function BookmarkList({
     return (
       <div className="empty-list">
         <Icon name="bookmark" size={24} />
-        <p>{T.nenhumMarcador}</p>
+        <p>{T.noBookmark}</p>
         <p className="muted">
-          {T.comoMarcarAntes}
+          {T.howToMarkBefore}
           <strong>+</strong>
-          {T.comoMarcarDepois}
+          {T.howToMarkAfter}
         </p>
         <p className="muted">
-          {T.comoComentarAntes}
-          <strong>{T.comentar}</strong>.
+          {T.howToCommentBefore}
+          <strong>{T.comment}</strong>.
         </p>
       </div>
     );
@@ -433,8 +433,8 @@ function BookmarkList({
 
   return (
     <div className="bookmark-list">
-      <div className="bookmark-tudo">
-        <CopyAllButton reference={tudo} count={bookmarks.length} />
+      <div className="bookmark-all">
+        <CopyAllButton reference={everything} count={bookmarks.length} />
       </div>
       {groups.map(([path, items]) => (
         <div key={path} className="bookmark-group">
@@ -459,14 +459,14 @@ function BookmarkList({
                   {status ? (
                     <FixBadge status={status} />
                   ) : (
-                    isOutdated && <span className="badge warn">{T.desatualizado}</span>
+                    isOutdated && <span className="badge warn">{T.outdated}</span>
                   )}
                   <span className="spacer" />
                   <ResolveButton resolved={!!b.resolved} size={14} onToggle={() => onToggleResolved(b.id)} />
                   <CopyReferenceButton reference={referenceOf(b)} size={14} />
                   <button
                     className="icon-btn danger"
-                    title={T.removerMarcador}
+                    title={T.removeBookmark}
                     onClick={(e) => {
                       e.stopPropagation();
                       onRemove(b.id);

@@ -7,7 +7,7 @@
 use serde::Serialize;
 
 use crate::differ::error::{Error, Result};
-use crate::idioma::tr;
+use crate::language::tr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -277,11 +277,11 @@ fn parse_range(range: &str) -> Option<(u32, u32)> {
 
 pub fn build(raw: Vec<RawEntry>, patch: Vec<PatchSection>) -> Result<Vec<FileDiff>> {
     if raw.len() != patch.len() {
-        let (lista, patch_n) = (raw.len(), patch.len());
-        return Err(Error::Parse(if crate::idioma::portugues() {
-            format!("{lista} arquivos na lista, mas {patch_n} no patch")
+        let (listed, patch_n) = (raw.len(), patch.len());
+        return Err(Error::Parse(if crate::language::portuguese() {
+            format!("{listed} arquivos na lista, mas {patch_n} no patch")
         } else {
-            format!("{lista} files in the list, but {patch_n} in the patch")
+            format!("{listed} files in the list, but {patch_n} in the patch")
         }));
     }
 

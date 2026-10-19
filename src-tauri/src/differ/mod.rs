@@ -11,7 +11,7 @@
 mod diff;
 mod error;
 mod git;
-mod pergunta;
+mod ask;
 mod review;
 
 use std::path::{Path, PathBuf};
@@ -23,7 +23,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use error::{Error, Result};
 use review::{RepoInfo, ReviewDiff};
 
-pub use pergunta::Perguntas;
+pub use ask::RunningAsks;
 
 /// Git calls block, and the async runtime has few threads: a `git diff` on a
 /// large repository would hold up the rest of the app with it.
@@ -112,14 +112,14 @@ pub async fn read_blob(path: PathBuf, oid: String) -> Result<Vec<String>> {
 /// dropped watcher shuts down, and switching repositories retires the previous one
 /// exactly that way.
 #[derive(Default)]
-pub struct Vigia(Mutex<Option<RecommendedWatcher>>);
+pub struct RepoWatcher(Mutex<Option<RecommendedWatcher>>);
 
 /// Only these parts of .git affect what the tab shows. The diff is of committed
 /// work, so `git add` and file edits change nothing — and `objects/` boils
 /// during a fetch, thousands of events ending in a single ref update, which is
 /// precisely the one that matters.
-fn interessa(caminho: &Path) -> bool {
-    let p = caminho.to_string_lossy();
+fn matters(path: &Path) -> bool {
+    let p = path.to_string_lossy();
     if p.ends_with(".lock") {
         return false;
     }
@@ -135,30 +135,30 @@ fn interessa(caminho: &Path) -> bool {
 pub async fn watch_repo(app: AppHandle, path: PathBuf) -> Result<()> {
     // `--absolute-git-dir` instead of `<root>/.git`: in a worktree or submodule
     // .git is a file pointing elsewhere, and it is the elsewhere that changes.
-    let (raiz, gitdir) = blocking(move || {
+    let (root_dir, gitdir) = blocking(move || {
         let repo = git::Repo::open(&path)?;
         let gitdir = repo.run_string(&["rev-parse", "--absolute-git-dir"])?;
         Ok((repo.root().to_string_lossy().into_owned(), PathBuf::from(gitdir)))
     })
     .await?;
 
-    let aviso = app.clone();
-    let mut vigia = notify::recommended_watcher(move |ev: notify::Result<Event>| {
+    let notify_app = app.clone();
+    let mut watcher = notify::recommended_watcher(move |ev: notify::Result<Event>| {
         let Ok(ev) = ev else { return };
         // Reading .git is not changing it — and we read it ourselves on every `git diff`.
         if matches!(ev.kind, EventKind::Access(_)) {
             return;
         }
-        if ev.paths.iter().any(|p| interessa(p)) {
-            let _ = aviso.emit("differ://mudou", &raiz);
+        if ev.paths.iter().any(|p| matters(p)) {
+            let _ = notify_app.emit("differ://changed", &root_dir);
         }
     })
     .map_err(|err| Error::Internal(err.to_string()))?;
 
-    vigia
+    watcher
         .watch(&gitdir, RecursiveMode::Recursive)
         .map_err(|err| Error::Internal(err.to_string()))?;
-    *app.state::<Vigia>().0.lock().unwrap() = Some(vigia);
+    *app.state::<RepoWatcher>().0.lock().unwrap() = Some(watcher);
     Ok(())
 }
 
@@ -179,8 +179,8 @@ pub async fn read_worktree_bytes(path: PathBuf, file: String) -> Result<tauri::i
 /// The Claude Code sessions open in this repository, so a question can mention
 /// one of them and be answered knowing what was already discussed there.
 #[tauri::command]
-pub async fn claude_sessions(path: PathBuf) -> Result<Vec<pergunta::Sessao>> {
-    blocking(move || pergunta::sessoes(&path)).await
+pub async fn claude_sessions(path: PathBuf) -> Result<Vec<ask::Session>> {
+    blocking(move || ask::sessions(&path)).await
 }
 
 /// Asks Claude about a snippet, without opening a session or saving anything. `id`
@@ -197,10 +197,10 @@ pub async fn ask_claude(
     model: Option<String>,
     session: Option<String>,
     allow_edits: bool,
-) -> Result<pergunta::Resposta> {
+) -> Result<ask::Answer> {
     blocking(move || {
-        let pids = app.state::<Perguntas>();
-        pergunta::perguntar(&path, &pids, &id, &question, &context, model.as_deref(), session.as_deref(), allow_edits)
+        let pids = app.state::<RunningAsks>();
+        ask::ask(&path, &pids, &id, &question, &context, model.as_deref(), session.as_deref(), allow_edits)
     })
     .await
 }
@@ -208,11 +208,11 @@ pub async fn ask_claude(
 /// Restores the files a question changed to what they were. Returns the ones
 /// that couldn't be restored — those someone changed again after it.
 #[tauri::command]
-pub async fn undo_ask(path: PathBuf, changes: Vec<pergunta::Alteracao>) -> Result<Vec<String>> {
-    blocking(move || pergunta::desfazer(&path, &changes)).await
+pub async fn undo_ask(path: PathBuf, changes: Vec<ask::FileChange>) -> Result<Vec<String>> {
+    blocking(move || ask::undo(&path, &changes)).await
 }
 
 #[tauri::command]
 pub fn cancel_ask(app: AppHandle, id: String) {
-    pergunta::cancelar(&app.state::<Perguntas>(), &id);
+    ask::cancel(&app.state::<RunningAsks>(), &id);
 }

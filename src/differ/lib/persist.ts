@@ -2,6 +2,7 @@
 
 import { load, type Store } from "@tauri-apps/plugin-store";
 import type { Bookmark, ReviewCheckpoint, Scope, ViewMode } from "../types";
+import { fromLegacy, LEGACY_SETTINGS } from "../../legacy";
 
 export interface Settings {
   viewMode: ViewMode;
@@ -10,18 +11,18 @@ export interface Settings {
   /** The whole branch or only what changed since the last complete review. */
   scope: Scope;
   /**
-   * The terminal viewer's "Open in editor": a command with `{arquivo}` and `{linha}`, run in
+   * The terminal viewer's "Open in editor": a command with `{file}` and `{line}`, run in
    * your shell. Empty means VS Code, through `vscode://`, which doesn't depend on `code` being on PATH.
    */
   editor: string;
   /** The Claude session's context, in %: the pill turns yellow from this one. */
-  contextoAtencao: number;
+  contextAttention: number;
   /** And red from this one, with the panel outlined in pulsing red. */
-  contextoPerigo: number;
-  /** Sends `/compact` on its own when the context reaches `autoCompactEm`. Off by default. */
+  contextDanger: number;
+  /** Sends `/compact` on its own when the context reaches `autoCompactAt`. Off by default. */
   autoCompact: boolean;
   /** The auto-compact %. Must exceed red: below it, red plus one applies. */
-  autoCompactEm: number;
+  autoCompactAt: number;
 }
 
 export interface RepoConfig {
@@ -50,10 +51,10 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultTarget: "",
   scope: "branch",
   editor: "",
-  contextoAtencao: 60,
-  contextoPerigo: 75,
+  contextAttention: 60,
+  contextDanger: 75,
   autoCompact: false,
-  autoCompactEm: 76,
+  autoCompactAt: 76,
 };
 
 let store: Promise<Store> | null = null;
@@ -68,7 +69,7 @@ async function write(key: string, value: unknown): Promise<void> {
 }
 
 export async function loadSettings(): Promise<Settings> {
-  return { ...DEFAULT_SETTINGS, ...(await read<Partial<Settings>>("settings")) };
+  return { ...DEFAULT_SETTINGS, ...(fromLegacy(await read<Partial<Settings>>("settings"), LEGACY_SETTINGS) as Partial<Settings>) };
 }
 
 export const saveSettings = (settings: Settings) => write("settings", settings);
@@ -83,7 +84,9 @@ export async function saveViewMode(viewMode: ViewMode): Promise<void> {
 
 /** Notifies when the preferences change — including when the other page changed them. */
 export async function onSettings(cb: (settings: Settings) => void): Promise<() => void> {
-  return (await getStore()).onKeyChange<Partial<Settings>>("settings", (v) => cb({ ...DEFAULT_SETTINGS, ...v }));
+  return (await getStore()).onKeyChange<Partial<Settings>>("settings", (v) =>
+    cb({ ...DEFAULT_SETTINGS, ...(fromLegacy(v, LEGACY_SETTINGS) as Partial<Settings>) }),
+  );
 }
 
 export const loadRepoConfig = (root: string) => read<RepoConfig>(`repo:${root}`);

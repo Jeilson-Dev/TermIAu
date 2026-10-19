@@ -1,6 +1,6 @@
 // The .vscode/launch.json, and the tasks.json it references, read without VS Code.
 
-import { palavra } from "./shell";
+import { word } from "./shell";
 import { T } from "../i18n/terminal";
 
 /** An entry in `configurations`. Besides these fields, each `type` has its own. */
@@ -12,7 +12,7 @@ export interface ConfigLaunch {
 }
 
 /** An entry in tasks.json's `tasks`, with only what the play button can run. */
-export interface Tarefa {
+export interface Task {
   label?: string;
   type?: string;
   command?: string;
@@ -24,77 +24,77 @@ export interface Tarefa {
 }
 
 /** What the `${...}` variables need to know. */
-export interface Contexto {
+export interface Context {
   /** The folder holding `.vscode`: the `${workspaceFolder}`. */
-  pasta: string;
+  folder: string;
   home: string;
 }
 
-const ehObjeto = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 
-/** Index of the quote that closes the string opened at `inicio`. */
-function fimDaString(texto: string, inicio: number): number {
-  let i = inicio + 1;
-  while (i < texto.length && texto[i] !== '"') i += texto[i] === "\\" ? 2 : 1;
+/** Index of the quote that closes the string opened at `beginning`. */
+function stringEnd(text: string, beginning: number): number {
+  let i = beginning + 1;
+  while (i < text.length && text[i] !== '"') i += text[i] === "\\" ? 2 : 1;
   return i;
 }
 
-function semComentarios(texto: string): string {
-  let saida = "";
-  for (let i = 0; i < texto.length; i++) {
-    const c = texto[i];
+function noComments(text: string): string {
+  let output = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
     if (c === '"') {
-      const fim = fimDaString(texto, i);
-      saida += texto.slice(i, fim + 1);
-      i = fim;
-    } else if (c === "/" && texto[i + 1] === "/") {
-      const fim = texto.indexOf("\n", i);
-      i = fim < 0 ? texto.length : fim - 1; // the newline stays
-    } else if (c === "/" && texto[i + 1] === "*") {
-      const fim = texto.indexOf("*/", i + 2);
-      i = fim < 0 ? texto.length : fim + 1;
+      const end = stringEnd(text, i);
+      output += text.slice(i, end + 1);
+      i = end;
+    } else if (c === "/" && text[i + 1] === "/") {
+      const end = text.indexOf("\n", i);
+      i = end < 0 ? text.length : end - 1; // the newline stays
+    } else if (c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 1;
     } else {
-      saida += c;
+      output += c;
     }
   }
-  return saida;
+  return output;
 }
 
-function semVirgulasSobrando(texto: string): string {
-  let saida = "";
-  for (let i = 0; i < texto.length; i++) {
-    const c = texto[i];
+function noTrailingCommas(text: string): string {
+  let output = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
     if (c === '"') {
-      const fim = fimDaString(texto, i);
-      saida += texto.slice(i, fim + 1);
-      i = fim;
+      const end = stringEnd(text, i);
+      output += text.slice(i, end + 1);
+      i = end;
       continue;
     }
     if (c === ",") {
       let j = i + 1;
-      while (/\s/.test(texto[j] ?? "")) j++;
-      if (texto[j] === "}" || texto[j] === "]") continue;
+      while (/\s/.test(text[j] ?? "")) j++;
+      if (text[j] === "}" || text[j] === "]") continue;
     }
-    saida += c;
+    output += c;
   }
-  return saida;
+  return output;
 }
 
 /** JSON with comments and trailing commas: the format VS Code accepts in these files. */
-export function lerJsonc(texto: string): unknown {
-  return JSON.parse(semVirgulasSobrando(semComentarios(texto)));
+export function readJsonc(text: string): unknown {
+  return JSON.parse(noTrailingCommas(noComments(text)));
 }
 
-export function configsDe(texto: string): ConfigLaunch[] {
-  const json = lerJsonc(texto);
-  const lista = ehObjeto(json) && Array.isArray(json.configurations) ? json.configurations : [];
-  return lista.filter(
-    (c): c is ConfigLaunch => ehObjeto(c) && typeof c.name === "string" && typeof c.type === "string",
+export function configsOf(text: string): ConfigLaunch[] {
+  const json = readJsonc(text);
+  const list = isObject(json) && Array.isArray(json.configurations) ? json.configurations : [];
+  return list.filter(
+    (c): c is ConfigLaunch => isObject(c) && typeof c.name === "string" && typeof c.type === "string",
   );
 }
 
 /** What the play button offers: the configurations it runs and the list with group titles. */
-export interface ListaDoPlay {
+export interface PlayList {
   configs: ConfigLaunch[];
   /** In launch.json order; a string is the title of the group below it. */
   menu: (ConfigLaunch | string)[];
@@ -107,60 +107,60 @@ export interface ListaDoPlay {
  * `──── DEV ────` pointing to a file that doesn't exist, the trick for grouping
  * VS Code's list, becomes a group title instead of something the play button would run.
  */
-export function listaDoPlay(configs: ConfigLaunch[]): ListaDoPlay {
+export function playList(configs: ConfigLaunch[]): PlayList {
   const menu: (ConfigLaunch | string)[] = [];
   // A group with nothing below it (it only had CodeLens configurations) doesn't show.
-  const semGrupoVazio = () => {
+  const noEmptyGroup = () => {
     if (typeof menu[menu.length - 1] === "string") menu.pop();
   };
   for (const c of configs) {
-    if (ehObjeto(c.codeLens)) continue;
-    const grupo = tituloDeSeparador(c.name);
-    if (grupo === null) {
+    if (isObject(c.codeLens)) continue;
+    const group = separatorTitle(c.name);
+    if (group === null) {
       menu.push(c);
     } else {
-      semGrupoVazio();
-      menu.push(grupo);
+      noEmptyGroup();
+      menu.push(group);
     }
   }
-  semGrupoVazio();
+  noEmptyGroup();
   return { configs: menu.filter((m): m is ConfigLaunch => typeof m !== "string"), menu };
 }
 
 /** "──── DEV ────" -> "DEV". Null when the name doesn't have dashes at both ends. */
-function tituloDeSeparador(nome: string): string | null {
-  if (!/^\s*[─━═—–=-]{3,}/.test(nome) || !/[─━═—–=-]{3,}\s*$/.test(nome)) return null;
-  return nome.replace(/[─━═—–=<>-]{2,}/g, "").trim();
+function separatorTitle(name: string): string | null {
+  if (!/^\s*[─━═—–=-]{3,}/.test(name) || !/[─━═—–=-]{3,}\s*$/.test(name)) return null;
+  return name.replace(/[─━═—–=<>-]{2,}/g, "").trim();
 }
 
-export function tarefasDe(texto: string): Tarefa[] {
-  const json = lerJsonc(texto);
-  const lista = ehObjeto(json) && Array.isArray(json.tasks) ? json.tasks : [];
-  return lista.filter(ehObjeto) as Tarefa[];
+export function tasksOf(text: string): Task[] {
+  const json = readJsonc(text);
+  const list = isObject(json) && Array.isArray(json.tasks) ? json.tasks : [];
+  return list.filter(isObject) as Task[];
 }
 
 /**
  * Replaces VS Code's variables. `${env:X}` passes intact: the shell expands it
- * (see `palavra`). Those that depend on the editor (`${file}`, `${input:...}`) have no
+ * (see `word`). Those that depend on the editor (`${file}`, `${input:...}`) have no
  * answer here and stop the run with their name.
  */
-export function resolver(valor: string, ctx: Contexto): string {
-  return valor.replace(/\$\{([^}]+)\}/g, (todo, nome: string) => {
-    switch (nome) {
+export function resolver(valor: string, ctx: Context): string {
+  return valor.replace(/\$\{([^}]+)\}/g, (todo, name: string) => {
+    switch (name) {
       case "workspaceFolder":
       case "workspaceRoot":
       case "cwd":
-        return ctx.pasta;
+        return ctx.folder;
       case "workspaceFolderBasename":
-        return ctx.pasta.split("/").filter(Boolean).pop() ?? "";
+        return ctx.folder.split("/").filter(Boolean).pop() ?? "";
       case "userHome":
         return ctx.home;
       case "pathSeparator":
       case "/":
         return "/";
     }
-    if (nome.startsWith("env:")) return todo;
-    throw new Error(T.variavelNaoSuportada(todo));
+    if (name.startsWith("env:")) return todo;
+    throw new Error(T.unsupportedVariable(todo));
   });
 }
 
@@ -169,32 +169,32 @@ export function resolver(valor: string, ctx: Contexto): string {
  * (`task && app`). Null when there is none. Tasks the play button can't run yet
  * stop the run saying why, instead of running the app without it.
  */
-export function tarefaAntes(cfg: ConfigLaunch, tarefas: Tarefa[], ctx: Contexto): string | null {
-  const nome = cfg.preLaunchTask;
-  if (typeof nome !== "string" || !nome) return null;
-  const tarefa =
-    tarefas.find((t) => t.label === nome) ??
+export function taskBefore(cfg: ConfigLaunch, tasks: Task[], ctx: Context): string | null {
+  const name = cfg.preLaunchTask;
+  if (typeof name !== "string" || !name) return null;
+  const task =
+    tasks.find((t) => t.label === name) ??
     // npm tasks detected by VS Code are named "npm: <script>".
-    tarefas.find((t) => t.type === "npm" && `npm: ${t.script}` === nome);
-  if (!tarefa) throw new Error(T.tarefaAusente(nome));
-  if (tarefa.dependsOn) throw new Error(T.tarefaDependsOn(nome));
-  if (tarefa.isBackground) {
-    throw new Error(T.tarefaSegundoPlano(nome));
+    tasks.find((t) => t.type === "npm" && `npm: ${t.script}` === name);
+  if (!task) throw new Error(T.taskMissing(name));
+  if (task.dependsOn) throw new Error(T.taskDependsOn(name));
+  if (task.isBackground) {
+    throw new Error(T.backgroundTask(name));
   }
 
   const r = (v: string) => resolver(v, ctx);
-  const args = (tarefa.args ?? []).filter((a): a is string => typeof a === "string").map((a) => palavra(r(a)));
-  let comando: string;
-  if (tarefa.type === "npm" && tarefa.script) {
-    comando = ["npm", "run", palavra(tarefa.script), ...args].join(" ");
-  } else if (tarefa.type === "shell" && tarefa.command) {
+  const args = (task.args ?? []).filter((a): a is string => typeof a === "string").map((a) => word(r(a)));
+  let command: string;
+  if (task.type === "npm" && task.script) {
+    command = ["npm", "run", word(task.script), ...args].join(" ");
+  } else if (task.type === "shell" && task.command) {
     // A shell task's `command` is already a shell line: it goes as is.
-    comando = [r(tarefa.command).replace(/\$\{env:(\w+)\}/g, "${$1}"), ...args].join(" ");
-  } else if (tarefa.type === "process" && tarefa.command) {
-    comando = [palavra(r(tarefa.command)), ...args].join(" ");
+    command = [r(task.command).replace(/\$\{env:(\w+)\}/g, "${$1}"), ...args].join(" ");
+  } else if (task.type === "process" && task.command) {
+    command = [word(r(task.command)), ...args].join(" ");
   } else {
-    throw new Error(T.tarefaTipo(nome, String(tarefa.type)));
+    throw new Error(T.taskType(name, String(task.type)));
   }
-  const cwd = tarefa.options?.cwd;
-  return cwd ? `(cd ${palavra(r(cwd))} && ${comando})` : comando;
+  const cwd = task.options?.cwd;
+  return cwd ? `(cd ${word(r(cwd))} && ${command})` : command;
 }

@@ -61,10 +61,10 @@ export function flattenTree(nodes: TreeNode[]): FileDiff[] {
  * part of it. It decides which buttons the folder's row shows.
  */
 export function dirStaged(node: DirNode): StagedState | null {
-  const estados = flattenTree(node.children).map((f) => f.staged);
-  if (estados.length === 0 || estados.some((e) => !e)) return null;
-  if (estados.every((e) => e === "staged")) return "staged";
-  if (estados.every((e) => e === "unstaged")) return "unstaged";
+  const states = flattenTree(node.children).map((f) => f.staged);
+  if (states.length === 0 || states.some((e) => !e)) return null;
+  if (states.every((e) => e === "staged")) return "staged";
+  if (states.every((e) => e === "unstaged")) return "unstaged";
   return "partial";
 }
 

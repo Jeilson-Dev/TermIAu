@@ -5,68 +5,70 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { nossoAtalho, type Atalho } from "./atalhos";
-import { iniciar } from "./inicio";
+import { ourShortcut, type Shortcut } from "./shortcuts";
+import { start } from "./startup";
 import { T } from "./i18n/terminal";
-import { idioma } from "./i18n";
-import { configsDe, listaDoPlay, tarefaAntes, tarefasDe, type ConfigLaunch, type Tarefa } from "./run/launch";
-import { linhaDeComando, runnerPara, type Plano } from "./run/runners";
-import { citar, palavra } from "./run/shell";
-import { ESTACOES, type Estacao } from "./estacoes";
+import { language } from "./i18n";
+import { configsOf, playList, taskBefore, tasksOf, type ConfigLaunch, type Task } from "./run/launch";
+import { commandLine, runnerFor, type Plan } from "./run/runners";
+import { quote, word } from "./run/shell";
+import { createPluginHost } from "./plugins/host";
+import { CLOSE_DIALOG_ICON, footerButton, isMarqueeRunning, marquee } from "./ui";
 import {
-  COMANDOS_DO_CLAUDE,
-  filtrarComandos,
-  lerFalas,
-  linhasDePrompt,
-  ladoALado,
-  linhasDoDiff,
+  CLAUDE_COMMANDS,
+  filterCommands,
+  readMessages,
+  promptLines,
+  sideBySide,
+  diffLines,
   markdown,
-  marcarNaLinha,
-  partesDoSeu,
-  provisoriosResolvidos,
-  questoesDe,
-  respostaDoHook,
-  resumoDe,
-  textoDaEscolha,
-  type Comando,
-  type Escolha,
-  type ArquivoDiff,
-  type Fala,
-  type LinhaDiff,
-  type Questao,
-  escapar,
-} from "./conversa";
+  markOnLine,
+  partsOfYour,
+  provisionalResolved,
+  questionsOf,
+  hookAnswer,
+  summaryOf,
+  choiceText,
+  type Command,
+  type Choice,
+  type FileDiff,
+  type Message,
+  type LineDiff,
+  type QuestionItem,
+  escape,
+} from "./conversation";
 import {
-  acharReferencias,
-  ehImagem,
-  ehMarkdown,
-  ehSvg,
-  temRenderizado,
-  linhaLogica,
-  referenciaInteira,
-  type LinhaDaTela,
-  type Referencia,
-} from "./visor";
-import { SEMANA_MIN, SESSAO_MIN, faltaPara, janelaAgora, usoDaStatusLine, type LimitesDaStatusLine, fracaoRestante, limiteDoAutoCompact, nivelDoContexto, nivelDoRitmo, nivelDoUso, type Janela, type LimitesDoContexto, type Nivel, type Uso } from "./uso";
-import { andamentoDoBloco, andamentoDoPlano, type PlanoDaTarefa } from "./progresso";
+  findReferences,
+  isImage,
+  isMarkdown,
+  isSvg,
+  hasRendered,
+  logicalLine,
+  referenceWhole,
+  type ScreenLine,
+  type Reference,
+} from "./viewer";
+import { WEEK_MIN, SESSION_MIN, missingFor, windowNow, statusLineUsage, type StatusLineLimits, remainingFraction, autoCompactLimit, contextLevel, paceLevel, usageLevel, type UsageWindow, type ContextLimits, type Level, type Usage } from "./usage";
+import { blockProgress, planProgress, type TaskPlan } from "./progress";
 import { loadSettings, onSettings, saveViewMode, type Settings } from "./differ/lib/persist";
 import type { ViewMode } from "./differ/types";
+import { fromLegacy, LEGACY_SESSION, LEGACY_USAGE, LEGACY_VIEWER_PREF } from "./legacy";
 import "@xterm/xterm/css/xterm.css";
 import "./style.css";
 
 // Webview console -> process stderr, otherwise JS errors vanish.
 // The HTML `lang` is fixed; the right one is the system's (see src/i18n).
-document.documentElement.lang = idioma();
+document.documentElement.lang = language();
 
 const jlog = (m: string) => invoke("js_log", { msg: m });
 window.addEventListener("error", (e) => jlog(`ERROR ${e.message} @ ${e.filename}:${e.lineno}`));
 window.addEventListener("unhandledrejection", (e) => jlog(`REJECT ${e.reason}`));
 
-const janela = getCurrentWindow();
-const barra = document.getElementById("tabs") as HTMLDivElement;
-const painel = document.getElementById("panes") as HTMLDivElement;
+const appWindow = getCurrentWindow();
+const bar = document.getElementById("tabs") as HTMLDivElement;
+const panel = document.getElementById("panes") as HTMLDivElement;
 
-const OPCOES_TERM = {
+const TERM_OPTIONS = {
   // Same as iTerm2: p10k runs on nerdfont-complete and needs its glyphs,
   // which SF Mono/Menlo don't have — without this the prompt turns into boxes.
   fontFamily: '"MesloLGS NF", Menlo, monospace',
@@ -83,8 +85,8 @@ const OPCOES_TERM = {
   scrollback: 10_000,
   // OSC 8 links (Claude Code writes its own this way), with the same rule
   // as the ones the addon finds in the text.
-  linkHandler: { activate: (e: MouseEvent, uri: string) => abrirLink(e, uri) },
-  // Dracula, from the official spec (https://draculatheme.com/spec) and the ANSI palette
+  linkHandler: { activate: (e: MouseEvent, uri: string) => openLink(e, uri) },
+  // Dracula, from the official spec (https://draculatheme.withTask/spec) and the ANSI palette
   // its terminals use. Without the 16 ANSI colors the theme would be half done: the
   // background would be Dracula and `ls` would keep coming out in xterm's default colors.
   theme: {
@@ -112,330 +114,330 @@ const OPCOES_TERM = {
   },
 } as const;
 
-/// How a split divides the space: "lado" puts panels side by side
-/// (vertical border), "abaixo" stacks them (horizontal border).
-type Eixo = "lado" | "abaixo";
+/// How a split divides the space: "side" puts panels side by side
+/// (vertical border), "below" stacks them (horizontal border).
+type Axis = "side" | "below";
 
 /// A panel: a terminal and its PTY. It is always a leaf of the tab's tree.
-type Folha = {
-  tipo: "folha";
+type Leaf = {
+  kind: "leaf";
   id: number;
   term: Terminal;
   fit: FitAddon;
   el: HTMLDivElement;
-  desligar: UnlistenFn[];
-  titulo: string;
+  turnOff: UnlistenFn[];
+  title: string;
   /// Last grid already reported to the kernel — avoids repeated SIGWINCH for the same size.
-  ultimo: { rows: number; cols: number };
-  pai?: Divisao;
+  lastOne: { rows: number; cols: number };
+  parent?: Split;
   /// The node keeps pointing to its parents after being torn out, so walking up the tree
   /// doesn't tell a dead panel from a live one. This flag does.
-  morta?: boolean;
+  dead?: boolean;
   /// Present while a Claude Code session is running in this panel.
-  claude?: SessaoClaude;
+  claude?: ClaudeSession;
   /// The tree's panels have a bar: title, play, stop, diff.
-  barra?: Barra;
+  bar?: Bar;
   /// The terminal of the app this panel's play button runs.
-  gaveta?: Gaveta;
+  drawer?: Drawer;
   /// In a drawer terminal: the panel that owns it.
-  dono?: Folha;
+  owner?: Leaf;
   /// The app this panel's play button launched, in its drawer.
-  execucao?: Execucao;
+  execution?: Run;
   /// What you sent to Claude in this panel: it is how the terminal finds
-  /// your lines on screen to highlight (see `marcar`).
+  /// your lines on screen to highlight (see `mark`).
   prompts?: string[];
   /// The highlight of each prompt found, by the line it is on.
-  marcas?: Map<string, IDecoration>;
+  marks?: Map<string, IDecoration>;
   /// How the screen was at the last search: what had already gone into scrollback
-  /// doesn't change anymore, and needn't be read again (see `marcar`).
-  vistas?: { base: number; cols: number; prompts: number };
-  esperaMarcas?: ReturnType<typeof setTimeout>;
+  /// doesn't change anymore, and needn't be read again (see `mark`).
+  seenOnes?: { base: number; cols: number; prompts: number };
+  waitMarks?: ReturnType<typeof setTimeout>;
   /// The conversation in bubbles, over the terminal. It exists after the first time
   /// the panel enters chat mode.
   chat?: Chat;
   /// The file shown in the panel, over the terminal and the chat. It exists
-  /// after the first `termiau ver` or ⌘-click on a reference.
-  visor?: Visor;
+  /// after the first `termiau view` or ⌘-click on a reference.
+  viewer?: Viewer;
   /// The file explorer, a drawer over the panel. It exists after the first time it opens.
-  explorador?: Explorador;
+  explorer?: Explorer;
   /// The plan of the long task Claude is doing here, as it published it with
-  /// `termiau progresso`. It shows in the footer, beside the usage.
-  progresso?: PlanoDaTarefa;
+  /// `termiau progress`. It shows in the footer, beside the usage.
+  progress?: TaskPlan;
 };
 
-type SessaoClaude = {
+type ClaudeSession = {
   /// How the voice calls this panel. It is the folder name, not "panel 2": hearing
   /// "MOBILE needs your permission" says where to go; a number doesn't.
-  nome: string;
-  estado: "ocioso" | "trabalhando" | "esperando";
+  name: string;
+  state: "idle" | "working" | "waiting";
   /// The session id, as the hook reports it. It is what `claude --resume` asks for
-  /// to resume it when the tab comes back (see `retomar`).
-  sessao?: string;
+  /// to resume it when the tab comes back (see `resume`).
+  session?: string;
   /// The folder the session was born in: `--resume` only finds it from there.
-  pasta?: string;
+  folder?: string;
   /// The JSONL where Claude Code writes the conversation. Chat mode reads from it.
-  transcricao?: string;
+  transcript?: string;
   /// Why Claude stopped to wait, when the hook said.
-  aviso?: string;
-  /// What the wait asks for. `permissao`: a yes or no, which the chat answers with
+  notice?: string;
+  /// What the wait asks for. `permission`: a yes or no, which the chat answers with
   /// buttons. `terminal`: a menu only the terminal shows (a question's options,
   /// the plan to approve). With nothing, it just waits for the next message —
   /// and the chat field sends that as well as the terminal.
-  pede?: "permissao" | "terminal";
+  asks?: "permission" | "terminal";
   /// A Claude question (`AskUserQuestion`) chat mode can
   /// answer: the hook is waiting for it (see `Pendentes` in lib.rs). The
   /// terminal shows the same question at the same time, and whoever answers first
   /// wins.
-  pergunta?: { id: string; questoes: Questao[] };
+  question?: { id: string; questions: QuestionItem[] };
   /// How much of the context the session has used (0 to 100), from the status line.
-  contexto?: number;
+  context?: number;
   /// The session's model (`display_name`, "Opus 5.5") and effort level
   /// ("high"), also from the status line. A model without effort doesn't send the level.
-  modelo?: string;
-  esforco?: string;
+  model?: string;
+  effort?: string;
   /// Auto-compact already sent `/compact` this time. It only re-arms when the
   /// context drops below the limit — otherwise every status line would send another.
-  compactou?: boolean;
+  compacted?: boolean;
 };
 
 /// The tools whose wait is a menu of options, not a yes or no: the
 /// Enter of "Allow" would pick the first option without you having read it.
-const PEDEM_TERMINAL = new Set(["AskUserQuestion", "ExitPlanMode"]);
+const NEED_TERMINAL = new Set(["AskUserQuestion", "ExitPlanMode"]);
 
 /// The wait resolves without leaving the chat: it is just a missing message, or a
 /// question the chat card answers.
-const atendivelNoChat = (folha: Folha) =>
-  folha.chat?.aberto && (!folha.claude?.pede || folha.claude.pergunta !== undefined);
+const answerableInChat = (leaf: Leaf) =>
+  leaf.chat?.isOpen && (!leaf.claude?.asks || leaf.claude.question !== undefined);
 
 /// A split: two children and the share that goes to the first. Nesting these nodes
 /// gives the layouts iTerm2 makes — splitting an already split panel.
-type Divisao = {
-  tipo: "divisao";
-  eixo: Eixo;
-  fracao: number;
-  filhos: [No, No];
+type Split = {
+  kind: "split";
+  axis: Axis;
+  fraction: number;
+  children: [TreeNode, TreeNode];
   el: HTMLDivElement;
-  pai?: Divisao;
+  parent?: Split;
 };
 
-type No = Folha | Divisao;
+type TreeNode = Leaf | Split;
 
-type Aba = {
-  corpo: HTMLDivElement;
+type Tab = {
+  body: HTMLDivElement;
   chip: HTMLDivElement;
-  rotulo: HTMLSpanElement;
+  label: HTMLSpanElement;
   /// The focused panel's branch, right after the chip's title.
-  ramo: Ramo;
-  raiz: No;
+  branchChip: BranchChip;
+  root: TreeNode;
   /// The panel that gets the keyboard; its title is what the tab shows.
-  foco: Folha;
+  focus: Leaf;
   /// The panel taking the whole tab, with the others hidden for a while.
   /// They stay alive in the tree — restoring brings the layout back as it was.
-  maximizada?: Folha;
+  maximized?: Leaf;
 };
 
 /// The terminal of the app a panel's play button runs: inside the panel, below its
-/// terminal, outside the split tree — and hideable. See `criarGaveta`.
-type Gaveta = {
-  folha: Folha;
+/// terminal, outside the split tree — and hideable. See `createDrawer`.
+type Drawer = {
+  leaf: Leaf;
   el: HTMLDivElement;
-  aberta: boolean;
+  open: boolean;
 };
 
-const abas: Aba[] = [];
-let ativa: Aba | undefined;
-/// A shortcut repeated quickly would fire two concurrent `criarFolha`s, and both
+const tabs: Tab[] = [];
+let active: Tab | undefined;
+/// A shortcut repeated quickly would fire two concurrent `createLeaf`s, and both
 /// would touch the same tree at the same time.
-let ocupado = false;
+let busy = false;
 
 /// The pinned tab: the differ, the branch's diff against the target branch. It lives outside the
-/// `abas` array on purpose — it has no PTY, doesn't split, doesn't close and doesn't leave
+/// `tabs` array on purpose — it has no PTY, doesn't split, doesn't close and doesn't leave
 /// first place. Inside the array, every function that sweeps panels today would
 /// have to ask first whether that tab has any; outside it, none needs to know
 /// it exists.
-type Presa = {
-  corpo: HTMLDivElement;
+type Pinned = {
+  body: HTMLDivElement;
   chip: HTMLDivElement;
-  quadro: HTMLIFrameElement;
+  frame: HTMLIFrameElement;
   /// The differ has mounted and is listening for messages.
-  pronta: boolean;
+  ready: boolean;
   /// Messages given before that. The first click almost always arrives before the
   /// page exists — it only loads when the tab is opened for the first time.
-  fila: unknown[];
+  queue: unknown[];
   /// There is a repository open in there. The differ itself says so, since it
   /// knows whether opening worked: sending a panel's cwd doesn't guarantee that the
   /// folder is a repository.
-  repoAberto: boolean;
+  repoOpen: boolean;
 };
-let presa: Presa | undefined;
+let pinned: Pinned | undefined;
 /// The root of the repository open in the diff, as the differ reports it. It is how
 /// that project's panels light up the diff button: the diff is of a
 /// repository, not a panel, and two panels may belong to the same one.
-let repoDoDiff: string | null = null;
-/// True while the pinned tab is the one on screen. `ativa` keeps
+let diffRepo: string | null = null;
+/// True while the pinned tab is the one on screen. `active` keeps
 /// pointing to the terminal we came from — that is where we go back.
-let noDiff = false;
+let inDiff = false;
 
 // ---------- tree ----------
 
-function* folhas(no: No): Generator<Folha> {
-  if (no.tipo === "folha") yield no;
-  else for (const f of no.filhos) yield* folhas(f);
+function* leaves(no: TreeNode): Generator<Leaf> {
+  if (no.kind === "leaf") yield no;
+  else for (const f of no.children) yield* leaves(f);
 }
 
 /// Walks up to the root and finds out whose it is. Avoids storing the tab in every
 /// leaf, which would create an annoying cycle to set up when creating the first one.
-function abaDe(no: No): Aba | undefined {
+function tabOf(no: TreeNode): Tab | undefined {
   // A drawer's terminal isn't in the tree: its tab is the owner's.
-  if (no.tipo === "folha" && no.dono) return abaDe(no.dono);
-  let raiz = no;
-  while (raiz.pai) raiz = raiz.pai;
-  return abas.find((a) => a.raiz === raiz);
+  if (no.kind === "leaf" && no.owner) return tabOf(no.owner);
+  let root = no;
+  while (root.parent) root = root.parent;
+  return tabs.find((a) => a.root === root);
 }
 
 /// The panels on screen: the tree's, and the open drawers. Hidden,
-/// a drawer keeps its last size, like a hidden tab (see `ativar`).
-function* visiveis(aba: Aba): Generator<Folha> {
+/// a drawer keeps its last size, like a hidden tab (see `activate`).
+function* visibleOnes(tab: Tab): Generator<Leaf> {
   // Maximized, only it is on screen. The hidden ones keep the grid they had,
   // like a hidden tab: no measuring, no SIGWINCH to zero.
-  for (const f of aba.maximizada ? [aba.maximizada] : folhas(aba.raiz)) {
+  for (const f of tab.maximized ? [tab.maximized] : leaves(tab.root)) {
     // The drawer before its owner: it is inside the owner's element, and whoever looks for
-    // the panel under the pointer (`folhaEm`) has to find it first.
-    if (f.gaveta?.aberta) yield f.gaveta.folha;
+    // the panel under the pointer (`leafIn`) has to find it first.
+    if (f.drawer?.open) yield f.drawer.leaf;
     yield f;
   }
 }
 
 /// Swaps one child for another, keeping the position — it is what preserves the order of
 /// the grid tracks, which decides which panel goes on which side.
-function trocarFilho(pai: Divisao, velho: No, novo: No) {
-  pai.filhos[pai.filhos[0] === velho ? 0 : 1] = novo;
-  novo.pai = pai;
+function switchChild(parent: Split, older: TreeNode, fresh: TreeNode) {
+  parent.children[parent.children[0] === older ? 0 : 1] = fresh;
+  fresh.parent = parent;
 }
 
 /// The grid has three tracks: first child, gap, second child. The gap's
-/// thickness is style.css's `--vao` — the same measure that keeps the panel cards
+/// thickness is style.css's `--gap` — the same measure that keeps the panel cards
 /// apart from each other and from the window's edge.
-function aplicarFracao(d: Divisao) {
-  const tracks = `${d.fracao}fr var(--vao) ${1 - d.fracao}fr`;
-  d.el.style.gridTemplate = d.eixo === "lado" ? `1fr / ${tracks}` : `${tracks} / 1fr`;
+function applyFraction(d: Split) {
+  const tracks = `${d.fraction}fr var(--gap) ${1 - d.fraction}fr`;
+  d.el.style.gridTemplate = d.axis === "side" ? `1fr / ${tracks}` : `${tracks} / 1fr`;
 }
 
 // ---------- measuring ----------
 
 /// Redoes the grid of every visible panel in the tab from its size on screen.
 /// Local drawing only: doesn't talk to the kernel.
-function medir(aba: Aba) {
-  for (const f of visiveis(aba)) {
+function measure(tab: Tab) {
+  for (const f of visibleOnes(tab)) {
     f.fit.fit();
     // Splitting, closing and switching tabs move the panel out of place (or off screen), and
     // the browser resets the scroll of whatever goes through that.
-    if (f.chat?.aberto) reporRolagem(f.chat);
+    if (f.chat?.isOpen) restoreScroll(f.chat);
   }
 }
 
 /// Tells the kernel the grids that actually changed, so the TUI redraws correctly.
-function sincronizar(aba: Aba) {
-  for (const f of visiveis(aba)) {
-    if (f.term.rows === f.ultimo.rows && f.term.cols === f.ultimo.cols) continue;
-    f.ultimo = { rows: f.term.rows, cols: f.term.cols };
-    invoke("pty_resize", { id: f.id, ...f.ultimo }).catch((e) => jlog(`pty_resize: ${e}`));
+function sync(tab: Tab) {
+  for (const f of visibleOnes(tab)) {
+    if (f.term.rows === f.lastOne.rows && f.term.cols === f.lastOne.cols) continue;
+    f.lastOne = { rows: f.term.rows, cols: f.term.cols };
+    invoke("pty_resize", { id: f.id, ...f.lastOne }).catch((e) => jlog(`pty_resize: ${e}`));
   }
 }
 
-let pendente: ReturnType<typeof setTimeout> | undefined;
+let pendingItem: ReturnType<typeof setTimeout> | undefined;
 /// A single SIGWINCH, when the drag stops. Without this the shell redraws the prompt
 /// every frame (~45 times in a drag), which looks like a new shell.
-function agendarSync(aba: Aba) {
-  clearTimeout(pendente);
-  pendente = setTimeout(() => {
+function scheduleSync(tab: Tab) {
+  clearTimeout(pendingItem);
+  pendingItem = setTimeout(() => {
     // Re-measure before comparing: what counted during the drag was each
     // frame's layout, and the last one may have caught the window in the middle of an
     // animation. The settled layout is what rules.
-    medir(aba);
-    sincronizar(aba);
+    measure(tab);
+    sync(tab);
   }, 80);
 }
 
-// ---------- foco ----------
+// ---------- focus ----------
 
-function focar(folha: Folha) {
-  const aba = abaDe(folha);
-  if (!aba) return;
+function focusLeaf(leaf: Leaf) {
+  const tab = tabOf(leaf);
+  if (!tab) return;
   // Going to a hidden panel (⌘⇧A, one waiting for you) means wanting to see it:
   // the layout comes back first. The maximized panel's drawer is on screen, and stays.
-  const dono = folha.dono ?? folha;
-  if (aba.maximizada && aba.maximizada !== dono) recolher(aba);
-  aba.foco.el.classList.remove("focada");
-  aba.foco = folha;
-  folha.el.classList.add("focada");
-  teclado(folha);
-  rotular(aba);
+  const owner = leaf.owner ?? leaf;
+  if (tab.maximized && tab.maximized !== owner) collapse(tab);
+  tab.focus.el.classList.remove("focused");
+  tab.focus = leaf;
+  leaf.el.classList.add("focused");
+  keyboard(leaf);
+  rotular(tab);
   // Looking at the panel is attending to it: the notice has done its job. In chat mode
   // too, if what is missing is a message; a permission request or a menu
   // stays lit until answered (through the notice's buttons or in the terminal).
-  if (folha.claude?.estado === "esperando" && (!folha.chat?.aberto || atendivelNoChat(folha))) {
-    folha.claude.estado = "ocioso";
+  if (leaf.claude?.state === "waiting" && (!leaf.chat?.isOpen || answerableInChat(leaf))) {
+    leaf.claude.state = "idle";
   }
-  pintar();
+  paint();
 }
 
-function rotular(aba: Aba) {
-  aba.rotulo.textContent = aba.foco.titulo;
-  aba.chip.title = aba.foco.titulo;
-  mostrarRamos(aba);
-  if (aba === ativa && !noDiff) janela.setTitle(`${aba.foco.titulo} — TermIAu`).catch(() => {});
+function rotular(tab: Tab) {
+  tab.label.textContent = tab.focus.title;
+  tab.chip.title = tab.focus.title;
+  showBranches(tab);
+  if (tab === active && !inDiff) appWindow.setTitle(`${tab.focus.title} — TermIAu`).catch(() => {});
 }
 
-function ativar(aba: Aba) {
-  esconderPresa();
-  ativa = aba;
-  for (const a of abas) {
-    const atual = a === aba;
-    a.corpo.hidden = !atual;
-    a.chip.classList.toggle("ativa", atual);
+function activate(tab: Tab) {
+  hidePinned();
+  active = tab;
+  for (const a of tabs) {
+    const current = a === tab;
+    a.body.hidden = !current;
+    a.chip.classList.toggle("active", current);
   }
   // The tab was hidden (zero size) and may have missed window resizes
   // in the meantime: re-measure now, before giving focus back.
-  medir(aba);
-  sincronizar(aba);
+  measure(tab);
+  sync(tab);
   // A branch that arrived with the tab hidden measured zero and didn't start scrolling.
-  for (const f of visiveis(aba)) if (f.barra) repassear(f.barra.ramo);
-  teclado(aba.foco);
-  rotular(aba);
-  agendarSalvar();
+  for (const f of visibleOnes(tab)) if (f.bar) repass(f.bar.branchChip);
+  keyboard(tab.focus);
+  rotular(tab);
+  scheduleSave();
 }
 
 // ---------- creation ----------
 
-/// Opens a shell and returns its panel. `inserir` puts the element in its
+/// Opens a shell and returns its panel. `insert` puts the element in its
 /// final place BEFORE we measure: off screen the grid would come out zeroed, and it is
 /// what goes into the spawn.
 ///
-/// `comBarra`: the tree's panels have their bar (title, play, diff); a
+/// `withBar`: the tree's panels have their bar (title, play, diff); a
 /// drawer's terminal doesn't — the owner's bar controls it.
-async function criarFolha(
+async function createLeaf(
   cwd: string | null,
-  inserir: (el: HTMLDivElement) => void,
-  comBarra = true,
-): Promise<Folha | undefined> {
+  insert: (el: HTMLDivElement) => void,
+  withBar = true,
+): Promise<Leaf | undefined> {
   const el = document.createElement("div");
-  el.className = "folha";
-  const barra = comBarra ? criarBarra() : undefined;
+  el.className = "leaf";
+  const bar = withBar ? createBar() : undefined;
   // The terminal lives in an element of its own: the panel also carries the bar on top and,
-  // when play runs something, the drawer below. Inside it, `folha-tela` holds
+  // when play runs something, the drawer below. Inside it, `leaf-screen` holds
   // the terminal and the chat; the split viewer sits beside it, not on top.
-  const host = elemento("div", "folha-termo");
-  const tela = elemento("div", "folha-tela");
-  host.append(tela);
-  if (barra) el.append(barra.el);
+  const host = element("div", "leaf-term");
+  const screen = element("div", "leaf-screen");
+  host.append(screen);
+  if (bar) el.append(bar.el);
   el.append(host);
-  inserir(el);
+  insert(el);
 
-  const term = new Terminal(OPCOES_TERM);
+  const term = new Terminal(TERM_OPTIONS);
   const fit = new FitAddon();
   term.loadAddon(fit);
-  term.loadAddon(new WebLinksAddon((e, uri) => abrirLink(e, uri)));
+  term.loadAddon(new WebLinksAddon((e, uri) => openLink(e, uri)));
   term.attachCustomKeyEventHandler((e) => {
     // ⇧↩ inserts a newline instead of sending: xterm sends the same `\r` as Enter,
     // so it sends `ESC ↩`, which Claude reads as a new line (and zsh too).
@@ -443,9 +445,9 @@ async function criarFolha(
       if (e.type === "keydown") term.input("\x1b\r");
       return false;
     }
-    return !nossoAtalho(e);
+    return !ourShortcut(e);
   });
-  term.open(tela);
+  term.open(screen);
   fit.fit();
 
   let id: number;
@@ -458,81 +460,81 @@ async function criarFolha(
     return;
   }
 
-  const folha: Folha = {
-    tipo: "folha",
+  const leaf: Leaf = {
+    kind: "leaf",
     id,
     term,
     fit,
     el,
-    desligar: [],
-    titulo: "shell",
-    ultimo: { rows: term.rows, cols: term.cols },
-    barra,
+    turnOff: [],
+    title: "shell",
+    lastOne: { rows: term.rows, cols: term.cols },
+    bar,
   };
 
   // Clicking a panel sends the keyboard to it, no shortcut needed. The drawer
   // sits inside the panel, but a click on it is its own: it has its own focus.
   el.addEventListener("mousedown", (e) => {
-    if (folha.gaveta?.el.contains(e.target as Node)) return;
+    if (leaf.drawer?.el.contains(e.target as Node)) return;
     // With the split viewer, the keyboard stays on the side you clicked.
-    if (folha.visor) folha.visor.comTeclado = folha.visor.el.contains(e.target as Node);
-    focar(folha);
+    if (leaf.viewer) leaf.viewer.withKeyboard = leaf.viewer.el.contains(e.target as Node);
+    focusLeaf(leaf);
   });
-  ligarBarra(folha);
-  ligarLinksDeArquivo(folha);
+  wireBar(leaf);
+  wireFileLinks(leaf);
 
   // PTY -> screen. Rust sends base64 so as not to break UTF-8 in the middle of a chunk.
-  folha.desligar.push(
+  leaf.turnOff.push(
     await listen<string>(`pty://data/${id}`, (e) => {
       const bin = atob(e.payload);
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       // Claude redraws the screen whenever it wants, and the highlight of your prompts
       // has to follow the lines: redo it after each batch of output.
-      term.write(bytes, () => agendarMarcas(folha));
+      term.write(bytes, () => scheduleMarks(leaf));
     }),
   );
   // The shell ended on its own — ⌃D, `exit`, crash: the panel goes with it.
-  folha.desligar.push(
-    await listen(`pty://exit/${id}`, () => fecharFolha(folha, { jaMorto: true })),
+  leaf.turnOff.push(
+    await listen(`pty://exit/${id}`, () => closeLeaf(leaf, { alreadyDead: true })),
   );
 
   // Only now does Rust start pumping: an event emitted before this point
   // would have no one listening and the start of the prompt would be lost.
   await invoke("pty_attach", { id });
 
-  // screen -> PTY. `onData` is user input: dictation goes in through `pty_write`
-  // directly and doesn't pass here, so typing is distinguishable from speaking.
+  // screen -> PTY. `onData` is user input: plugins (dictation) write through
+  // `pty_write` directly and don't pass here, so typing is distinguishable from speaking.
   term.onData((data) => {
-    cancelarEnvio();
+    for (const listener of userInputListeners) listener();
     // Touching the panel is attending to it, as much as clicking it: the
-    // "waiting" notice stops blinking on the first key. `focar` only covers whoever
+    // "waiting" notice stops blinking on the first key. `focusLeaf` only covers whoever
     // arrives at the panel; whoever was already on it types directly.
-    if (folha.claude?.estado === "esperando" && !RESPOSTA_DO_TERMINAL.test(data)) {
-      folha.claude.estado = "ocioso";
-      pintar();
+    if (leaf.claude?.state === "waiting" && !TERMINAL_ANSWER.test(data)) {
+      leaf.claude.state = "idle";
+      paint();
     }
     // Esc alone interrupts Claude, and when interrupted it doesn't send `Stop`.
-    if (data === "\x1b" && folha.claude?.estado === "trabalhando") {
-      folha.claude.estado = "ocioso";
-      pintar();
+    if (data === "\x1b" && leaf.claude?.state === "working") {
+      leaf.claude.state = "idle";
+      paint();
     }
     invoke("pty_write", { id, data }).catch((e) => jlog(`pty_write: ${e}`));
   });
   // The prompt (p10k, zsh) publishes the directory via OSC; it is the tab's title.
   term.onTitleChange((t) => {
-    folha.titulo = t || "shell";
-    const aba = abaDe(folha);
-    if (aba?.foco === folha) rotular(aba);
+    leaf.title = t || "shell";
+    const tab = tabOf(leaf);
+    if (tab?.focus === leaf) rotular(tab);
     // The bar shows the title, and a `cd` may have changed project.
-    desenharBarra(folha);
-    agendarProjeto(folha);
+    drawBar(leaf);
+    scheduleProject(leaf);
   });
 
-  desenharBarra(folha);
-  desenharMaximizar(folha);
-  agendarProjeto(folha);
-  return folha;
+  drawBar(leaf);
+  drawMaximize(leaf);
+  scheduleProject(leaf);
+  return leaf;
 }
 
 /// xterm's `onData` doesn't only carry what you type: the terminal itself
@@ -540,41 +542,41 @@ async function criarFolha(
 /// terminal attributes, the mouse, colors. None of that is you touching the panel.
 /// Focus matters most: switching tabs sends an "I left", and without this filter
 /// leaving a waiting panel would clear its notice.
-const RESPOSTA_DO_TERMINAL = /^\x1b(?:\[[IO]$|\[[?>=]?[\d;]*[Rcnty]$|\[<|\[M|[\]P_])/;
+const TERMINAL_ANSWER = /^\x1b(?:\[[IO]$|\[[?>=]?[\d;]*[Rcnty]$|\[<|\[M|[\]P_])/;
 
 /// How long the ✕ stays armed waiting for the second click. Short on purpose:
 /// it is a confirmation, not a mode — past that, the tab goes back to being a tab.
-const CONFIRMA_FECHAR = 1000;
+const CONFIRM_CLOSE = 1000;
 
 /// How to disarm the tab that is armed now, if any. Two tabs in
 /// red at the same time would say both are closing, and only one is: arming
 /// one disarms the other.
-let desarmarFechar: (() => void) | undefined;
+let disarmClose: (() => void) | undefined;
 
-/// `em`: the folder the tab opens in, for callers who already know it — a tab
-/// coming back (see `reabrir`). Without it, the focused panel's applies.
-async function novaAba(em?: string | null): Promise<Aba | undefined> {
-  if (ocupado) return;
-  ocupado = true;
+/// `at`: the folder the tab opens in, for callers who already know it — a tab
+/// coming back (see `reopen`). Without it, the focused panel's applies.
+async function newTab(at?: string | null): Promise<Tab | undefined> {
+  if (busy) return;
+  busy = true;
   try {
     // A new tab opens where the focused panel is, like in other terminals. Rust
     // falls back to HOME on its own if it can't find out (deleted folder, for example).
     const cwd =
-      em !== undefined ? em : ativa ? await invoke<string | null>("pty_cwd", { id: ativa.foco.id }) : null;
+      at !== undefined ? at : active ? await invoke<string | null>("pty_cwd", { id: active.focus.id }) : null;
 
-    const corpo = document.createElement("div");
-    corpo.className = "aba";
-    painel.appendChild(corpo);
+    const body = document.createElement("div");
+    body.className = "tab-body";
+    panel.appendChild(body);
     // Measure in the final place: with the previous tab still visible, the two
     // would split the area and the grid would come out at half height.
-    esconderPresa();
-    if (ativa) ativa.corpo.hidden = true;
+    hidePinned();
+    if (active) active.body.hidden = true;
 
-    const folha = await criarFolha(cwd, (el) => corpo.appendChild(el));
-    if (!folha) {
+    const leaf = await createLeaf(cwd, (el) => body.appendChild(el));
+    if (!leaf) {
       // No shell, no tab: undo and give the screen back to whatever was open.
-      corpo.remove();
-      if (ativa) ativa.corpo.hidden = false;
+      body.remove();
+      if (active) active.body.hidden = false;
       return;
     }
 
@@ -582,84 +584,84 @@ async function novaAba(em?: string | null): Promise<Aba | undefined> {
     chip.className = "tab";
     // Claude's status dot; stays transparent while there is no session.
     const sinal = document.createElement("span");
-    sinal.className = "tab-sinal";
-    const rotulo = document.createElement("span");
-    rotulo.className = "tab-titulo";
-    rotulo.textContent = folha.titulo;
-    const ramo = criarRamo("tab-ramo");
-    const fechar = document.createElement("span");
-    fechar.className = "tab-fechar";
+    sinal.className = "tab-dot";
+    const label = document.createElement("span");
+    label.className = "tab-title";
+    label.textContent = leaf.title;
+    const branchChip = createBranchChip("tab-branch");
+    const close = document.createElement("span");
+    close.className = "tab-close";
     // The "+" of the new tab, turned: the same stroke and size, where the "✕" glyph came out small.
-    fechar.innerHTML = ICONE_FECHAR_ABA;
-    chip.append(sinal, rotulo, ramo.el, fechar);
-    barra.appendChild(chip);
+    close.innerHTML = ICON_CLOSE_TAB;
+    chip.append(sinal, label, branchChip.el, close);
+    bar.appendChild(chip);
 
-    const aba: Aba = { corpo, chip, rotulo, ramo, raiz: folha, foco: folha };
-    folha.el.classList.add("focada");
+    const tab: Tab = { body, chip, label, branchChip, root: leaf, focus: leaf };
+    leaf.el.classList.add("focused");
 
     // Closing a tab has no undo: the shell dies with it, and with it whatever was
     // running there. That is why ✕ asks twice — the first click only lights the
     // red ring, the notice that it is THIS tab going away, and the
-    // second, within CONFIRMA_FECHAR, is what closes it. Without the second, the ring
+    // second, within CONFIRM_CLOSE, is what closes it. Without the second, the ring
     // fades on its own and nothing happened.
-    let espera: ReturnType<typeof setTimeout> | undefined;
-    const desarmar = () => {
-      if (espera === undefined) return;
-      clearTimeout(espera);
-      espera = undefined;
+    let wait: ReturnType<typeof setTimeout> | undefined;
+    const disarm = () => {
+      if (wait === undefined) return;
+      clearTimeout(wait);
+      wait = undefined;
       chip.classList.remove("armada");
-      if (desarmarFechar === desarmar) desarmarFechar = undefined;
+      if (disarmClose === disarm) disarmClose = undefined;
     };
 
     chip.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return;
       // ✕ closes the whole tab; on the rest of the chip, it only activates.
-      if (e.target === fechar) {
+      if (e.target === close) {
         // Second click within the window: that is what they really wanted.
-        if (espera !== undefined) {
-          desarmar();
-          fecharAba(aba);
+        if (wait !== undefined) {
+          disarm();
+          closeTab(tab);
           return;
         }
-        desarmarFechar?.();
+        disarmClose?.();
         chip.classList.add("armada");
-        espera = setTimeout(desarmar, CONFIRMA_FECHAR);
-        desarmarFechar = desarmar;
+        wait = setTimeout(disarm, CONFIRM_CLOSE);
+        disarmClose = disarm;
       } else {
         // Clicked the chip, not ✕: changed their mind about closing.
-        desarmar();
-        ativar(aba);
+        disarm();
+        activate(tab);
       }
     });
     // Middle button closes, like in the browser. It is a gesture nobody makes by
     // accident, so this one skips the confirmation.
     chip.addEventListener("auxclick", (e) => {
       if (e.button !== 1) return;
-      desarmar();
-      fecharAba(aba);
+      disarm();
+      closeTab(tab);
     });
 
-    abas.push(aba);
-    ligarArrasto(aba);
-    sincronizarBarra();
-    ativar(aba);
-    return aba;
+    tabs.push(tab);
+    wireDragging(tab);
+    syncBar();
+    activate(tab);
+    return tab;
   } finally {
-    ocupado = false;
+    busy = false;
   }
 }
 
-function sincronizarBarra() {
+function syncBar() {
   // With the pinned tab in the bar there are always two chips, so it no longer
   // hides. That was the price of the diff always being one click away.
-  barra.hidden = !presa && abas.length < 2;
+  bar.hidden = !pinned && tabs.length < 2;
 }
 
 // ---------- reordenar abas ----------
 
 /// How far the pointer must move for the intent to become a drag. Without this
 /// slack, a click with a shaky hand would reorder the bar unasked.
-const LIMIAR_ARRASTO = 4;
+const DRAG_THRESHOLD = 4;
 
 /// Dragging a chip along the bar moves the tab — and the array order is the
 /// same one ⌘1..⌘9 and ⌘⇧[ use, so moving here moves it everywhere.
@@ -668,59 +670,59 @@ const LIMIAR_ARRASTO = 4;
 /// dragging, the neighbors stay where they were and serve as a ruler. The swap
 /// happens as soon as the chip's center passes a neighbor's center, so the
 /// bar reorders during the drag, not only on release.
-function ligarArrasto(aba: Aba) {
-  const chip = aba.chip;
+function wireDragging(tab: Tab) {
+  const chip = tab.chip;
 
   chip.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
     // ✕ is a button, not a handle: whoever presses there wants to close, not move.
-    if ((e.target as HTMLElement).classList.contains("tab-fechar")) return;
+    if ((e.target as HTMLElement).classList.contains("tab-close")) return;
 
     // Point from which the offset is counted. It changes on every swap, because the chip
     // gets a new position in the layout and the `transform` must be discounted
     // from it so the chip doesn't jump on screen.
-    let origem = e.clientX;
-    let arrastando = false;
+    let source = e.clientX;
+    let dragging = false;
 
     const mover = (ev: PointerEvent) => {
-      if (!arrastando) {
-        if (Math.abs(ev.clientX - origem) < LIMIAR_ARRASTO || abas.length < 2) return;
-        arrastando = true;
-        chip.classList.add("arrastando");
+      if (!dragging) {
+        if (Math.abs(ev.clientX - source) < DRAG_THRESHOLD || tabs.length < 2) return;
+        dragging = true;
+        chip.classList.add("dragging");
       }
-      chip.style.transform = `translateX(${ev.clientX - origem}px)`;
+      chip.style.transform = `translateX(${ev.clientX - source}px)`;
 
       // Only the two neighbors matter: to reach the third you have to pass
       // the second, and by then the swap with it has already happened.
-      const i = abas.indexOf(aba);
-      const centro = meio(chip);
-      let alvo: Aba | undefined;
-      if (abas[i - 1] && centro < meio(abas[i - 1].chip)) alvo = abas[i - 1];
-      else if (abas[i + 1] && centro > meio(abas[i + 1].chip)) alvo = abas[i + 1];
-      if (!alvo) return;
+      const i = tabs.indexOf(tab);
+      const center = meio(chip);
+      let target: Tab | undefined;
+      if (tabs[i - 1] && center < meio(tabs[i - 1].chip)) target = tabs[i - 1];
+      else if (tabs[i + 1] && center > meio(tabs[i + 1].chip)) target = tabs[i + 1];
+      if (!target) return;
 
-      const antes = chip.getBoundingClientRect().left;
-      const j = abas.indexOf(alvo);
-      abas[i] = alvo;
-      abas[j] = aba;
-      barra.insertBefore(chip, j < i ? alvo.chip : alvo.chip.nextSibling);
+      const before = chip.getBoundingClientRect().left;
+      const j = tabs.indexOf(target);
+      tabs[i] = target;
+      tabs[j] = tab;
+      bar.insertBefore(chip, j < i ? target.chip : target.chip.nextSibling);
       // Both measurements carry the same `transform`, so the difference between
       // them is only how much the layout moved — which is what the origin absorbs.
-      origem += chip.getBoundingClientRect().left - antes;
-      chip.style.transform = `translateX(${ev.clientX - origem}px)`;
+      source += chip.getBoundingClientRect().left - before;
+      chip.style.transform = `translateX(${ev.clientX - source}px)`;
     };
 
-    const soltar = () => {
+    const release = () => {
       window.removeEventListener("pointermove", mover);
-      chip.classList.remove("arrastando");
+      chip.classList.remove("dragging");
       chip.style.transform = "";
       // The bar's order is the order in which the tabs come back.
-      agendarSalvar();
+      scheduleSave();
     };
 
     window.addEventListener("pointermove", mover);
-    window.addEventListener("pointerup", soltar, { once: true });
-    window.addEventListener("pointercancel", soltar, { once: true });
+    window.addEventListener("pointerup", release, { once: true });
+    window.addEventListener("pointercancel", release, { once: true });
   });
 }
 
@@ -731,195 +733,195 @@ function meio(el: HTMLElement): number {
   return r.left + r.width / 2;
 }
 
-// ---------- aba presa: o diff ----------
+// ---------- aba pinned: o diff ----------
 
 /// The chip's icon. The pinned tab shows no text: it is always in the bar, and
 /// a 180px chip reading "Diff" would compete for space with the name of what
 /// you are running — which is the information that changes.
-const ICONE_DIFF = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>`;
+const ICON_DIFF = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/></svg>`;
 
 /// Builds the pinned tab. Called before the first terminal tab: that is how its
 /// chip ends up as the bar's first child, out of reach of any drag —
-/// `ligarArrasto` only reorders what is in the `abas` array, and it isn't there.
+/// `wireDragging` only reorders what is in the `tabs` array, and it isn't there.
 ///
 /// The differ goes in an <iframe>, not mounted here in the document: its CSS is
 /// global (it touches `body`, `button`, the scrollbar) and its shortcuts
 /// are single keys. In a separate document, none of that reaches the terminal —
 /// and Tauri's IPC crosses over because the origin is the same (see ponte.ts).
-function criarPresa() {
-  const corpo = document.createElement("div");
-  corpo.className = "aba";
-  corpo.hidden = true;
-  const quadro = document.createElement("iframe");
-  quadro.className = "quadro";
-  quadro.src = "/differ.html";
+function createPinned() {
+  const body = document.createElement("div");
+  body.className = "tab-body";
+  body.hidden = true;
+  const frame = document.createElement("iframe");
+  frame.className = "frame";
+  frame.src = "/differ.html";
   // The iframe goes inside a frame, not loose in the tab: the card's rounded
   // corner doesn't clip an iframe's content in WebKit — what clips is a plain
   // element with `overflow:hidden` around it.
-  const moldura = elemento("div", "moldura");
-  moldura.appendChild(quadro);
-  corpo.appendChild(moldura);
-  painel.appendChild(corpo);
+  const outline = element("div", "outline");
+  outline.appendChild(frame);
+  body.appendChild(outline);
+  panel.appendChild(body);
 
   const chip = document.createElement("div");
-  chip.className = "tab presa";
-  chip.title = T.diffDaBranch;
-  chip.innerHTML = ICONE_DIFF;
-  barra.appendChild(chip);
+  chip.className = "tab pinned";
+  chip.title = T.branchDiff;
+  chip.innerHTML = ICON_DIFF;
+  bar.appendChild(chip);
   chip.addEventListener("mousedown", (e) => {
-    if (e.button === 0) abrirPresa();
+    if (e.button === 0) openPinned();
   });
 
-  presa = { corpo, chip, quadro, pronta: false, fila: [], repoAberto: false };
-  habilitarPresa(null);
+  pinned = { body, chip, frame, ready: false, queue: [], repoOpen: false };
+  enablePinned(null);
 }
 
 /// Lights up or dims the diff chip. A tab that can only show a blank screen
 /// doesn't open: while there is no repository, the chip stays dimmed and clicking
 /// it does nothing.
-function habilitarPresa(raiz: string | null) {
-  if (!presa) return;
-  presa.repoAberto = !!raiz;
-  repoDoDiff = raiz;
-  presa.chip.classList.toggle("desabilitada", !raiz);
+function enablePinned(root: string | null) {
+  if (!pinned) return;
+  pinned.repoOpen = !!root;
+  diffRepo = root;
+  pinned.chip.classList.toggle("disabled", !root);
   // Lit in the same color as the diff button of the panel the repository came from: the
   // two icons lit at the same time are what links one place to the other.
-  presa.chip.classList.toggle("ligado", !!raiz);
-  const nome = raiz?.split("/").filter(Boolean).pop();
-  presa.chip.title = raiz
-    ? T.diffDe(nome ?? T.repositorio)
-    : T.nenhumRepositorio;
+  pinned.chip.classList.toggle("on", !!root);
+  const name = root?.split("/").filter(Boolean).pop();
+  pinned.chip.title = root
+    ? T.diffOf(name ?? T.repository)
+    : T.noRepository;
   // Each panel's diff button says whether that project is the one in there,
   // and what is in there just changed.
-  for (const a of abas) for (const f of folhas(a.raiz)) desenharBarra(f);
+  for (const a of tabs) for (const f of leaves(a.root)) drawBar(f);
 }
 
 /// The panel is in the repository the diff shows. It compares the two roots, not the
 /// folder against the root: a panel inside a submodule is in another
 /// repository, even though it is inside this one's folder.
-function noRepoDoDiff(b: Barra): boolean {
-  return !!repoDoDiff && b.repo === repoDoDiff;
+function inDiffRepo(b: Bar): boolean {
+  return !!diffRepo && b.repo === diffRepo;
 }
 
 /// Talks to the differ page, storing the message if it hasn't loaded yet.
-function recado(msg: unknown) {
-  if (!presa) return;
-  if (presa.pronta) presa.quadro.contentWindow?.postMessage(msg, "*");
-  else presa.fila.push(msg);
+function flash(msg: unknown) {
+  if (!pinned) return;
+  if (pinned.ready) pinned.frame.contentWindow?.postMessage(msg, "*");
+  else pinned.queue.push(msg);
 }
 
 /// A Claude session running in a panel, as the diff tab sees it: where to send a review request.
-type SessaoViva = { painel: number; sessao: string; nome: string; titulo: string; pasta: string; estado: SessaoClaude["estado"] };
+type LiveSession = { panel: number; session: string; name: string; title: string; folder: string; state: ClaudeSession["state"] };
 
-function sessoesVivas(): SessaoViva[] {
-  const lista: SessaoViva[] = [];
-  for (const a of abas) {
-    for (const f of folhas(a.raiz)) {
+function sessionsLive(): LiveSession[] {
+  const list: LiveSession[] = [];
+  for (const a of tabs) {
+    for (const f of leaves(a.root)) {
       const c = f.claude;
-      if (!c?.sessao || f.morta) continue;
+      if (!c?.session || f.dead) continue;
       // Claude Code puts a spinner in front of the title while it works.
-      const titulo = f.titulo.replace(/^[^\p{L}\p{N}]+/u, "");
-      lista.push({ painel: f.id, sessao: c.sessao, nome: c.nome, titulo, pasta: c.pasta ?? "", estado: c.estado });
+      const title = f.title.replace(/^[^\p{L}\p{N}]+/u, "");
+      list.push({ panel: f.id, session: c.session, name: c.name, title, folder: c.folder ?? "", state: c.state });
     }
   }
-  return lista;
+  return list;
 }
 
 /// The diff tab keeps the list in its session menu; it only goes out when something in it changed.
-let sessoesAvisadas = "";
-function avisarSessoes(forcar = false) {
-  const lista = sessoesVivas();
-  const chave = JSON.stringify(lista);
-  if (!forcar && chave === sessoesAvisadas) return;
-  sessoesAvisadas = chave;
-  recado({ termiauSessoesVivas: lista });
+let sessionsNotified = "";
+function notifySessions(force = false) {
+  const list = sessionsLive();
+  const key = JSON.stringify(list);
+  if (!force && key === sessionsNotified) return;
+  sessionsNotified = key;
+  flash({ termiauLiveSessions: list });
 }
 
 /// A change asked from the diff tab goes to the session as if typed in its panel: the paste
 /// way (several lines as one block), and Enter after, on its own. A session waiting for a yes or no
 /// would take the paste as the answer — that one is refused.
-function pedirNaSessao(painel: number, texto: string): string | null {
-  const folha = folhaPorPainel(painel);
-  if (!folha?.claude?.sessao || folha.morta) return T.sessaoNaoEstaMaisAberta;
-  if (folha.claude.estado === "esperando") return T.sessaoEsperandoVoce(folha.claude.nome);
-  colar(folha, texto);
+function askInSession(panel: number, text: string): string | null {
+  const leaf = leafByPanel(panel);
+  if (!leaf?.claude?.session || leaf.dead) return T.sessionNoLongerOpen;
+  if (leaf.claude.state === "waiting") return T.sessionWaitingForYou(leaf.claude.name);
+  paste(leaf, text);
   setTimeout(() => {
-    invoke("pty_write", { id: folha.id, data: "\r" }).catch((err) => jlog(`review send: ${err}`));
+    invoke("pty_write", { id: leaf.id, data: "\r" }).catch((err) => jlog(`review send: ${err}`));
   }, 80);
-  folha.claude.estado = "trabalhando";
-  pintar();
+  leaf.claude.state = "working";
+  paint();
   return null;
 }
 
 /// Takes the panel's repository to the diff tab and brings it to the front.
-async function abrirDiff(folha: Folha) {
+async function openDiff(leaf: Leaf) {
   // Forced: this click is what will give it a repository.
-  abrirPresa(true);
-  const cwd = await invoke<string | null>("pty_cwd", { id: folha.id }).catch(() => null);
-  if (cwd) recado({ termiauRepo: cwd });
+  openPinned(true);
+  const cwd = await invoke<string | null>("pty_cwd", { id: leaf.id }).catch(() => null);
+  if (cwd) flash({ termiauRepo: cwd });
 }
 
 /// ⌘, — the preferences float over whatever tab is on screen. They are the differ's page
 /// on its own (`differ.html?prefs`), in an iframe over the whole window: their CSS is
-/// the differ's, and loose in this document it would reach the terminal (see `criarPresa`).
-/// The page says when it is drawn (`termiauPrefsPronta`) and closes itself by message
-/// (`termiauPrefsFechou`).
-let prefsQuadro: HTMLIFrameElement | undefined;
+/// the differ's, and loose in this document it would reach the terminal (see `createPinned`).
+/// The page says when it is drawn (`termiauPrefsReady`) and closes itself by message
+/// (`termiauPrefsClosed`).
+let prefsFrame: HTMLIFrameElement | undefined;
 
-function abrirPreferencias() {
-  if (prefsQuadro) return prefsQuadro.contentWindow?.focus();
+function openPreferences() {
+  if (prefsFrame) return prefsFrame.contentWindow?.focus();
   const q = document.createElement("iframe");
-  q.className = "prefs-quadro";
+  q.className = "prefs-frame";
   q.src = "/differ.html?prefs";
   document.body.append(q);
-  prefsQuadro = q;
+  prefsFrame = q;
 }
 
-function fecharPreferencias() {
-  prefsQuadro?.remove();
-  prefsQuadro = undefined;
+function closePreferences() {
+  prefsFrame?.remove();
+  prefsFrame = undefined;
   // The keyboard goes back where it was — a panel, or the diff tab.
-  if (noDiff) presa?.quadro.contentWindow?.focus();
-  else if (ativa?.foco) focar(ativa.foco);
+  if (inDiff) pinned?.frame.contentWindow?.focus();
+  else if (active?.focus) focusLeaf(active.focus);
 }
 
-function abrirPresa(forcar = false) {
-  if (!presa || noDiff) return;
+function openPinned(force = false) {
+  if (!pinned || inDiff) return;
   // Dimmed: clicking the chip, ⌘` and the tab cycle pass through here and stop.
-  if (!presa.repoAberto && !forcar) return;
-  if (ativa) {
-    ativa.corpo.hidden = true;
-    ativa.chip.classList.remove("ativa");
+  if (!pinned.repoOpen && !force) return;
+  if (active) {
+    active.body.hidden = true;
+    active.chip.classList.remove("active");
     // xterm only switches the cursor to the inactive style when focus is taken away; without
     // this the little paw would keep blinking behind the diff.
-    ativa.foco.term.blur();
+    active.focus.term.blur();
   }
-  noDiff = true;
+  inDiff = true;
   // The tab only keeps up with the working tree while it is in view:
   // checking the disk every second behind a terminal would be wasted
   // work. This is where we know whether it is in view.
-  recado({ termiauVisivel: true });
-  presa.corpo.hidden = false;
-  presa.chip.classList.add("ativa");
-  presa.quadro.focus();
-  presa.quadro.contentWindow?.focus();
-  janela.setTitle(T.tituloDiff).catch(() => {});
+  flash({ termiauVisible: true });
+  pinned.body.hidden = false;
+  pinned.chip.classList.add("active");
+  pinned.frame.focus();
+  pinned.frame.contentWindow?.focus();
+  appWindow.setTitle(T.titleDiff).catch(() => {});
 }
 
 /// Takes the pinned tab off screen. The caller is whoever will put a terminal in its place.
-function esconderPresa() {
-  if (!presa || !noDiff) return;
-  noDiff = false;
-  recado({ termiauVisivel: false });
-  presa.corpo.hidden = true;
-  presa.chip.classList.remove("ativa");
+function hidePinned() {
+  if (!pinned || !inDiff) return;
+  inDiff = false;
+  flash({ termiauVisible: false });
+  pinned.body.hidden = true;
+  pinned.chip.classList.remove("active");
 }
 
 // ---------- splitting ----------
 
-function criarDivisor(d: Divisao): HTMLDivElement {
+function createDivisor(d: Split): HTMLDivElement {
   const divisor = document.createElement("div");
-  divisor.className = `divisor ${d.eixo}`;
+  divisor.className = `divisor ${d.axis}`;
 
   divisor.addEventListener("pointerdown", (e) => {
     e.preventDefault(); // otherwise the drag becomes text selection in the terminals
@@ -928,220 +930,220 @@ function criarDivisor(d: Divisao): HTMLDivElement {
     const mover = (ev: PointerEvent) => {
       const r = d.el.getBoundingClientRect();
       const bruta =
-        d.eixo === "lado" ? (ev.clientX - r.left) / r.width : (ev.clientY - r.top) / r.height;
+        d.axis === "side" ? (ev.clientX - r.left) / r.width : (ev.clientY - r.top) / r.height;
       // A panel squeezed to zero has no grid to measure and xterm complains.
-      d.fracao = Math.min(0.9, Math.max(0.1, bruta));
-      aplicarFracao(d);
+      d.fraction = Math.min(0.9, Math.max(0.1, bruta));
+      applyFraction(d);
 
-      const aba = abaDe(d);
-      if (!aba) return;
-      medir(aba); // o desenho acompanha o arrasto, quadro a quadro
-      agendarSync(aba);
+      const tab = tabOf(d);
+      if (!tab) return;
+      measure(tab); // o drawing acompanha o arrasto, frame a frame
+      scheduleSync(tab);
     };
-    const soltar = () => {
+    const release = () => {
       divisor.removeEventListener("pointermove", mover);
-      divisor.removeEventListener("pointerup", soltar);
-      agendarSalvar();
+      divisor.removeEventListener("pointerup", release);
+      scheduleSave();
     };
     divisor.addEventListener("pointermove", mover);
-    divisor.addEventListener("pointerup", soltar);
+    divisor.addEventListener("pointerup", release);
   });
 
   return divisor;
 }
 
-async function dividir(eixo: Eixo) {
-  if (ocupado || noDiff || !ativa) return;
-  ocupado = true;
-  const aba = ativa;
+async function split(axis: Axis) {
+  if (busy || inDiff || !active) return;
+  busy = true;
+  const tab = active;
   // Splitting changes the layout, and it must be in view for that.
-  terminarAnimacao();
-  if (aba.maximizada) recolher(aba, false);
-  const alvo = aba.foco;
+  finishAnimation();
+  if (tab.maximized) collapse(tab, false);
+  const target = tab.focus;
   try {
-    const cwd = await invoke<string | null>("pty_cwd", { id: alvo.id });
-    const nova = await dividirFolha(aba, alvo, eixo, cwd);
-    if (nova) focar(nova);
+    const cwd = await invoke<string | null>("pty_cwd", { id: target.id });
+    const newOne = await splitLeaf(tab, target, axis, cwd);
+    if (newOne) focusLeaf(newOne);
   } finally {
-    ocupado = false;
+    busy = false;
   }
 }
 
-/// Cuts `alvo` in two and returns the new panel, which takes the second place.
-/// Doesn't touch focus or `ocupado`: that is the caller's job — ⌘D, or a tab
-/// coming back that rebuilds the layout split by split (see `montar`). The tab must
+/// Cuts `target` in two and returns the new panel, which takes the second place.
+/// Doesn't touch focus or `busy`: that is the caller's job — ⌘D, or a tab
+/// coming back that rebuilds the layout split by split (see `build`). The tab must
 /// be on screen: the new panel is measured in place.
-async function dividirFolha(
-  aba: Aba,
-  alvo: Folha,
-  eixo: Eixo,
+async function splitLeaf(
+  tab: Tab,
+  target: Leaf,
+  axis: Axis,
   cwd: string | null,
-  fracao = 0.5,
-): Promise<Folha | undefined> {
+  fraction = 0.5,
+): Promise<Leaf | undefined> {
   // Removing from the document an element containing the focused textarea steals focus
   // without firing `blur`. xterm would keep thinking it has the keyboard: the
   // `.xterm-focus` mark up and a cursor blinking in a panel that no longer gets keys.
   // While focus is still real, we tell it.
-  alvo.term.blur();
+  target.term.blur();
 
   // The panel's place in the page is reserved before touching it: building the
-  // split moves `alvo.el` into it and the original position would be lost.
-  const marca = document.createComment("divisao");
-  alvo.el.replaceWith(marca);
+  // split moves `target.el` into it and the original position would be lost.
+  const marker = document.createComment("split");
+  target.el.replaceWith(marker);
 
-  const d: Divisao = {
-    tipo: "divisao",
-    eixo,
-    fracao,
-    filhos: [alvo, alvo], // the second is replaced as soon as the shell opens
+  const d: Split = {
+    kind: "split",
+    axis,
+    fraction,
+    children: [target, target], // the second is replaced as soon as the shell opens
     el: document.createElement("div"),
-    pai: alvo.pai,
+    parent: target.parent,
   };
-  d.el.className = "divisao";
-  aplicarFracao(d);
-  d.el.append(alvo.el, criarDivisor(d));
-  marca.replaceWith(d.el);
+  d.el.className = "split";
+  applyFraction(d);
+  d.el.append(target.el, createDivisor(d));
+  marker.replaceWith(d.el);
 
-  const nova = await criarFolha(cwd, (el) => d.el.appendChild(el));
-  if (!nova) {
+  const newOne = await createLeaf(cwd, (el) => d.el.appendChild(el));
+  if (!newOne) {
     // Undo the split and put the panel back — with the keyboard back on it.
-    d.el.replaceWith(alvo.el);
-    alvo.term.focus();
+    d.el.replaceWith(target.el);
+    target.term.focus();
     return;
   }
 
-  d.filhos = [alvo, nova];
-  alvo.pai = d;
-  nova.pai = d;
-  if (d.pai) trocarFilho(d.pai, alvo, d);
-  else aba.raiz = d;
-  aba.corpo.classList.add("dividida");
-  marcarMaximizada(aba);
+  d.children = [target, newOne];
+  target.parent = d;
+  newOne.parent = d;
+  if (d.parent) switchChild(d.parent, target, d);
+  else tab.root = d;
+  tab.body.classList.add("divided");
+  markMaximized(tab);
 
-  medir(aba);
-  sincronizar(aba);
-  agendarSalvar();
-  return nova;
+  measure(tab);
+  sync(tab);
+  scheduleSave();
+  return newOne;
 }
 
 // ---------- fechamento ----------
 
 /// Releases the panel's resources. Doesn't touch the tree — the caller does that.
-function destruirFolha(folha: Folha, jaMorto: boolean) {
-  folha.morta = true;
+function destroyLeaf(leaf: Leaf, alreadyDead: boolean) {
+  leaf.dead = true;
   // The drawer lives inside the panel: it goes along, and so does the app running in it.
-  if (folha.gaveta) destruirFolha(folha.gaveta.folha, false);
-  folha.execucao = undefined;
-  clearTimeout(folha.esperaMarcas);
-  clearInterval(folha.chat?.pulso);
-  clearInterval(folha.visor?.pulso);
-  largarPergunta(folha);
-  for (const off of folha.desligar) off();
-  folha.desligar = [];
-  if (!jaMorto) invoke("pty_close", { id: folha.id }).catch((e) => jlog(`pty_close: ${e}`));
-  folha.term.dispose();
-  folha.el.remove();
+  if (leaf.drawer) destroyLeaf(leaf.drawer.leaf, false);
+  leaf.execution = undefined;
+  clearTimeout(leaf.waitMarks);
+  clearInterval(leaf.chat?.pulse);
+  clearInterval(leaf.viewer?.pulse);
+  dropQuestion(leaf);
+  for (const off of leaf.turnOff) off();
+  leaf.turnOff = [];
+  if (!alreadyDead) invoke("pty_close", { id: leaf.id }).catch((e) => jlog(`pty_close: ${e}`));
+  leaf.term.dispose();
+  leaf.el.remove();
   // The panel's plan leaves the footer with it.
-  if (folha.progresso) desenharProgresso();
+  if (leaf.progress) drawProgress();
 }
 
-function fecharFolha(folha: Folha, opts: { jaMorto?: boolean } = {}) {
-  if (folha.morta) return; // the shell's exit may arrive after we already closed it
-  const aba = abaDe(folha);
-  if (!aba) return;
+function closeLeaf(leaf: Leaf, opts: { alreadyDead?: boolean } = {}) {
+  if (leaf.dead) return; // the shell's exit may arrive after we already closed it
+  const tab = tabOf(leaf);
+  if (!tab) return;
   // The drawer has no parent, but it isn't the last panel either: close only it.
-  if (folha.dono) return fecharGaveta(folha.dono, opts.jaMorto ?? false);
+  if (leaf.owner) return closeDrawer(leaf.owner, opts.alreadyDead ?? false);
   // The tab's last panel: no layout is left, so the tab is what closes.
-  if (!folha.pai) return fecharAba(aba);
+  if (!leaf.parent) return closeTab(tab);
 
-  const pai = folha.pai;
-  const irmao = pai.filhos[pai.filhos[0] === folha ? 1 : 0];
+  const parent = leaf.parent;
+  const sibling = parent.children[parent.children[0] === leaf ? 1 : 0];
   // Before destroying: ⌘⇧T brings the panel back too, beside the one with the keyboard.
-  guardarFechada({ painel: fotografar(folha) as Extract<NoSalvo, { tipo: "folha" }>, eixo: pai.eixo, fracao: pai.fracao });
+  storeClosed({ panel: snapshot(leaf) as Extract<SavedNode, { kind: "leaf" }>, axis: parent.axis, fraction: parent.fraction });
   // The animation walks the tree's splits, and the tree is about to change.
-  terminarAnimacao();
+  finishAnimation();
   // Closed the maximized one: there is nothing left to keep full screen.
-  if (aba.maximizada === folha) aba.maximizada = undefined;
-  destruirFolha(folha, opts.jaMorto ?? false);
+  if (tab.maximized === leaf) tab.maximized = undefined;
+  destroyLeaf(leaf, opts.alreadyDead ?? false);
 
   // The sibling moves up and alone takes the space that was both's. It leaves the DOM along with
   // the parent, so the place is marked before tearing out the split.
-  const marca = document.createComment("promocao");
-  pai.el.replaceWith(marca);
-  marca.replaceWith(irmao.el);
+  const marker = document.createComment("promocao");
+  parent.el.replaceWith(marker);
+  marker.replaceWith(sibling.el);
 
-  irmao.pai = pai.pai;
-  if (pai.pai) trocarFilho(pai.pai, pai, irmao);
-  else aba.raiz = irmao;
-  aba.corpo.classList.toggle("dividida", aba.raiz.tipo === "divisao");
+  sibling.parent = parent.parent;
+  if (parent.parent) switchChild(parent.parent, parent, sibling);
+  else tab.root = sibling;
+  tab.body.classList.toggle("divided", tab.root.kind === "split");
   // A hidden one that closed on its own (an `exit`, the shell crashed) changed the tree
   // under the maximized one: the path to it is different now.
-  marcarMaximizada(aba);
+  markMaximized(tab);
 
-  medir(aba);
-  sincronizar(aba);
-  pintar();
+  measure(tab);
+  sync(tab);
+  paint();
   // Focus was on the panel that died: it falls to the neighbor that took its place.
-  if (aba.foco === folha) focar(folhas(irmao).next().value as Folha);
+  if (tab.focus === leaf) focusLeaf(leaves(sibling).next().value as Leaf);
   // It survived, but the promotion moved its element in the DOM and the textarea lost
   // real focus — with no `blur`, xterm didn't even know. Refocus.
-  else teclado(aba.foco);
+  else keyboard(tab.focus);
 }
 
-function fecharAba(aba: Aba) {
-  const i = abas.indexOf(aba);
+function closeTab(tab: Tab) {
+  const i = tabs.indexOf(tab);
   if (i < 0) return;
 
   // Before destroying: this snapshot is what ⌘⇧T brings the tab back from.
-  guardarFechada({ aba: fotografarAba(aba) });
+  storeClosed({ tab: snapshotTab(tab) });
 
-  abas.splice(i, 1);
-  for (const f of folhas(aba.raiz)) destruirFolha(f, false);
-  aba.corpo.remove();
-  aba.chip.remove();
+  tabs.splice(i, 1);
+  for (const f of leaves(tab.root)) destroyLeaf(f, false);
+  tab.body.remove();
+  tab.chip.remove();
 
-  if (abas.length === 0) {
+  if (tabs.length === 0) {
     // Closing the last tab is quitting, and whoever closed it already said what they wanted: no
     // question. The session is saved empty — the next launch starts clean.
-    void sair();
+    void quit();
     return;
   }
-  sincronizarBarra();
-  pintar();
+  syncBar();
+  paint();
   // Focus goes to the neighbor on the right; if it was the last, to the one on the left.
-  if (ativa === aba) ativar(abas[Math.min(i, abas.length - 1)]);
+  if (active === tab) activate(tabs[Math.min(i, tabs.length - 1)]);
 }
 
-// ---------- maximizar ----------
+// ---------- maximize ----------
 
 /// Marks in the DOM the path from the root to the maximized panel: it is what CSS uses
 /// to hide the rest without removing anything from the tree. Redone on every change to it.
 /// With a single panel there is nothing to hide, and the state undoes itself.
-function marcarMaximizada(aba: Aba) {
-  if (aba.maximizada && (aba.maximizada.morta || aba.raiz.tipo === "folha")) {
-    aba.maximizada = undefined;
+function markMaximized(tab: Tab) {
+  if (tab.maximized && (tab.maximized.dead || tab.root.kind === "leaf")) {
+    tab.maximized = undefined;
   }
-  for (const el of aba.corpo.querySelectorAll(".caminho")) el.classList.remove("caminho");
-  const m = aba.maximizada;
-  aba.corpo.classList.toggle("maximizada", !!m);
+  for (const el of tab.body.querySelectorAll(".path")) el.classList.remove("path");
+  const m = tab.maximized;
+  tab.body.classList.toggle("maximized", !!m);
   if (m) {
-    let no: No | undefined = m;
-    for (; no; no = no.pai) no.el.classList.add("caminho");
+    let no: TreeNode | undefined = m;
+    for (; no; no = no.parent) no.el.classList.add("path");
   }
-  for (const f of folhas(aba.raiz)) desenharMaximizar(f);
+  for (const f of leaves(tab.root)) drawMaximize(f);
 }
 
-/// Shorter than CSS's `--tempo`: that one is for signals lighting up and dimming;
+/// Shorter than CSS's `--time`: that one is for signals lighting up and dimming;
 /// this one is the whole layout moving, and it has to feel like a response to the click.
-const DURACAO_MAXIMIZAR = 240;
-const movimentoReduzido = matchMedia("(prefers-reduced-motion: reduce)");
+const MAXIMIZE_DURATION = 240;
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 
 /// The animation in progress, if any. Finishing means jumping to the last frame: whoever
 /// touches the tree (split, close) or toggles again midway doesn't wait.
-let animacao: { terminar: () => void } | undefined;
+let animation: { finish: () => void } | undefined;
 
-function terminarAnimacao() {
-  animacao?.terminar();
+function finishAnimation() {
+  animation?.finish();
 }
 
 /// One frame on the way to `m`, from 0 (the usual layout) to 1 (it alone).
@@ -1149,90 +1151,90 @@ function terminarAnimacao() {
 /// It is the grid that moves, not a `transform`: scaling the terminal would blur the text.
 /// xterm's grid doesn't follow — whoever is squeezed gets clipped by the card,
 /// and everyone is re-measured only once, at the end.
-function quadroMaximizar(m: Folha, t: number) {
-  let filho: No = m;
-  for (let d = m.pai; d; filho = d, d = d.pai) {
-    const alvo = d.filhos[0] === filho ? 1 : 0;
-    const f = d.fracao + (alvo - d.fracao) * t;
-    const tracks = `${f}fr calc(var(--vao) * ${1 - t}) ${1 - f}fr`;
-    d.el.style.gridTemplate = d.eixo === "lado" ? `1fr / ${tracks}` : `${tracks} / 1fr`;
+function frameMaximize(m: Leaf, t: number) {
+  let child: TreeNode = m;
+  for (let d = m.parent; d; child = d, d = d.parent) {
+    const target = d.children[0] === child ? 1 : 0;
+    const f = d.fraction + (target - d.fraction) * t;
+    const tracks = `${f}fr calc(var(--gap) * ${1 - t}) ${1 - f}fr`;
+    d.el.style.gridTemplate = d.axis === "side" ? `1fr / ${tracks}` : `${tracks} / 1fr`;
   }
 }
 
-function animarMaximizar(m: Folha, de: number, para: number, fim: () => void) {
-  terminarAnimacao();
-  const inicio = performance.now();
+function animateMaximize(m: Leaf, from: number, dest: number, end: () => void) {
+  finishAnimation();
+  const beginning = performance.now();
   let raf = 0;
-  const esta = {
-    terminar() {
-      if (animacao !== esta) return;
-      animacao = undefined;
+  const thisOne = {
+    finish() {
+      if (animation !== thisOne) return;
+      animation = undefined;
       cancelAnimationFrame(raf);
       // The grid goes back to the real fractions; with the panel maximized CSS
       // rules the layout, and they stay stored for when it restores.
-      for (let d = m.pai; d; d = d.pai) aplicarFracao(d);
-      fim();
+      for (let d = m.parent; d; d = d.parent) applyFraction(d);
+      end();
     },
   };
-  animacao = esta;
-  if (movimentoReduzido.matches) return esta.terminar();
-  const quadro = (agora: number) => {
-    const p = Math.min(1, (agora - inicio) / DURACAO_MAXIMIZAR);
+  animation = thisOne;
+  if (reducedMotion.matches) return thisOne.finish();
+  const frame = (now: number) => {
+    const p = Math.min(1, (now - beginning) / MAXIMIZE_DURATION);
     // Leaves fast and lands slowly, like the rest of the app's animations.
     const e = 1 - Math.pow(1 - p, 3);
-    quadroMaximizar(m, de + (para - de) * e);
-    if (p < 1) raf = requestAnimationFrame(quadro);
-    else esta.terminar();
+    frameMaximize(m, from + (dest - from) * e);
+    if (p < 1) raf = requestAnimationFrame(frame);
+    else thisOne.finish();
   };
-  raf = requestAnimationFrame(quadro);
+  raf = requestAnimationFrame(frame);
 }
 
-function maximizar(folha: Folha) {
-  const aba = abaDe(folha);
-  if (!aba || aba.raiz.tipo === "folha") return;
-  terminarAnimacao();
-  aba.maximizada = folha;
-  for (const f of folhas(aba.raiz)) desenharMaximizar(f);
-  focar(folha);
+function maximize(leaf: Leaf) {
+  const tab = tabOf(leaf);
+  if (!tab || tab.root.kind === "leaf") return;
+  finishAnimation();
+  tab.maximized = leaf;
+  for (const f of leaves(tab.root)) drawMaximize(f);
+  focusLeaf(leaf);
   // The others only vanish at the end: until then they are being squeezed, in view.
-  animarMaximizar(folha, 0, 1, () => {
-    marcarMaximizada(aba);
-    medir(aba);
-    sincronizar(aba);
+  animateMaximize(leaf, 0, 1, () => {
+    markMaximized(tab);
+    measure(tab);
+    sync(tab);
   });
 }
 
-/// `animar: false` is for callers about to touch the tree right after (split):
+/// `animate: false` is for callers about to touch the tree right after (split):
 /// the layout must be in place now, not a quarter of a second from now.
-function recolher(aba: Aba, animar = true) {
-  terminarAnimacao();
-  const m = aba.maximizada;
+function collapse(tab: Tab, animate = true) {
+  finishAnimation();
+  const m = tab.maximized;
   if (!m) return;
-  const voltar = () => {
+  const goBack = () => {
     // The hidden ones come back with their previous grid; the window may have
     // changed size in the meantime.
-    medir(aba);
-    sincronizar(aba);
+    measure(tab);
+    sync(tab);
     // The panel leaves full screen without `blur`: refocus the keyboard.
-    aba.foco.term.focus();
+    tab.focus.term.focus();
   };
-  aba.maximizada = undefined;
-  if (!animar) {
-    marcarMaximizada(aba);
-    return voltar();
+  tab.maximized = undefined;
+  if (!animate) {
+    markMaximized(tab);
+    return goBack();
   }
   // The grid is set to the last frame BEFORE CSS releases the other panels:
   // removing the classes with the usual fractions on the grid would flash the whole layout.
-  quadroMaximizar(m, 1);
-  marcarMaximizada(aba);
-  animarMaximizar(m, 1, 0, voltar);
+  frameMaximize(m, 1);
+  markMaximized(tab);
+  animateMaximize(m, 1, 0, goBack);
 }
 
-function alternarMaximizar(folha: Folha) {
-  const aba = abaDe(folha);
-  if (!aba) return;
-  if (aba.maximizada) recolher(aba);
-  else maximizar(folha);
+function toggleMaximize(leaf: Leaf) {
+  const tab = tabOf(leaf);
+  if (!tab) return;
+  if (tab.maximized) collapse(tab);
+  else maximize(leaf);
 }
 
 // ---------- navigating between panels ----------
@@ -1240,66 +1242,66 @@ function alternarMaximizar(folha: Folha) {
 /// Nearest panel in the requested direction. On-screen geometry counts, not the
 /// tree's shape: it is what makes ⌥→ go to the panel visibly to the right,
 /// even if it is in another branch.
-function vizinho(folha: Folha, dir: "Left" | "Right" | "Up" | "Down"): Folha | undefined {
-  const aba = abaDe(folha);
-  if (!aba) return;
-  const r = folha.el.getBoundingClientRect();
+function neighbor(leaf: Leaf, dir: "Left" | "Right" | "Up" | "Down"): Leaf | undefined {
+  const tab = tabOf(leaf);
+  if (!tab) return;
+  const r = leaf.el.getBoundingClientRect();
   const horizontal = dir === "Left" || dir === "Right";
   const sinal = dir === "Left" || dir === "Up" ? -1 : 1;
 
   // The current panel's center on the other axis. Among several panels at the same
   // distance — one above and three below —, it goes to the one most aligned with it,
   // which is the middle one. From there, the side ones are one step each.
-  const centro = (q: DOMRect) => (horizontal ? q.top + q.height / 2 : q.left + q.width / 2);
-  const meu = centro(r);
+  const center = (q: DOMRect) => (horizontal ? q.top + q.height / 2 : q.left + q.width / 2);
+  const my = center(r);
 
-  let melhor: Folha | undefined;
-  let menor = Infinity;
-  let desvio = Infinity;
-  for (const f of visiveis(aba)) {
-    if (f === folha) continue;
+  let best: Leaf | undefined;
+  let smaller = Infinity;
+  let offset = Infinity;
+  for (const f of visibleOnes(tab)) {
+    if (f === leaf) continue;
     const q = f.el.getBoundingClientRect();
     // Progress in the requested direction; negative means it is on the wrong side.
-    const passo = sinal * (horizontal ? q.left - r.left : q.top - r.top);
-    if (passo <= 0) continue;
+    const step = sinal * (horizontal ? q.left - r.left : q.top - r.top);
+    if (step <= 0) continue;
     // It must overlap on the other axis, otherwise the panel in the opposite corner would win.
-    const cruza = horizontal
+    const crosses = horizontal
       ? q.bottom > r.top && q.top < r.bottom
       : q.right > r.left && q.left < r.right;
-    if (!cruza) continue;
-    const d = Math.abs(centro(q) - meu);
+    if (!crosses) continue;
+    const d = Math.abs(center(q) - my);
     // The 2px slack absorbs the grid's rounding: panels in the same row
     // may start half a pixel apart.
-    if (passo < menor - 2 || (Math.abs(passo - menor) <= 2 && d < desvio)) {
-      menor = passo;
-      desvio = d;
-      melhor = f;
+    if (step < smaller - 2 || (Math.abs(step - smaller) <= 2 && d < offset)) {
+      smaller = step;
+      offset = d;
+      best = f;
     }
   }
-  return melhor;
+  return best;
 }
 
-function irParaAba(delta: number) {
+function goToTab(delta: number) {
   // The pinned tab joins the ring like any other — it is first in the bar,
   // and ⌘⇧[ on the next tab must land on it. Dimmed, it stays out, unless
   // it is the one on screen: a panel's diff button opens it before the
   // repository loads, and the cycle must be able to leave from there.
-  const dentro = presa && (presa.repoAberto || noDiff);
-  const anel: (Aba | Presa)[] = dentro ? [presa as Presa, ...abas] : [...abas];
-  const i = noDiff ? 0 : ativa ? anel.indexOf(ativa) : -1;
-  if (i < 0 || anel.length < 2) return;
+  const inside = pinned && (pinned.repoOpen || inDiff);
+  const ring: (Tab | Pinned)[] = inside ? [pinned as Pinned, ...tabs] : [...tabs];
+  const i = inDiff ? 0 : active ? ring.indexOf(active) : -1;
+  if (i < 0 || ring.length < 2) return;
   // Circular: from the last to the first, like in iTerm2.
-  const alvo = anel[(i + delta + anel.length) % anel.length];
-  if (alvo === presa) abrirPresa();
-  else ativar(alvo as Aba);
+  const target = ring[(i + delta + ring.length) % ring.length];
+  if (target === pinned) openPinned();
+  else activate(target as Tab);
 }
 
 // ---------- Claude sessions ----------
 
-/// What arrives from the hooks. `painel` is set by termiau-evento.sh from the
+/// What arrives from the hooks. `panel` is set by termiau-event.sh from the
 /// shell's environment; the rest comes from Claude Code as is.
-type EventoClaude = {
-  painel: number;
+type ClaudeEvent = {
+  panel: number;
   hook_event_name: string;
   cwd?: string;
   session_id?: string;
@@ -1318,13 +1320,13 @@ type EventoClaude = {
   tool_use_id?: string;
 };
 
-/// What Claude Code's status line sends, through the hook (`termiau-evento.sh
+/// What Claude Code's status line sends, through the hook (`termiau-event.sh
 /// status`). Only the fields the app uses.
-type StatusDoSocket = {
-  painel: number;
+type SocketStatus = {
+  panel: number;
   status: {
     context_window?: { used_percentage?: number | null } | null;
-    rate_limits?: LimitesDaStatusLine | null;
+    rate_limits?: StatusLineLimits | null;
     model?: { display_name?: string | null } | null;
     effort?: { level?: string | null } | null;
   };
@@ -1332,204 +1334,204 @@ type StatusDoSocket = {
 
 /// Context, model and effort go to the session panel's bar; usage,
 /// to the footer.
-function receberStatus(bruto: StatusDoSocket) {
-  const st = bruto.status ?? {};
-  const u = usoDaStatusLine(st.rate_limits);
-  if (u) receberUso(u);
-  const folha = folhaPorPainel(bruto.painel);
-  const c = folha?.claude;
-  if (!folha || !c) return;
-  const usado = st.context_window?.used_percentage;
-  const contexto = typeof usado === "number" ? usado : c.contexto;
-  const modelo = st.model?.display_name ?? c.modelo;
+function receiveStatus(raw: SocketStatus) {
+  const st = raw.status ?? {};
+  const u = statusLineUsage(st.rate_limits);
+  if (u) receiveUsage(u);
+  const leaf = leafByPanel(raw.panel);
+  const c = leaf?.claude;
+  if (!leaf || !c) return;
+  const used = st.context_window?.used_percentage;
+  const context = typeof used === "number" ? used : c.context;
+  const model = st.model?.display_name ?? c.model;
   // The level really goes away when the new model has no effort.
-  const esforco = st.model ? (st.effort?.level ?? undefined) : c.esforco;
-  const mudou = c.contexto !== contexto || c.modelo !== modelo || c.esforco !== esforco;
-  Object.assign(c, { contexto, modelo, esforco });
-  if (mudou) desenharBarra(folha);
-  autoCompactar(folha);
+  const effort = st.model ? (st.effort?.level ?? undefined) : c.effort;
+  const changed = c.context !== context || c.model !== model || c.effort !== effort;
+  Object.assign(c, { context, model, effort });
+  if (changed) drawBar(leaf);
+  autoCompact(leaf);
 }
 
 /// `/compact` on its own, when the context reaches the limit in Preferences.
 /// Only with Claude idle: while working, the command would go into the queue; while waiting,
 /// it would answer its question. `Stop` calls it again, in case the limit
 /// was crossed mid-turn.
-function autoCompactar(folha: Folha) {
-  const c = folha.claude;
-  const limite = limiteDoAutoCompact(limitesDoContexto);
-  if (!c || c.contexto === undefined || limite === null) return;
-  if (c.contexto < limite) {
-    c.compactou = false;
+function autoCompact(leaf: Leaf) {
+  const c = leaf.claude;
+  const limit = autoCompactLimit(contextLimits);
+  if (!c || c.context === undefined || limit === null) return;
+  if (c.context < limit) {
+    c.compacted = false;
     return;
   }
-  if (c.compactou || c.estado !== "ocioso") return;
-  c.compactou = true;
-  avisar(folha, T.compactandoSozinho(Math.round(c.contexto)));
-  compactar(folha);
+  if (c.compacted || c.state !== "idle") return;
+  c.compacted = true;
+  notify(leaf, T.compactingAlone(Math.round(c.context)));
+  compact(leaf);
 }
 
-function folhaPorPainel(id: number): Folha | undefined {
-  for (const a of abas) for (const f of folhas(a.raiz)) if (f.id === id) return f;
+function leafByPanel(id: number): Leaf | undefined {
+  for (const a of tabs) for (const f of leaves(a.root)) if (f.id === id) return f;
   return undefined;
 }
 
 /// Redraws the status signals: a dot on each tab, an outline on the waiting
 /// panel, and the Dock badge with how many are waiting — which is what shows with the whole
 /// app in the background.
-function pintar() {
-  let esperando = 0;
-  for (const aba of abas) {
+function paint() {
+  let waiting = 0;
+  for (const tab of tabs) {
     let sinal = "";
-    for (const f of folhas(aba.raiz)) {
-      const estado = f.claude?.estado;
-      f.el.classList.toggle("esperando", estado === "esperando");
-      desenharAviso(f);
-      if (estado === "esperando") {
-        esperando++;
-        sinal = "esperando";
-      } else if (estado === "trabalhando" && sinal !== "esperando") {
-        sinal = "trabalhando";
+    for (const f of leaves(tab.root)) {
+      const state = f.claude?.state;
+      f.el.classList.toggle("waiting", state === "waiting");
+      drawNotice(f);
+      if (state === "waiting") {
+        waiting++;
+        sinal = "waiting";
+      } else if (state === "working" && sinal !== "waiting") {
+        sinal = "working";
       }
     }
-    aba.chip.dataset.claude = sinal;
+    tab.chip.dataset.claude = sinal;
     // Opening or closing a panel changes how many folders the tab has.
-    mostrarRamos(aba);
+    showBranches(tab);
   }
-  janela.setBadgeCount(esperando || undefined).catch(() => {});
+  appWindow.setBadgeCount(waiting || undefined).catch(() => {});
   // Everything that changes the tabs, the panels or the Claude sessions goes through here.
-  agendarSalvar();
-  avisarSessoes();
+  scheduleSave();
+  notifySessions();
 }
 
-function receber(
-  bruto:
-    | EventoClaude
-    | { painel: number; evento: Omit<EventoClaude, "painel">; espera?: boolean; pergunta_id?: string },
+function receive(
+  raw:
+    | ClaudeEvent
+    | { panel: number; event: Omit<ClaudeEvent, "panel">; wait?: boolean; question_id?: string },
 ) {
-  // The hook wraps Claude's payload with the panel number outside. The
-  // earlier one put `painel` inside it — and that may be the one still
-  // installed.
-  const ev: EventoClaude = "evento" in bruto ? { ...bruto.evento, painel: bruto.painel } : bruto;
+  // The hook wraps Claude's payload with the panel number outside. An
+  // earlier one put the panel inside it — and that may be the one still
+  // installed (Rust has already renamed its keys, see `normalize_socket`).
+  const ev: ClaudeEvent = "event" in raw ? { ...raw.event, panel: raw.panel } : raw;
   // A Claude question whose hook stayed waiting for the chat's answer, with
   // the number Rust gave it.
-  const perguntaId = "pergunta_id" in bruto ? bruto.pergunta_id : undefined;
-  const folha = folhaPorPainel(ev.painel);
-  if (!folha) {
+  const questionId = "question_id" in raw ? raw.question_id : undefined;
+  const leaf = leafByPanel(ev.panel);
+  if (!leaf) {
     // The panel closed before the event arrived: the hook waits for no one.
-    if (perguntaId) void invoke("pergunta_largar", { id: perguntaId });
+    if (questionId) void invoke("question_drop", { id: questionId });
     return;
   }
 
   // The folder name is what shows on the tab.
-  const nome = ev.cwd?.split("/").filter(Boolean).pop() || `painel ${ev.painel}`;
+  const name = ev.cwd?.split("/").filter(Boolean).pop() || `painel ${ev.panel}`;
   // The session changes without Claude exiting (a `/clear`, a `/resume`): the last
   // event's always wins. The folder is the one from each session's first event — afterwards
   // Claude may have moved, and `--resume` looks for the session where it was born.
-  const antes = folha.claude;
-  const sessao = ev.session_id ?? antes?.sessao;
-  const pasta = (antes?.sessao === sessao && antes?.pasta) || ev.cwd;
-  const transcricao = ev.transcript_path ?? (antes?.sessao === sessao ? antes?.transcricao : undefined);
+  const before = leaf.claude;
+  const session = ev.session_id ?? before?.session;
+  const folder = (before?.session === session && before?.folder) || ev.cwd;
+  const transcript = ev.transcript_path ?? (before?.session === session ? before?.transcript : undefined);
   // The pending question carries across events until it is answered.
-  const pergunta = antes?.sessao === sessao ? antes?.pergunta : undefined;
+  const question = before?.session === session ? before?.question : undefined;
   // The context too: it only arrives through the status line, and a hook event that
   // forgot it would clear the pill until Claude ran again.
-  const contexto = antes?.sessao === sessao ? antes?.contexto : undefined;
-  const compactou = antes?.sessao === sessao ? antes?.compactou : undefined;
+  const context = before?.session === session ? before?.context : undefined;
+  const compacted = before?.session === session ? before?.compacted : undefined;
   // Model and effort carry across a `/clear`: they belong to the running Claude.
-  const { modelo, esforco } = antes ?? {};
-  folha.claude = { nome, estado: antes?.estado ?? "ocioso", sessao, pasta, transcricao, pergunta, contexto, modelo, esforco, compactou };
+  const { model, effort } = before ?? {};
+  leaf.claude = { name, state: before?.state ?? "idle", session, folder, transcript, question, context, model, effort, compacted };
 
   switch (ev.hook_event_name) {
     case "UserPromptSubmit":
-      folha.claude.estado = "trabalhando";
-      if (ev.prompt) lembrarPrompts(folha, [ev.prompt]);
+      leaf.claude.state = "working";
+      if (ev.prompt) rememberPrompts(leaf, [ev.prompt]);
       // A new prompt: the question that was open was left behind.
-      largarPergunta(folha);
+      dropQuestion(leaf);
       break;
     case "Stop":
       // The turn ended. A wait that arrived earlier (a question, a
       // permission) still stands.
-      if (folha.claude.estado === "trabalhando") folha.claude.estado = "ocioso";
-      autoCompactar(folha);
+      if (leaf.claude.state === "working") leaf.claude.state = "idle";
+      autoCompact(leaf);
       break;
     case "PostToolUse":
     case "PostToolUseFailure":
       // The question was answered — in the chat, or in the terminal before it. The hook
       // still waiting exits quietly, and the card goes away. A session only has one
       // open question at a time, so the tool name is enough.
-      if (pergunta && ev.tool_name === "AskUserQuestion") {
-        largarPergunta(folha);
-        if (folha.claude.estado === "esperando") folha.claude.estado = "trabalhando";
-        folha.claude.pede = undefined;
-        folha.claude.aviso = undefined;
+      if (question && ev.tool_name === "AskUserQuestion") {
+        dropQuestion(leaf);
+        if (leaf.claude.state === "waiting") leaf.claude.state = "working";
+        leaf.claude.asks = undefined;
+        leaf.claude.notice = undefined;
       }
       break;
     case "PermissionRequest": {
-      folha.claude.estado = "esperando";
+      leaf.claude.state = "waiting";
       // A new question in place of another: the previous one won't come back.
-      if (perguntaId) largarPergunta(folha);
-      const questoes = ev.tool_name === "AskUserQuestion" ? questoesDe(ev.tool_input) : undefined;
-      if (perguntaId && questoes) {
-        folha.claude.pergunta = { id: perguntaId, questoes };
-        folha.claude.pede = "terminal";
-        folha.claude.aviso = T.temUmaPergunta;
+      if (questionId) dropQuestion(leaf);
+      const questions = ev.tool_name === "AskUserQuestion" ? questionsOf(ev.tool_input) : undefined;
+      if (questionId && questions) {
+        leaf.claude.question = { id: questionId, questions };
+        leaf.claude.asks = "terminal";
+        leaf.claude.notice = T.hasAQuestion;
         break;
       }
-      const tool = ev.tool_name ?? T.umaFerramenta;
-      const oque = resumoDe(ev.tool_input);
-      folha.claude.aviso = T.pedePermissao(tool, oque);
-      folha.claude.pede = ev.tool_name && PEDEM_TERMINAL.has(ev.tool_name) ? "terminal" : "permissao";
+      const tool = ev.tool_name ?? T.oneTool;
+      const what = summaryOf(ev.tool_input);
+      leaf.claude.notice = T.asksPermission(tool, what);
+      leaf.claude.asks = ev.tool_name && NEED_TERMINAL.has(ev.tool_name) ? "terminal" : "permission";
       break;
     }
     case "Notification":
-      folha.claude.estado = "esperando";
+      leaf.claude.state = "waiting";
       // The permission notification arrives right after `PermissionRequest`, and
       // says less than it: the request and text already there stay.
       if (ev.notification_type === "permission_prompt" || /permission/i.test(ev.message ?? "")) {
-        folha.claude.pede = antes?.pede ?? "permissao";
-        folha.claude.aviso = (antes?.pede && antes.aviso) || ev.message;
+        leaf.claude.asks = before?.asks ?? "permission";
+        leaf.claude.notice = (before?.asks && before.notice) || ev.message;
       } else {
-        folha.claude.pede = ev.notification_type === "elicitation_dialog" ? "terminal" : undefined;
-        folha.claude.aviso = ev.message;
+        leaf.claude.asks = ev.notification_type === "elicitation_dialog" ? "terminal" : undefined;
+        leaf.claude.notice = ev.message;
       }
       break;
     case "SessionEnd":
-      largarPergunta(folha);
-      folha.claude = undefined;
+      dropQuestion(leaf);
+      leaf.claude = undefined;
       break;
   }
-  pintar();
+  paint();
   // The chat button only exists where there is a conversation to show.
-  desenharBarra(folha);
+  drawBar(leaf);
   // The session may have changed under an open chat (`/clear`, `/resume`),
   // and a new prompt is already in the transcript: read now, without waiting for the pulse.
-  if (folha.chat?.aberto) void lerChat(folha);
+  if (leaf.chat?.isOpen) void readChat(leaf);
 }
 
 /// Gives up on the panel's pending question: its hook exits without an answer, and if
 /// it is still open, the terminal is the one that answers.
-function largarPergunta(folha: Folha) {
-  const id = folha.claude?.pergunta?.id;
+function dropQuestion(leaf: Leaf) {
+  const id = leaf.claude?.question?.id;
   if (!id) return;
-  folha.claude!.pergunta = undefined;
-  invoke("pergunta_largar", { id }).catch((e) => jlog(`pergunta_largar: ${e}`));
+  leaf.claude!.question = undefined;
+  invoke("question_drop", { id }).catch((e) => jlog(`pergunta_largar: ${e}`));
 }
 
 /// Jumps to the next panel that is waiting, in any tab. Repeating the
 /// shortcut goes through all of them, and doesn't get stuck on the first.
-function irParaEsperando() {
-  const fila: { aba: Aba; folha: Folha }[] = [];
-  for (const aba of abas) {
-    for (const f of folhas(aba.raiz)) {
-      if (f.claude?.estado === "esperando") fila.push({ aba, folha: f });
+function goToWaiting() {
+  const queue: { tab: Tab; leaf: Leaf }[] = [];
+  for (const tab of tabs) {
+    for (const f of leaves(tab.root)) {
+      if (f.claude?.state === "waiting") queue.push({ tab, leaf: f });
     }
   }
-  if (!fila.length) return;
+  if (!queue.length) return;
 
-  const atual = fila.findIndex((x) => x.folha === ativa?.foco);
-  const alvo = fila[(atual + 1) % fila.length];
-  if (alvo.aba !== ativa) ativar(alvo.aba);
-  focar(alvo.folha);
+  const current = queue.findIndex((x) => x.leaf === active?.focus);
+  const target = queue[(current + 1) % queue.length];
+  if (target.tab !== active) activate(target.tab);
+  focusLeaf(target.leaf);
 }
 
 // ---------- your prompts, highlighted in the terminal ----------
@@ -1539,33 +1541,33 @@ const MAX_PROMPTS = 300;
 /// How often the highlight is redone while the screen changes. It is a frequency
 /// cap, not a wait for silence: Claude working writes nonstop
 /// (the counter, the animation), and waiting for it to go quiet would mean never highlighting.
-const MARCAS_MS = 400;
+const MARKS_MS = 400;
 /// How many lines before the start of the screen are still reread: a prompt may
 /// have started there and continue inside it.
-const MARCA_FOLGA = 16;
+const MARK_SLACK = 16;
 
-function lembrarPrompts(folha: Folha, novos: string[]) {
-  const lista = (folha.prompts ??= []);
-  for (const p of novos) if (p.trim() && !lista.includes(p)) lista.push(p);
-  if (lista.length > MAX_PROMPTS) lista.splice(0, lista.length - MAX_PROMPTS);
-  agendarMarcas(folha);
+function rememberPrompts(leaf: Leaf, newItems: string[]) {
+  const list = (leaf.prompts ??= []);
+  for (const p of newItems) if (p.trim() && !list.includes(p)) list.push(p);
+  if (list.length > MAX_PROMPTS) list.splice(0, list.length - MAX_PROMPTS);
+  scheduleMarks(leaf);
 }
 
-function agendarMarcas(folha: Folha) {
-  if (!folha.prompts?.length || folha.esperaMarcas !== undefined) return;
-  folha.esperaMarcas = setTimeout(() => {
-    folha.esperaMarcas = undefined;
-    marcar(folha);
-  }, MARCAS_MS);
+function scheduleMarks(leaf: Leaf) {
+  if (!leaf.prompts?.length || leaf.waitMarks !== undefined) return;
+  leaf.waitMarks = setTimeout(() => {
+    leaf.waitMarks = undefined;
+    mark(leaf);
+  }, MARKS_MS);
 }
 
 /// Puts a highlight on each screen line that is one of your prompts. Searches again
 /// each time instead of marking at send time: Claude Code rewrites the
 /// whole conversation on a resize, and a mark placed earlier would go away
 /// with the old lines.
-function marcar(folha: Folha) {
-  if (folha.morta || !folha.prompts?.length) return;
-  const { term } = folha;
+function mark(leaf: Leaf) {
+  if (leaf.dead || !leaf.prompts?.length) return;
+  const { term } = leaf;
   const buf = term.buffer.active;
   // On the alternate screen (Claude's full-screen mode) xterm draws no
   // decorations at all; there the highlight is up to chat mode.
@@ -1576,56 +1578,56 @@ function marcar(folha: Folha) {
   // as long as it only grows, rereading from where the screen started last time is enough.
   // Shrank (a clear, a resize redraw), changed width or a new prompt
   // arrived: then reread everything.
-  const v = folha.vistas;
-  const inteira = !v || buf.baseY < v.base || v.cols !== term.cols || v.prompts !== folha.prompts.length;
-  const de = inteira ? 0 : Math.max(0, v.base - MARCA_FOLGA);
-  folha.vistas = { base: buf.baseY, cols: term.cols, prompts: folha.prompts.length };
+  const v = leaf.seenOnes;
+  const whole = !v || buf.baseY < v.base || v.cols !== term.cols || v.prompts !== leaf.prompts.length;
+  const from = whole ? 0 : Math.max(0, v.base - MARK_SLACK);
+  leaf.seenOnes = { base: buf.baseY, cols: term.cols, prompts: leaf.prompts.length };
 
-  const tela: string[] = [];
-  for (let i = de; i < buf.length; i++) tela.push(buf.getLine(i)?.translateToString(true) ?? "");
-  const querem = new Map<string, { linha: number; altura: number }>();
-  for (const a of linhasDePrompt(tela, folha.prompts)) {
-    querem.set(`${a.linha + de}:${a.altura}:${term.cols}`, { linha: a.linha + de, altura: a.altura });
+  const screen: string[] = [];
+  for (let i = from; i < buf.length; i++) screen.push(buf.getLine(i)?.translateToString(true) ?? "");
+  const want = new Map<string, { line: number; height: number }>();
+  for (const a of promptLines(screen, leaf.prompts)) {
+    want.set(`${a.line + from}:${a.height}:${term.cols}`, { line: a.line + from, height: a.height });
   }
 
   // The key keeps the line from when the mark was born, and scrolling moves it:
   // the map is rebuilt with the line each mark is on now.
-  const antigas = folha.marcas ?? new Map<string, IDecoration>();
-  const marcas = (folha.marcas = new Map<string, IDecoration>());
-  for (const [chave, d] of antigas) {
-    const atual = `${d.marker.line}:${chave.slice(chave.indexOf(":") + 1)}`;
+  const oldOnes = leaf.marks ?? new Map<string, IDecoration>();
+  const marks = (leaf.marks = new Map<string, IDecoration>());
+  for (const [key, d] of oldOnes) {
+    const current = `${d.marker.line}:${key.slice(key.indexOf(":") + 1)}`;
     // Above where the reading started nothing was checked: the mark stays.
-    if (!d.isDisposed && d.marker.line < de) marcas.set(atual, d);
-    else if (d.isDisposed || !querem.has(atual) || marcas.has(atual)) d.dispose();
-    else marcas.set(atual, d);
+    if (!d.isDisposed && d.marker.line < from) marks.set(current, d);
+    else if (d.isDisposed || !want.has(current) || marks.has(current)) d.dispose();
+    else marks.set(current, d);
   }
-  for (const [chave, a] of querem) {
-    if (marcas.has(chave)) continue;
-    const marker = term.registerMarker(a.linha - (buf.baseY + buf.cursorY));
-    const d = marker && term.registerDecoration({ marker, x: 0, width: term.cols, height: a.altura });
+  for (const [key, a] of want) {
+    if (marks.has(key)) continue;
+    const marker = term.registerMarker(a.line - (buf.baseY + buf.cursorY));
+    const d = marker && term.registerDecoration({ marker, x: 0, width: term.cols, height: a.height });
     if (!d) continue;
-    d.onRender((el) => el.classList.add("prompt-marca"));
-    marcas.set(chave, d);
+    d.onRender((el) => el.classList.add("prompt-mark"));
+    marks.set(key, d);
   }
 }
 
 /// Jumps to your previous or next prompt: in the terminal's scrollback or, in
 /// chat mode, between your bubbles.
-function irParaMensagem(folha: Folha, delta: number) {
-  const chat = folha.chat;
-  if (chat?.aberto) {
-    const topo = chat.lista.scrollTop;
-    const seus = [...chat.lista.querySelectorAll<HTMLElement>(".chat-voce")].map((el) => el.offsetTop - 12);
-    const alvo = delta < 0 ? seus.filter((y) => y < topo - 1).pop() : seus.find((y) => y > topo + 1);
-    chat.lista.scrollTo({ top: alvo ?? (delta < 0 ? 0 : chat.lista.scrollHeight) });
+function goToMessage(leaf: Leaf, delta: number) {
+  const chat = leaf.chat;
+  if (chat?.isOpen) {
+    const top = chat.list.scrollTop;
+    const yours = [...chat.list.querySelectorAll<HTMLElement>(".chat-you")].map((el) => el.offsetTop - 12);
+    const target = delta < 0 ? yours.filter((y) => y < top - 1).pop() : yours.find((y) => y > top + 1);
+    chat.list.scrollTo({ top: target ?? (delta < 0 ? 0 : chat.list.scrollHeight) });
     return;
   }
-  marcar(folha);
-  const linhas = [...(folha.marcas?.values() ?? [])].map((d) => d.marker.line).sort((a, b) => a - b);
-  const topo = folha.term.buffer.active.viewportY;
-  const alvo = delta < 0 ? linhas.filter((l) => l < topo).pop() : linhas.find((l) => l > topo);
-  if (alvo !== undefined) folha.term.scrollToLine(alvo);
-  else if (delta > 0) folha.term.scrollToBottom();
+  mark(leaf);
+  const lines = [...(leaf.marks?.values() ?? [])].map((d) => d.marker.line).sort((a, b) => a - b);
+  const top = leaf.term.buffer.active.viewportY;
+  const target = delta < 0 ? lines.filter((l) => l < top).pop() : lines.find((l) => l > top);
+  if (target !== undefined) leaf.term.scrollToLine(target);
+  else if (delta > 0) leaf.term.scrollToBottom();
 }
 
 // ---------- chat mode: the conversation in bubbles ----------
@@ -1636,57 +1638,57 @@ function irParaMensagem(folha: Folha, delta: number) {
 /// to Claude the same way as the keyboard.
 type Chat = {
   el: HTMLDivElement;
-  lista: HTMLDivElement;
-  aviso: HTMLDivElement;
-  avisoTexto: HTMLSpanElement;
+  list: HTMLDivElement;
+  notice: HTMLDivElement;
+  noticeText: HTMLSpanElement;
   /// The Claude question card, and which question is the one drawn:
-  /// redrawing on every `pintar` would erase what you already checked.
-  pergunta: HTMLDivElement;
-  perguntaDe?: string;
+  /// redrawing on every `paint` would erase what you already checked.
+  question: HTMLDivElement;
+  questionOf?: string;
   /// The "working…" line between the conversation and the field, and since when.
-  pensando: HTMLDivElement;
-  pensandoDesde?: number;
+  thinking: HTMLDivElement;
+  thinkingSince?: number;
   /// Your bubbles already on screen but not yet in the transcript: Claude
   /// only stores the prompt when it receives it, and waiting for it made sending
   /// look stuck. They go away, in order, when the real ones arrive.
-  pendentes: { el: HTMLElement; texto: string }[];
+  pending: { el: HTMLElement; text: string }[];
   /// The buttons that answer a permission request without leaving the chat.
-  permitir: HTMLButtonElement;
-  negar: HTMLButtonElement;
+  allow: HTMLButtonElement;
+  deny: HTMLButtonElement;
   campo: HTMLTextAreaElement;
   /// The `/commands` list, above the field while typing one.
   menu: HTMLDivElement;
   /// The commands from disk (yours, the project's, the plugins') and the ones matching
   /// what is typed, with the selected one.
-  comandos: Comando[];
-  achados: Comando[];
-  escolhido: number;
+  commands: Command[];
+  findings: Command[];
+  picked: number;
   /// The sessions to resume, while the `/resume` list is open: then the
   /// menu shows these, and what is typed in the field filters them.
-  sessoes?: SessaoSalva[];
-  sessoesAchadas: SessaoSalva[];
-  /// "Show earlier": the turns left off screen (see `CHAT_JANELA`).
-  mais: HTMLButtonElement;
+  sessions?: SavedSession[];
+  sessionsFound: SavedSession[];
+  /// "Show earlier": the turns left off screen (see `CHAT_WINDOW`).
+  more: HTMLButtonElement;
   /// The whole conversation, and from which turn it is drawn.
-  falas: Fala[];
-  desde: number;
+  messages: Message[];
+  since: number;
   /// Where the scroll was, to restore it when the browser resets it.
-  topo: number;
-  noFim: boolean;
-  /// Present while the list is being taken to the end (see `reporRolagem`).
-  grude?: number;
+  top: number;
+  atEnd: boolean;
+  /// Present while the list is being taken to the end (see `restoreScroll`).
+  stick?: number;
   /// A notice from the chat itself, in the same strip as "Claude is waiting for you".
-  recado?: string;
-  aberto: boolean;
+  flash?: string;
+  isOpen: boolean;
   /// The transcript on screen, and up to which byte of it has been read.
-  caminho?: string;
-  fim: number;
-  lendo?: boolean;
-  pulso?: ReturnType<typeof setInterval>;
+  path?: string;
+  end: number;
+  reading?: boolean;
+  pulse?: ReturnType<typeof setInterval>;
   /// The thumbnails of the images already pasted into Claude's prompt, waiting for Enter.
-  anexos: HTMLDivElement;
+  attachments: HTMLDivElement;
   /// The fade in or out in progress: toggling midway starts from where it stopped.
-  transicao?: Animation;
+  transition?: Animation;
 };
 
 /// How often the open chat checks whether the transcript grew. Claude
@@ -1697,136 +1699,136 @@ const CHAT_MS = 700;
 /// drawing them all makes a huge document the browser redoes entirely on
 /// every change of panel width — splitting, maximizing and switching modes
 /// got heavy in proportion to the conversation.
-const CHAT_JANELA = 80;
+const CHAT_WINDOW = 80;
 
 /// The strip above the field: Claude stopped to wait for you, or the chat has
 /// something to say. With neither, it doesn't exist.
-function desenharAviso(folha: Folha) {
-  const chat = folha.chat;
+function drawNotice(leaf: Leaf) {
+  const chat = leaf.chat;
   if (!chat) return;
-  const pergunta = folha.claude?.pergunta;
-  chat.pergunta.hidden = !pergunta;
-  if (!pergunta) chat.perguntaDe = undefined;
-  else if (chat.perguntaDe !== pergunta.id) desenharPergunta(folha, chat, pergunta);
+  const question = leaf.claude?.question;
+  chat.question.hidden = !question;
+  if (!question) chat.questionOf = undefined;
+  else if (chat.questionOf !== question.id) drawQuestion(leaf, chat, question);
   // With the card on screen, the strip would only say the same as it.
-  const esperando = folha.claude?.estado === "esperando" && !pergunta;
-  chat.aviso.hidden = !esperando && !chat.recado;
-  chat.avisoTexto.textContent = esperando
-    ? (folha.claude?.aviso ?? T.estaEsperando)
-    : (chat.recado ?? "");
-  chat.avisoTexto.title = chat.avisoTexto.textContent;
-  const permissao = esperando && folha.claude?.pede === "permissao";
-  chat.permitir.hidden = chat.negar.hidden = !permissao;
-  desenharPensando(folha);
+  const waiting = leaf.claude?.state === "waiting" && !question;
+  chat.notice.hidden = !waiting && !chat.flash;
+  chat.noticeText.textContent = waiting
+    ? (leaf.claude?.notice ?? T.isWaiting)
+    : (chat.flash ?? "");
+  chat.noticeText.title = chat.noticeText.textContent;
+  const permission = waiting && leaf.claude?.asks === "permission";
+  chat.allow.hidden = chat.deny.hidden = !permission;
+  drawThinking(leaf);
 }
 
 /// "Working… 12s": Claude received it and hasn't finished the turn yet. It is what
 /// the terminal shows with the spinning asterisk; without this, the chat stood still
 /// and there was no way to know whether the message had arrived.
-function desenharPensando(folha: Folha) {
-  const chat = folha.chat;
+function drawThinking(leaf: Leaf) {
+  const chat = leaf.chat;
   if (!chat) return;
-  const trabalhando = folha.claude?.estado === "trabalhando";
-  chat.pensando.hidden = !trabalhando;
-  if (!trabalhando) {
-    chat.pensandoDesde = undefined;
+  const working = leaf.claude?.state === "working";
+  chat.thinking.hidden = !working;
+  if (!working) {
+    chat.thinkingSince = undefined;
     return;
   }
-  chat.pensandoDesde ??= Date.now();
-  const s = Math.floor((Date.now() - chat.pensandoDesde) / 1000);
-  const tempo = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-  chat.pensando.textContent = T.trabalhando(tempo);
+  chat.thinkingSince ??= Date.now();
+  const s = Math.floor((Date.now() - chat.thinkingSince) / 1000);
+  const time = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+  chat.thinking.textContent = T.working(time);
 }
 
 /// The card for a Claude question, in steps: one question at a time, with
 /// tabs for all of them on top to go back and forth. In a single-choice question, the
 /// click already answers and moves to the next — and, on the last, sends everything —, like
 /// in the terminal. Multiple choice, "Other…" and options with a preview need the button.
-function desenharPergunta(folha: Folha, chat: Chat, pergunta: { id: string; questoes: Questao[] }) {
-  chat.perguntaDe = pergunta.id;
-  const { questoes } = pergunta;
-  const escolhas: Escolha[] = questoes.map(() => ({ labels: [] }));
-  let passo = 0;
-  const respondida = (i: number) => textoDaEscolha(escolhas[i]) !== undefined;
+function drawQuestion(leaf: Leaf, chat: Chat, question: { id: string; questions: QuestionItem[] }) {
+  chat.questionOf = question.id;
+  const { questions } = question;
+  const choices: Choice[] = questions.map(() => ({ labels: [] }));
+  let step = 0;
+  const answered = (i: number) => choiceText(choices[i]) !== undefined;
 
-  const enviar = () => {
-    const resposta = respostaDoHook(questoes, escolhas);
-    if (!resposta || folha.claude?.pergunta?.id !== pergunta.id) return;
-    folha.claude.pergunta = undefined;
-    folha.claude.pede = undefined;
-    folha.claude.aviso = undefined;
-    folha.claude.estado = "trabalhando";
-    invoke("pergunta_responder", { id: pergunta.id, resposta }).catch((e) => {
+  const send = () => {
+    const answer = hookAnswer(questions, choices);
+    if (!answer || leaf.claude?.question?.id !== question.id) return;
+    leaf.claude.question = undefined;
+    leaf.claude.asks = undefined;
+    leaf.claude.notice = undefined;
+    leaf.claude.state = "working";
+    invoke("question_answer", { id: question.id, answer: answer }).catch((e) => {
       // The terminal answered first, or Claude gave up on the question.
-      chat.recado = T.jaRespondidaNoTerminal;
-      jlog(`pergunta_responder: ${e}`);
-      pintar();
+      chat.flash = T.alreadyAnsweredInTerminal;
+      jlog(`question_answer: ${e}`);
+      paint();
     });
-    pintar();
-    teclado(folha);
+    paint();
+    keyboard(leaf);
   };
   /// Goes to the next unanswered one; with none missing, sends.
-  const avancar = () => {
-    const falta = questoes.findIndex((_, i) => i > passo && !respondida(i));
-    const antes = questoes.findIndex((_, i) => !respondida(i));
-    const proxima = falta >= 0 ? falta : antes;
-    if (proxima < 0) return enviar();
-    passo = proxima;
-    desenhar();
+  const advance = () => {
+    const missing = questions.findIndex((_, i) => i > step && !answered(i));
+    const before = questions.findIndex((_, i) => !answered(i));
+    const next = missing >= 0 ? missing : before;
+    if (next < 0) return send();
+    step = next;
+    draw();
   };
 
-  const desenhar = () => {
-    const q = questoes[passo];
-    const e = escolhas[passo];
-    const elementos: HTMLElement[] = [];
+  const draw = () => {
+    const q = questions[step];
+    const e = choices[step];
+    const elements: HTMLElement[] = [];
 
     // The tabs: with a single question there is nowhere to go.
-    if (questoes.length > 1) {
-      const abas = elemento("div", "chat-pergunta-abas");
-      for (const [i, outra] of questoes.entries()) {
-        const aba = elemento("button", "chat-pergunta-aba");
-        aba.textContent = `${respondida(i) ? "✓" : "○"} ${outra.header || T.perguntaN(i + 1)}`;
-        aba.setAttribute("aria-current", String(i === passo));
-        aba.addEventListener("click", () => {
-          passo = i;
-          desenhar();
+    if (questions.length > 1) {
+      const tabs = element("div", "chat-question-tabs");
+      for (const [i, other] of questions.entries()) {
+        const tab = element("button", "chat-question-tab");
+        tab.textContent = `${answered(i) ? "✓" : "○"} ${other.header || T.questionN(i + 1)}`;
+        tab.setAttribute("aria-current", String(i === step));
+        tab.addEventListener("click", () => {
+          step = i;
+          draw();
         });
-        abas.append(aba);
+        tabs.append(tab);
       }
-      elementos.push(abas);
+      elements.push(tabs);
     } else if (q.header) {
-      const etiqueta = elemento("span", "chat-pergunta-etiqueta");
-      etiqueta.textContent = q.header;
-      elementos.push(etiqueta);
+      const tag = element("span", "chat-question-label");
+      tag.textContent = q.header;
+      elements.push(tag);
     }
 
-    const texto = elemento("div", "chat-pergunta-texto");
-    texto.textContent = q.question;
+    const text = element("div", "chat-question-text");
+    text.textContent = q.question;
     if (q.multiSelect) {
-      const dica = elemento("span", "chat-pergunta-dica");
-      dica.textContent = T.marqueQuantasQuiser;
-      texto.append(dica);
+      const hint = element("span", "chat-question-hint");
+      hint.textContent = T.pickAnyNumber;
+      text.append(hint);
     }
-    const temPrevia = q.options.some((o) => o.preview);
-    const direto = !q.multiSelect && !temPrevia;
-    const opcoes = elemento("div", "chat-pergunta-opcoes");
-    const previa = elemento("pre", "chat-pergunta-previa");
-    const escolhida = q.options.find((o) => e.labels.includes(o.label) && o.preview);
-    previa.hidden = !escolhida;
-    previa.textContent = escolhida?.preview ?? "";
-    const outra = elemento("input", "chat-pergunta-outra");
-    outra.placeholder = T.escrevaSuaResposta;
-    outra.value = e.outra ?? "";
-    outra.hidden = e.outra === undefined;
+    const hasPreview = q.options.some((o) => o.preview);
+    const direct = !q.multiSelect && !hasPreview;
+    const options = element("div", "chat-question-options");
+    const preview = element("pre", "chat-question-preview");
+    const chosen = q.options.find((o) => e.labels.includes(o.label) && o.preview);
+    preview.hidden = !chosen;
+    preview.textContent = chosen?.preview ?? "";
+    const other = element("input", "chat-question-other");
+    other.placeholder = T.writeYourAnswer;
+    other.value = e.other ?? "";
+    other.hidden = e.other === undefined;
 
     for (const o of q.options) {
-      const b = elemento("button", "chat-opcao");
+      const b = element("button", "chat-option");
       b.setAttribute("aria-pressed", String(e.labels.includes(o.label)));
-      const rotulo = elemento("span", "chat-opcao-rotulo");
-      rotulo.textContent = o.label;
-      b.append(rotulo);
+      const label = element("span", "chat-option-label");
+      label.textContent = o.label;
+      b.append(label);
       if (o.description) {
-        const d = elemento("span", "chat-opcao-descricao");
+        const d = element("span", "chat-option-description");
         d.textContent = o.description;
         b.append(d);
       }
@@ -1835,168 +1837,168 @@ function desenharPergunta(folha: Folha, chat: Chat, pergunta: { id: string; ques
           e.labels = e.labels.includes(o.label) ? e.labels.filter((l) => l !== o.label) : [...e.labels, o.label];
         } else {
           e.labels = [o.label];
-          e.outra = undefined;
+          e.other = undefined;
         }
-        if (direto) return avancar();
-        desenhar();
+        if (direct) return advance();
+        draw();
       });
-      opcoes.append(b);
+      options.append(b);
     }
-    const outraBotao = elemento("button", "chat-opcao");
-    outraBotao.textContent = T.outra;
-    outraBotao.setAttribute("aria-pressed", String(e.outra !== undefined));
-    outraBotao.addEventListener("click", () => {
+    const otherButton = element("button", "chat-option");
+    otherButton.textContent = T.other;
+    otherButton.setAttribute("aria-pressed", String(e.other !== undefined));
+    otherButton.addEventListener("click", () => {
       // In a single choice, writing your own unchecks the checked one.
       if (!q.multiSelect) e.labels = [];
-      e.outra ??= "";
-      desenhar();
-      chat.pergunta.querySelector<HTMLInputElement>(".chat-pergunta-outra")?.focus();
+      e.other ??= "";
+      draw();
+      chat.question.querySelector<HTMLInputElement>(".chat-question-other")?.focus();
     });
-    opcoes.append(outraBotao);
-    outra.addEventListener("input", () => {
-      e.outra = outra.value;
-      seguir.disabled = !respondida(passo);
+    options.append(otherButton);
+    other.addEventListener("input", () => {
+      e.other = other.value;
+      follow.disabled = !answered(step);
     });
-    outra.addEventListener("keydown", (ev) => {
+    other.addEventListener("keydown", (ev) => {
       if (ev.key !== "Enter" || ev.isComposing) return;
       ev.preventDefault();
-      if (respondida(passo)) avancar();
+      if (answered(step)) advance();
     });
 
-    const acoes = elemento("div", "chat-pergunta-acoes");
-    const terminal = elemento("button", "chat-pergunta-terminal");
-    terminal.textContent = T.verNoTerminal;
-    terminal.addEventListener("click", () => alternarChat(folha));
-    const voltar = elemento("button", "chat-pergunta-terminal");
-    voltar.textContent = T.voltar;
-    voltar.addEventListener("click", () => {
-      passo--;
-      desenhar();
+    const actions = element("div", "chat-question-actions");
+    const terminal = element("button", "chat-question-terminal");
+    terminal.textContent = T.viewInTerminal;
+    terminal.addEventListener("click", () => toggleChat(leaf));
+    const goBack = element("button", "chat-question-terminal");
+    goBack.textContent = T.goBack;
+    goBack.addEventListener("click", () => {
+      step--;
+      draw();
     });
     // On the last unanswered one the button already sends; before it, it moves on.
-    const ultima = questoes.every((_, i) => i === passo || respondida(i));
-    const seguir = elemento("button", "chat-pergunta-responder");
-    seguir.textContent = ultima ? T.responder : T.proxima;
-    seguir.disabled = !respondida(passo);
-    seguir.addEventListener("click", avancar);
-    acoes.append(terminal);
-    if (passo > 0) acoes.append(voltar);
-    acoes.append(seguir);
+    const last = questions.every((_, i) => i === step || answered(i));
+    const follow = element("button", "chat-question-answer");
+    follow.textContent = last ? T.reply : T.next;
+    follow.disabled = !answered(step);
+    follow.addEventListener("click", advance);
+    actions.append(terminal);
+    if (step > 0) actions.append(goBack);
+    actions.append(follow);
 
-    elementos.push(texto, opcoes, outra, previa, acoes);
-    chat.pergunta.replaceChildren(...elementos);
+    elements.push(text, options, other, preview, actions);
+    chat.question.replaceChildren(...elements);
   };
-  desenhar();
+  draw();
 }
 
 /// Answers the permission request in the terminal, through its keyboard: the
 /// Enter accepts the top option ("Yes"), esc declines. It is what you would press there.
-function responderPermissao(folha: Folha, sim: boolean) {
-  const claude = folha.claude;
-  if (claude?.estado !== "esperando" || claude.pede !== "permissao") return;
-  invoke("pty_write", { id: folha.id, data: sim ? "\r" : "\x1b" }).catch((e) => jlog(`permission: ${e}`));
+function answerPermission(leaf: Leaf, yes: boolean) {
+  const claude = leaf.claude;
+  if (claude?.state !== "waiting" || claude.asks !== "permission") return;
+  invoke("pty_write", { id: leaf.id, data: yes ? "\r" : "\x1b" }).catch((e) => jlog(`permission: ${e}`));
   // Accepted, Claude keeps working; declined, it stops and waits for you to say
   // what to do instead — and the chat field sends that.
-  claude.estado = sim ? "trabalhando" : "ocioso";
-  claude.pede = undefined;
-  claude.aviso = undefined;
-  pintar();
-  teclado(folha);
+  claude.state = yes ? "working" : "idle";
+  claude.asks = undefined;
+  claude.notice = undefined;
+  paint();
+  keyboard(leaf);
 }
 
 /// Puts the chat's scroll back where you left it.
-function reporRolagem(chat: Chat) {
-  const { lista } = chat;
-  if (!chat.noFim) {
-    if (lista.scrollTop !== chat.topo) lista.scrollTop = chat.topo;
+function restoreScroll(chat: Chat) {
+  const { list } = chat;
+  if (!chat.atEnd) {
+    if (list.scrollTop !== chat.top) list.scrollTop = chat.top;
     return;
   }
-  lista.scrollTop = lista.scrollHeight;
+  list.scrollTop = list.scrollHeight;
   // Once isn't enough to reach the end: off-screen turns have a guessed height
   // (style.css's `content-visibility`), and only get the real one when the
   // scroll reaches them — then the list grows and the end is somewhere else. It insists for
   // a few frames, until the height stops changing.
-  if (chat.grude !== undefined) return;
-  let quadros = 0;
-  let iguais = 0;
-  let antes = -1;
-  const passo = () => {
-    chat.grude = undefined;
-    if (!chat.aberto || !chat.noFim) return;
-    const altura = lista.scrollHeight;
-    lista.scrollTop = altura;
-    iguais = altura === antes ? iguais + 1 : 0;
-    antes = altura;
-    if (++quadros < 30 && iguais < 2) chat.grude = requestAnimationFrame(passo);
+  if (chat.stick !== undefined) return;
+  let frames = 0;
+  let equal = 0;
+  let before = -1;
+  const step = () => {
+    chat.stick = undefined;
+    if (!chat.isOpen || !chat.atEnd) return;
+    const height = list.scrollHeight;
+    list.scrollTop = height;
+    equal = height === before ? equal + 1 : 0;
+    before = height;
+    if (++frames < 30 && equal < 2) chat.stick = requestAnimationFrame(step);
   };
-  chat.grude = requestAnimationFrame(passo);
+  chat.stick = requestAnimationFrame(step);
 }
 
 /// Draws one more batch of older turns, above the ones already on screen,
 /// without moving what you are reading.
-function mostrarAnteriores(chat: Chat) {
-  const ate = chat.desde;
-  chat.desde = Math.max(0, ate - CHAT_JANELA);
-  const altura = chat.lista.scrollHeight;
-  chat.mais.after(...chat.falas.slice(chat.desde, ate).map(desenharFala));
-  chat.mais.hidden = chat.desde === 0;
-  chat.lista.scrollTop += chat.lista.scrollHeight - altura;
+function showPrevious(chat: Chat) {
+  const to = chat.since;
+  chat.since = Math.max(0, to - CHAT_WINDOW);
+  const height = chat.list.scrollHeight;
+  chat.more.after(...chat.messages.slice(chat.since, to).map(drawMessage));
+  chat.more.hidden = chat.since === 0;
+  chat.list.scrollTop += chat.list.scrollHeight - height;
 }
 
 /// The thumbnails go away along with the message that took them.
-function limparAnexos(chat: Chat) {
-  for (const img of chat.anexos.querySelectorAll("img")) URL.revokeObjectURL(img.src);
-  chat.anexos.replaceChildren();
-  chat.anexos.hidden = true;
+function clearAttachments(chat: Chat) {
+  for (const img of chat.attachments.querySelectorAll("img")) URL.revokeObjectURL(img.src);
+  chat.attachments.replaceChildren();
+  chat.attachments.hidden = true;
 }
 
 /// Who gets the panel's keyboard: the chat field, if it is the one on screen.
-function teclado(folha: Folha) {
-  const v = folha.visor;
-  if (folha.explorador?.aberto && !folha.explorador.fixo) folha.explorador.arvore.focus({ preventScroll: true });
-  else if (v?.aberto && (arranjoVisor === "sobre" || v.comTeclado)) (v.edicao?.area ?? v.corpo).focus({ preventScroll: true });
-  else if (folha.chat?.aberto) folha.chat.campo.focus();
-  else folha.term.focus();
+function keyboard(leaf: Leaf) {
+  const v = leaf.viewer;
+  if (leaf.explorer?.isOpen && !leaf.explorer.fixed) leaf.explorer.tree.focus({ preventScroll: true });
+  else if (v?.isOpen && (layoutViewer === "over" || v.withKeyboard)) (v.edit?.area ?? v.body).focus({ preventScroll: true });
+  else if (leaf.chat?.isOpen) leaf.chat.campo.focus();
+  else leaf.term.focus();
 }
 
-function criarChat(folha: Folha): Chat {
-  const el = elemento("div", "chat");
-  const lista = elemento("div", "chat-lista");
-  const pergunta = elemento("div", "chat-pergunta");
-  pergunta.hidden = true;
-  const pensando = elemento("div", "chat-pensando");
-  pensando.hidden = true;
-  const aviso = elemento("div", "chat-aviso");
-  const avisoTexto = elemento("span", "chat-aviso-texto");
-  const permitir = elemento("button", "chat-aviso-sim");
-  permitir.textContent = T.permitir;
-  permitir.addEventListener("click", () => responderPermissao(folha, true));
-  const negar = elemento("button", "chat-aviso-nao");
-  negar.textContent = T.negar;
-  negar.addEventListener("click", () => responderPermissao(folha, false));
-  const ver = elemento("button", "chat-aviso-ver");
-  ver.textContent = T.verNoTerminal;
-  ver.addEventListener("click", () => alternarChat(folha));
-  aviso.append(avisoTexto, permitir, negar, ver);
-  const mais = elemento("button", "chat-mais");
-  mais.textContent = T.mostrarAnteriores;
-  mais.hidden = true;
-  const campo = elemento("textarea", "chat-campo");
+function createChat(leaf: Leaf): Chat {
+  const el = element("div", "chat");
+  const list = element("div", "chat-list");
+  const question = element("div", "chat-question");
+  question.hidden = true;
+  const thinking = element("div", "chat-thinking");
+  thinking.hidden = true;
+  const notice = element("div", "chat-notice");
+  const noticeText = element("span", "chat-notice-text");
+  const allow = element("button", "chat-notice-yes");
+  allow.textContent = T.allow;
+  allow.addEventListener("click", () => answerPermission(leaf, true));
+  const deny = element("button", "chat-notice-not");
+  deny.textContent = T.deny;
+  deny.addEventListener("click", () => answerPermission(leaf, false));
+  const view = element("button", "chat-notice-view");
+  view.textContent = T.viewInTerminal;
+  view.addEventListener("click", () => toggleChat(leaf));
+  notice.append(noticeText, allow, deny, view);
+  const more = element("button", "chat-more");
+  more.textContent = T.showPrevious;
+  more.hidden = true;
+  const campo = element("textarea", "chat-field");
   campo.rows = 1;
   campo.spellcheck = false;
   campo.setAttribute("autocorrect", "off");
-  campo.placeholder = T.mensagemParaOClaude;
-  const menu = elemento("div", "chat-comandos");
+  campo.placeholder = T.messageForClaude;
+  const menu = element("div", "chat-commands");
   menu.hidden = true;
-  const anexos = elemento("div", "chat-anexos");
-  anexos.hidden = true;
-  el.append(lista, pensando, pergunta, aviso, menu, anexos, campo);
+  const attachments = element("div", "chat-attachments");
+  attachments.hidden = true;
+  el.append(list, thinking, question, notice, menu, attachments, campo);
   // Inside the terminal's element, not beside it: hiding it would remove the measure
   // FitAddon computes the grid from, and Claude would get a SIGWINCH on every
   // mode switch.
-  folha.el.querySelector(".folha-tela")?.append(el);
+  leaf.el.querySelector(".leaf-screen")?.append(el);
 
-  const crescer = () => {
+  const grow = () => {
     campo.style.height = "auto";
     campo.style.height = `${Math.min(campo.scrollHeight, 160)}px`;
   };
@@ -2005,118 +2007,118 @@ function criarChat(folha: Folha): Chat {
   /// rest goes the paste way, like ⌘V — several lines arrive as
   /// a single block, not as an Enter at each break. Enter goes after, on
   /// its own: together with the paste Claude would take it as one more line of it.
-  const enviar = (texto: string) => {
+  const send = (text: string) => {
     // `/resume` alone would open the session list in the terminal, where the chat
     // can't see it. The list is built here, and what goes to Claude is
     // `/resume` already with the chosen session.
-    if (texto === "/resume") return void abrirSessoes(folha);
-    chat.sessoes = undefined;
-    limparAnexos(chat);
+    if (text === "/resume") return void openSessions(leaf);
+    chat.sessions = undefined;
+    clearAttachments(chat);
     campo.value = "";
-    crescer();
-    desenharComandos(chat);
-    const comando = /^\/([\w:.-]+)/.exec(texto);
+    grow();
+    drawCommands(chat);
+    const command = /^\/([\w:.-]+)/.exec(text);
     // The message goes on screen right away, dimmed until the transcript confirms it. A
     // `/command` doesn't: many don't even become turns, and the bubble would hang there.
-    if (!comando) {
-      const balao = desenharFala({ quem: "voce", texto });
-      balao.classList.add("pendente");
-      chat.lista.append(balao);
-      chat.pendentes.push({ el: balao, texto });
-      chat.noFim = true;
-      reporRolagem(chat);
-      if (folha.claude) folha.claude.estado = "trabalhando";
+    if (!command) {
+      const balao = drawMessage({ who: "you", text });
+      balao.classList.add("pending");
+      chat.list.append(balao);
+      chat.pending.push({ el: balao, text });
+      chat.atEnd = true;
+      restoreScroll(chat);
+      if (leaf.claude) leaf.claude.state = "working";
     }
-    if (comando && !texto.includes("\n")) {
-      invoke("pty_write", { id: folha.id, data: texto }).catch((err) => jlog(`chat command: ${err}`));
-    } else colar(folha, texto);
+    if (command && !text.includes("\n")) {
+      invoke("pty_write", { id: leaf.id, data: text }).catch((err) => jlog(`chat command: ${err}`));
+    } else paste(leaf, text);
     setTimeout(() => {
-      invoke("pty_write", { id: folha.id, data: "\r" }).catch((err) => jlog(`chat send: ${err}`));
+      invoke("pty_write", { id: leaf.id, data: "\r" }).catch((err) => jlog(`chat send: ${err}`));
     }, 80);
     // What the command opens (the model list, the sessions to resume) shows
     // in the terminal, and that is where it is answered. The chat doesn't step aside on its own:
     // it notifies, and the notice's button takes you there.
-    const nome = comando?.[1];
+    const name = command?.[1];
     // With an argument the command already says what it wants, and opens no screen.
-    const abreTela = texto === `/${nome}` && COMANDOS_DO_CLAUDE.some((c) => c.interativo && c.nome === nome);
-    chat.recado = abreTela ? T.abriuTelaNoTerminal(nome ?? "") : undefined;
-    pintar();
+    const opensScreen = text === `/${name}` && CLAUDE_COMMANDS.some((c) => c.interactive && c.name === name);
+    chat.flash = opensScreen ? T.openedScreenInTerminal(name ?? "") : undefined;
+    paint();
   };
-  const completar = (c: Comando) => {
-    campo.value = `/${c.nome} `;
-    crescer();
-    desenharComandos(chat);
+  const completeWith = (c: Command) => {
+    campo.value = `/${c.name} `;
+    grow();
+    drawCommands(chat);
   };
 
   campo.addEventListener("input", () => {
-    crescer();
+    grow();
     // Writing the answer is attending, like the first key in the terminal.
-    if (folha.claude?.estado === "esperando" && atendivelNoChat(folha)) {
-      folha.claude.estado = "ocioso";
-      pintar();
+    if (leaf.claude?.state === "waiting" && answerableInChat(leaf)) {
+      leaf.claude.state = "idle";
+      paint();
     }
     // Just opened the list: the commands on disk may have changed since the
     // last time (a new skill, another project).
-    if (campo.value === "/") void carregarComandos(folha);
-    chat.escolhido = 0;
-    desenharComandos(chat);
+    if (campo.value === "/") void loadCommands(leaf);
+    chat.picked = 0;
+    drawCommands(chat);
   });
-  const retomarSessao = (s: SessaoSalva) => enviar(`/resume ${s.id}`);
-  const fecharSessoes = () => {
-    chat.sessoes = undefined;
+  const resumeSession = (s: SavedSession) => send(`/resume ${s.id}`);
+  const closeSessions = () => {
+    chat.sessions = undefined;
     campo.value = "";
-    crescer();
-    desenharComandos(chat);
+    grow();
+    drawCommands(chat);
   };
   menu.addEventListener("mousedown", (e) => {
     // The click doesn't take the keyboard away from the field.
     e.preventDefault();
-    const item = (e.target as HTMLElement).closest<HTMLElement>(".chat-comando");
+    const item = (e.target as HTMLElement).closest<HTMLElement>(".chat-command");
     if (!item) return;
-    if (chat.sessoes) {
-      const s = chat.sessoesAchadas[Number(item.dataset.i)];
-      if (s) retomarSessao(s);
+    if (chat.sessions) {
+      const s = chat.sessionsFound[Number(item.dataset.i)];
+      if (s) resumeSession(s);
       return;
     }
-    const c = chat.achados[Number(item.dataset.i)];
-    if (c) completar(c);
+    const c = chat.findings[Number(item.dataset.i)];
+    if (c) completeWith(c);
   });
   campo.addEventListener("keydown", (e) => {
-    if (nossoAtalho(e)) return;
-    if (chat.sessoes) {
-      const n = chat.sessoesAchadas.length;
+    if (ourShortcut(e)) return;
+    if (chat.sessions) {
+      const n = chat.sessionsFound.length;
       if ((e.key === "ArrowDown" || e.key === "ArrowUp") && n) {
         e.preventDefault();
-        chat.escolhido = (chat.escolhido + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
-        return desenharComandos(chat);
+        chat.picked = (chat.picked + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
+        return drawCommands(chat);
       }
       if (e.key === "Enter" && !e.isComposing) {
         e.preventDefault();
-        const s = chat.sessoesAchadas[chat.escolhido];
-        if (s) retomarSessao(s);
+        const s = chat.sessionsFound[chat.picked];
+        if (s) resumeSession(s);
         return;
       }
       if (e.key === "Escape") {
         e.preventDefault();
-        return fecharSessoes();
+        return closeSessions();
       }
       return;
     }
-    if (!menu.hidden && chat.achados.length) {
-      const n = chat.achados.length;
+    if (!menu.hidden && chat.findings.length) {
+      const n = chat.findings.length;
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        chat.escolhido = (chat.escolhido + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
-        return desenharComandos(chat);
+        chat.picked = (chat.picked + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
+        return drawCommands(chat);
       }
       // Tab completes, for those who will write the arguments; Enter sends right away.
       if (e.key === "Tab") {
         e.preventDefault();
-        return completar(chat.achados[chat.escolhido]);
+        return completeWith(chat.findings[chat.picked]);
       }
       if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
-        return enviar(`/${chat.achados[chat.escolhido].nome}`);
+        return send(`/${chat.findings[chat.picked].name}`);
       }
       // Esc closes the list; only without it does it interrupt Claude.
       if (e.key === "Escape") {
@@ -2128,14 +2130,14 @@ function criarChat(folha: Folha): Chat {
     if (e.key === "Escape") {
       e.preventDefault();
       // With a permission request open, esc there is the "no": the notice goes along.
-      if (folha.claude?.estado === "esperando" && folha.claude.pede === "permissao") {
-        return responderPermissao(folha, false);
+      if (leaf.claude?.state === "waiting" && leaf.claude.asks === "permission") {
+        return answerPermission(leaf, false);
       }
-      invoke("pty_write", { id: folha.id, data: "\x1b" }).catch((err) => jlog(`chat esc: ${err}`));
+      invoke("pty_write", { id: leaf.id, data: "\x1b" }).catch((err) => jlog(`chat esc: ${err}`));
       // When interrupted, Claude doesn't send `Stop`: "working" goes away here.
-      if (folha.claude?.estado === "trabalhando") {
-        folha.claude.estado = "ocioso";
-        pintar();
+      if (leaf.claude?.state === "working") {
+        leaf.claude.state = "idle";
+        paint();
       }
       return;
     }
@@ -2144,103 +2146,103 @@ function criarChat(folha: Folha): Chat {
     e.preventDefault();
     // The marker in the field is only for you to see where the image is: in Claude's
     // prompt it already went in with ⌃V, and sent again it would become text.
-    const texto = campo.value.replace(/\[Image #\d+\] ?/g, "").trim();
-    if (texto) enviar(texto);
-    else if (!chat.anexos.hidden) {
+    const text = campo.value.replace(/\[Image #\d+\] ?/g, "").trim();
+    if (text) send(text);
+    else if (!chat.attachments.hidden) {
       campo.value = "";
-      crescer();
-      invoke("pty_write", { id: folha.id, data: "\r" }).catch((err) => jlog(`chat send: ${err}`));
-      limparAnexos(chat);
+      grow();
+      invoke("pty_write", { id: leaf.id, data: "\r" }).catch((err) => jlog(`chat send: ${err}`));
+      clearAttachments(chat);
     }
   });
   // Clicking anywhere in the chat is like clicking in the terminal: the keyboard goes
   // to the field, and you can just start typing. Except when the click was for
   // something else — a button, a link, another field — or to select text.
   el.addEventListener("mouseup", (e) => {
-    const alvo = e.target as HTMLElement;
-    if (alvo.closest("button, a, input, textarea, select, summary")) return;
+    const target = e.target as HTMLElement;
+    if (target.closest("button, a, input, textarea, select, summary")) return;
     if (!(getSelection()?.isCollapsed ?? true)) return;
     campo.focus({ preventScroll: true });
   });
   // A link in the answer opens outside, like the terminal's: inside, it would replace the
   // whole app's page with the link's.
-  lista.addEventListener("click", (e) => {
+  list.addEventListener("click", (e) => {
     // ⌘-click on a `path:line` in the answer opens the file in the viewer.
-    if (cliqueEmReferencia(folha, e)) return;
+    if (referenceClick(leaf, e)) return;
     const a = (e.target as HTMLElement).closest("a");
     if (!a) return;
     e.preventDefault();
-    abrirLink(e, a.href);
+    openLink(e, a.href);
   });
   // A pasted image goes to Claude as in the terminal: ⌃V is what makes Claude
   // Code read the clipboard and attach it to the prompt it is building. The
   // field's text goes after, along with Enter.
   campo.addEventListener("paste", (e) => {
-    const arquivo = [...(e.clipboardData?.items ?? [])]
+    const file = [...(e.clipboardData?.items ?? [])]
       .find((i) => i.kind === "file" && i.type.startsWith("image/"))
       ?.getAsFile();
-    if (!arquivo) return;
+    if (!file) return;
     e.preventDefault();
-    invoke("pty_write", { id: folha.id, data: "\x16" }).catch((err) => jlog(`chat image: ${err}`));
-    const img = elemento("img", "chat-anexo");
-    img.src = URL.createObjectURL(arquivo);
-    img.alt = T.imagemAnexada;
-    img.addEventListener("click", () => ampliarImagem(img.src));
-    anexos.append(img);
-    anexos.hidden = false;
+    invoke("pty_write", { id: leaf.id, data: "\x16" }).catch((err) => jlog(`chat image: ${err}`));
+    const img = element("img", "chat-attachment");
+    img.src = URL.createObjectURL(file);
+    img.alt = T.attachedImage;
+    img.addEventListener("click", () => expandImage(img.src));
+    attachments.append(img);
+    attachments.hidden = false;
     // The number Claude Code will give it: it counts across the whole session.
-    const vistas = chat.falas.flatMap((f) =>
-      f.quem === "voce" ? [...f.texto.matchAll(/\[Image #(\d+)\]/g)].map((m) => Number(m[1])) : [],
+    const seenOnes = chat.messages.flatMap((f) =>
+      f.who === "you" ? [...f.text.matchAll(/\[Image #(\d+)\]/g)].map((m) => Number(m[1])) : [],
     );
-    const n = Math.max(0, ...vistas) + anexos.childElementCount;
+    const n = Math.max(0, ...seenOnes) + attachments.childElementCount;
     campo.setRangeText(`[Image #${n}] `, campo.selectionStart, campo.selectionEnd, "end");
-    crescer();
+    grow();
   });
 
   const chat: Chat = {
     el,
-    lista,
-    aviso,
-    avisoTexto,
-    pergunta,
-    pensando,
-    pendentes: [],
-    permitir,
-    negar,
+    list,
+    notice,
+    noticeText,
+    question,
+    thinking,
+    pending: [],
+    allow,
+    deny,
     campo,
     menu,
-    comandos: [],
-    achados: [],
-    escolhido: 0,
-    anexos,
-    sessoesAchadas: [],
-    mais,
-    falas: [],
-    desde: 0,
-    topo: 0,
-    noFim: true,
-    aberto: false,
-    fim: 0,
+    commands: [],
+    findings: [],
+    picked: 0,
+    attachments,
+    sessionsFound: [],
+    more,
+    messages: [],
+    since: 0,
+    top: 0,
+    atEnd: true,
+    isOpen: false,
+    end: 0,
   };
-  mais.addEventListener("click", () => mostrarAnteriores(chat));
-  lista.addEventListener(
+  more.addEventListener("click", () => showPrevious(chat));
+  list.addEventListener(
     "scroll",
     () => {
       // Off screen the list has no height, and what it says about the scroll is zero.
       // And on the way to the end, the positions passed through aren't your choice.
-      if (!lista.clientHeight || chat.grude !== undefined) return;
-      chat.topo = lista.scrollTop;
-      chat.noFim = lista.scrollHeight - lista.scrollTop - lista.clientHeight < 40;
+      if (!list.clientHeight || chat.stick !== undefined) return;
+      chat.top = list.scrollTop;
+      chat.atEnd = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
     },
     { passive: true },
   );
   // Scrolled by hand midway: you are in charge.
-  lista.addEventListener(
+  list.addEventListener(
     "wheel",
     () => {
-      if (chat.grude === undefined) return;
-      cancelAnimationFrame(chat.grude);
-      chat.grude = undefined;
+      if (chat.stick === undefined) return;
+      cancelAnimationFrame(chat.stick);
+      chat.stick = undefined;
     },
     { passive: true },
   );
@@ -2249,13 +2251,13 @@ function criarChat(folha: Folha): Chat {
 
 /// The commands and skills on disk, for the `/` list. The folder is the
 /// session's: it is from there that Claude Code sees the project's `.claude`.
-async function carregarComandos(folha: Folha) {
-  const chat = folha.chat;
+async function loadCommands(leaf: Leaf) {
+  const chat = leaf.chat;
   if (!chat) return;
   try {
-    const doDisco = await invoke<Comando[]>("comandos_listar", { pasta: folha.claude?.pasta ?? null });
-    chat.comandos = doDisco;
-    desenharComandos(chat);
+    const fromDisk = await invoke<Command[]>("commands_list", { folder: leaf.claude?.folder ?? null });
+    chat.commands = fromDisk;
+    drawCommands(chat);
   } catch (e) {
     jlog(`commands: ${e}`);
   }
@@ -2263,113 +2265,113 @@ async function carregarComandos(folha: Folha) {
 
 /// The list shows while the field is just a slash and a name with no space yet;
 /// after the space come the arguments, and it gets out of the way.
-function desenharComandos(chat: Chat) {
-  if (chat.sessoes) return desenharSessoes(chat);
-  const digitado = /^\/([\w:.-]*)$/.exec(chat.campo.value);
-  chat.achados = digitado ? filtrarComandos([...chat.comandos, ...COMANDOS_DO_CLAUDE], digitado[1]) : [];
-  chat.menu.hidden = !chat.achados.length;
+function drawCommands(chat: Chat) {
+  if (chat.sessions) return drawSessions(chat);
+  const typed = /^\/([\w:.-]*)$/.exec(chat.campo.value);
+  chat.findings = typed ? filterCommands([...chat.commands, ...CLAUDE_COMMANDS], typed[1]) : [];
+  chat.menu.hidden = !chat.findings.length;
   if (chat.menu.hidden) return;
-  chat.escolhido = Math.min(chat.escolhido, chat.achados.length - 1);
+  chat.picked = Math.min(chat.picked, chat.findings.length - 1);
   chat.menu.replaceChildren(
-    ...chat.achados.map((c, i) => {
-      const item = elemento("div", "chat-comando");
+    ...chat.findings.map((c, i) => {
+      const item = element("div", "chat-command");
       item.dataset.i = String(i);
-      item.classList.toggle("escolhido", i === chat.escolhido);
-      const nome = elemento("span", "chat-comando-nome");
-      nome.textContent = `/${c.nome}`;
-      const descricao = elemento("span", "chat-comando-descricao");
-      descricao.textContent = c.descricao;
-      item.append(nome, descricao);
+      item.classList.toggle("selected", i === chat.picked);
+      const name = element("span", "chat-command-name");
+      name.textContent = `/${c.name}`;
+      const description = element("span", "chat-command-description");
+      description.textContent = c.description;
+      item.append(name, description);
       return item;
     }),
   );
-  chat.menu.querySelector(".escolhido")?.scrollIntoView({ block: "nearest" });
+  chat.menu.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
 }
 
 /// A Claude Code session stored on disk, as `claude_sessions` lists it.
-type SessaoSalva = { id: string; title: string; modified: number };
+type SavedSession = { id: string; title: string; modified: number };
 
 /// "5 min ago", "3 h ago", "2 d ago": enough to find yesterday's conversation.
-function haQuanto(ms: number): string {
+function howLongAgo(ms: number): string {
   const min = Math.max(0, Math.round((Date.now() - ms) / 60_000));
-  if (min < 1) return T.agora;
+  if (min < 1) return T.now;
   if (min < 60) return T.haMin(min);
-  if (min < 60 * 24) return T.haHoras(Math.round(min / 60));
-  return T.haDias(Math.round(min / (60 * 24)));
+  if (min < 60 * 24) return T.hoursAgo(Math.round(min / 60));
+  return T.daysAgo(Math.round(min / (60 * 24)));
 }
 
 /// The `/resume` list, inside the chat: the stored sessions of the folder this one
 /// was born in, which is where Claude Code looks for them.
-async function abrirSessoes(folha: Folha) {
-  const chat = folha.chat;
+async function openSessions(leaf: Leaf) {
+  const chat = leaf.chat;
   if (!chat) return;
   chat.campo.value = "";
   chat.campo.style.height = "auto";
-  const pasta = folha.claude?.pasta ?? (await invoke<string | null>("pty_cwd", { id: folha.id }).catch(() => null));
-  const todas = pasta ? await invoke<SessaoSalva[]>("claude_sessions", { path: pasta }).catch(() => []) : [];
+  const folder = leaf.claude?.folder ?? (await invoke<string | null>("pty_cwd", { id: leaf.id }).catch(() => null));
+  const every = folder ? await invoke<SavedSession[]>("claude_sessions", { path: folder }).catch(() => []) : [];
   // The session we are already in isn't one to resume.
-  const outras = todas.filter((s) => s.id !== folha.claude?.sessao);
-  if (!outras.length) {
-    chat.recado = T.semOutraSessao;
-    return desenharAviso(folha);
+  const others = every.filter((s) => s.id !== leaf.claude?.session);
+  if (!others.length) {
+    chat.flash = T.noOtherSession;
+    return drawNotice(leaf);
   }
-  chat.recado = undefined;
-  desenharAviso(folha);
-  chat.sessoes = outras;
-  chat.escolhido = 0;
-  desenharComandos(chat);
+  chat.flash = undefined;
+  drawNotice(leaf);
+  chat.sessions = others;
+  chat.picked = 0;
+  drawCommands(chat);
   chat.campo.focus();
 }
 
 /// The menu, in place of the commands: the sessions whose title contains what is in the
 /// field. With the field empty, all of them.
-function desenharSessoes(chat: Chat) {
+function drawSessions(chat: Chat) {
   const q = chat.campo.value.trim().toLowerCase();
-  chat.sessoesAchadas = (chat.sessoes ?? []).filter((s) => s.title.toLowerCase().includes(q));
-  chat.escolhido = Math.max(0, Math.min(chat.escolhido, chat.sessoesAchadas.length - 1));
-  const cabeca = elemento("div", "chat-comandos-cabeca");
-  cabeca.textContent = chat.sessoesAchadas.length
-    ? T.retomarSessao
-    : T.nenhumaSessaoComTexto;
+  chat.sessionsFound = (chat.sessions ?? []).filter((s) => s.title.toLowerCase().includes(q));
+  chat.picked = Math.max(0, Math.min(chat.picked, chat.sessionsFound.length - 1));
+  const head = element("div", "chat-commands-head");
+  head.textContent = chat.sessionsFound.length
+    ? T.resumeSession
+    : T.noSessionWithText;
   chat.menu.hidden = false;
   chat.menu.replaceChildren(
-    cabeca,
-    ...chat.sessoesAchadas.map((s, i) => {
-      const item = elemento("div", "chat-comando chat-sessao");
+    head,
+    ...chat.sessionsFound.map((s, i) => {
+      const item = element("div", "chat-command chat-sessao");
       item.dataset.i = String(i);
-      item.classList.toggle("escolhido", i === chat.escolhido);
-      const titulo = elemento("span", "chat-sessao-titulo");
-      titulo.textContent = s.title;
-      const quando = elemento("span", "chat-sessao-quando");
-      quando.textContent = haQuanto(s.modified);
-      item.append(titulo, quando);
+      item.classList.toggle("selected", i === chat.picked);
+      const title = element("span", "chat-session-title");
+      title.textContent = s.title;
+      const when = element("span", "chat-session-when");
+      when.textContent = howLongAgo(s.modified);
+      item.append(title, when);
       return item;
     }),
   );
-  chat.menu.querySelector(".escolhido")?.scrollIntoView({ block: "nearest" });
+  chat.menu.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
 }
 
-function desenharFala(f: Fala): HTMLElement {
-  if (f.quem === "ferramenta") {
-    const el = elemento("div", "chat-ferramenta");
-    const nome = elemento("span", "chat-ferramenta-nome");
-    nome.textContent = f.nome;
-    const resumo = elemento("span", "chat-ferramenta-resumo");
-    resumo.textContent = f.resumo;
-    el.append(nome, resumo);
+function drawMessage(f: Message): HTMLElement {
+  if (f.who === "tool") {
+    const el = element("div", "chat-tool");
+    const name = element("span", "chat-tool-name");
+    name.textContent = f.name;
+    const summary = element("span", "chat-tool-summary");
+    summary.textContent = f.summary;
+    el.append(name, summary);
     return el;
   }
-  if (f.quem === "diff") {
-    const el = elemento("div", "chat-diffs");
-    el.append(...f.arquivos.map(desenharDiff));
+  if (f.who === "diff") {
+    const el = element("div", "chat-diffs");
+    el.append(...f.files.map(drawDiff));
     return el;
   }
-  const el = elemento("div", `chat-fala chat-${f.quem}`);
+  const el = element("div", `chat-message chat-${f.who}`);
   // Your text goes as written; only Claude's answer is markdown.
-  if (f.quem === "voce") desenharSeu(el, f.texto, f.imagens ?? []);
+  if (f.who === "you") drawYour(el, f.text, f.images ?? []);
   else {
-    el.innerHTML = markdown(f.texto);
-    botoesDeCopiar(el);
+    el.innerHTML = markdown(f.text);
+    copyButtons(el);
   }
   return el;
 }
@@ -2377,156 +2379,156 @@ function desenharFala(f: Fala): HTMLElement {
 /// A copy button on each code block of rendered markdown — a Claude answer, a .md in
 /// the viewer. It copies the block as it is: the command ready to paste. In a frame
 /// around the block, not inside it: the block scrolls sideways, and the button would go along.
-function botoesDeCopiar(el: HTMLElement) {
+function copyButtons(el: HTMLElement) {
   for (const pre of el.querySelectorAll<HTMLPreElement>("pre:not(.mermaid)")) {
-    const moldura = elemento("div", "codigo-bloco");
-    const b = elemento("button", "copiar-codigo");
-    const voltar = () => {
-      b.innerHTML = ICONE_COPIAR;
-      b.title = T.copiarCodigo;
-      b.classList.remove("copiado");
+    const outline = element("div", "code-block");
+    const b = element("button", "copy-code");
+    const goBack = () => {
+      b.innerHTML = ICON_COPY;
+      b.title = T.copyCode;
+      b.classList.remove("copied");
     };
-    voltar();
+    goBack();
     b.addEventListener("mousedown", (e) => e.preventDefault());
     b.addEventListener("click", (e) => {
       e.stopPropagation();
       navigator.clipboard
         .writeText(pre.querySelector("code")?.textContent ?? pre.textContent ?? "")
         .then(() => {
-          b.innerHTML = ICONE_COPIADO;
-          b.title = T.codigoCopiado;
-          b.classList.add("copiado");
-          setTimeout(voltar, 1500);
+          b.innerHTML = ICON_COPIED;
+          b.title = T.codeCopied;
+          b.classList.add("copied");
+          setTimeout(goBack, 1500);
         })
         .catch((err) => jlog(`copy: ${err}`));
     });
-    pre.replaceWith(moldura);
-    moldura.append(pre, b);
+    pre.replaceWith(outline);
+    outline.append(pre, b);
   }
 }
 
 /// How many diff lines go on screen. A `Write` of a whole file
 /// would have thousands; the rest is in the file.
-const DIFF_MAXIMO = 400;
+const DIFF_MAX = 400;
 
 /// Unified or side by side: the same mode as the differ, stored in its
 /// preferences. Switching here switches there, and vice versa.
-let modoDiff: ViewMode = "unified";
+let modeDiff: ViewMode = "unified";
 
 /// The file for each diff on screen, to redraw it when the mode changes.
-const arquivoDoDiff = new WeakMap<HTMLElement, ArquivoDiff>();
+const diffFileOf = new WeakMap<HTMLElement, FileDiff>();
 
-const ICONE_UNIFICADO = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M4.5 6h7M4.5 10h7"/></svg>`;
-const ICONE_LADO_A_LADO = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M8 2.5v11"/></svg>`;
+const ICON_UNIFIED = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M4.5 6h7M4.5 10h7"/></svg>`;
+const ICON_SIDE_SIDE = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M8 2.5v11"/></svg>`;
 
 /// The context pill's limits, from Preferences (⌘,).
-let limitesDoContexto: Partial<LimitesDoContexto> = {};
+let contextLimits: Partial<ContextLimits> = {};
 
-async function ligarLimitesDoContexto() {
-  const aplicar = (s: Pick<Settings, "contextoAtencao" | "contextoPerigo" | "autoCompact" | "autoCompactEm">) => {
-    limitesDoContexto = {
-      atencao: s.contextoAtencao,
-      perigo: s.contextoPerigo,
+async function wireContextLimits() {
+  const apply = (s: Pick<Settings, "contextAttention" | "contextDanger" | "autoCompact" | "autoCompactAt">) => {
+    contextLimits = {
+      attention: s.contextAttention,
+      danger: s.contextDanger,
       autoCompact: s.autoCompact,
-      autoCompactEm: s.autoCompactEm,
+      autoCompactAt: s.autoCompactAt,
     };
-    for (const a of abas)
-      for (const f of folhas(a.raiz)) {
-        desenharBarra(f);
-        autoCompactar(f);
+    for (const a of tabs)
+      for (const f of leaves(a.root)) {
+        drawBar(f);
+        autoCompact(f);
       }
   };
   try {
-    aplicar(await loadSettings());
-    await onSettings(aplicar);
+    apply(await loadSettings());
+    await onSettings(apply);
   } catch (e) {
     jlog(`context limits: ${e}`);
   }
 }
 
-async function ligarModoDiff() {
+async function wireDiffMode() {
   try {
-    trocarModoDiff((await loadSettings()).viewMode);
-    await onSettings(({ viewMode }) => trocarModoDiff(viewMode));
+    switchModeDiff((await loadSettings()).viewMode);
+    await onSettings(({ viewMode }) => switchModeDiff(viewMode));
   } catch (e) {
     jlog(`diff preferences: ${e}`);
   }
 }
 
 /// Redraws the chat's diffs in the new mode. What was open stays open.
-function trocarModoDiff(modo: ViewMode) {
-  if (modo === modoDiff) return;
-  modoDiff = modo;
+function switchModeDiff(mode: ViewMode) {
+  if (mode === modeDiff) return;
+  modeDiff = mode;
   for (const el of document.querySelectorAll<HTMLElement>(".chat-diff")) {
-    const arquivo = arquivoDoDiff.get(el);
-    if (!arquivo) continue;
-    const aberto = el.querySelector(".chat-recolhivel-botao") && !el.querySelector(".recolhida");
-    const novo = desenharDiff(arquivo);
-    if (aberto) novo.querySelector<HTMLButtonElement>(".chat-recolhivel-botao")?.click();
-    el.replaceWith(novo);
+    const file = diffFileOf.get(el);
+    if (!file) continue;
+    const isOpen = el.querySelector(".chat-collapsible-button") && !el.querySelector(".folded");
+    const fresh = drawDiff(file);
+    if (isOpen) fresh.querySelector<HTMLButtonElement>(".chat-collapsible-button")?.click();
+    el.replaceWith(fresh);
   }
 }
 
 /// What a tool changed in a file, as the terminal shows it: the name, the
 /// count, the numbered lines. As a preview like long messages — the
 /// first lines, and the rest one click away.
-function desenharDiff(arquivo: ArquivoDiff): HTMLElement {
-  const { linhas, mais, menos } = linhasDoDiff(arquivo);
-  const el = elemento("div", "chat-diff");
-  arquivoDoDiff.set(el, arquivo);
-  const resumo = elemento("div", "chat-diff-resumo");
-  const nome = elemento("span", "chat-diff-arquivo");
-  nome.textContent = arquivo.caminho.split("/").pop() ?? arquivo.caminho;
-  nome.title = arquivo.caminho;
-  const partes = [mais && `+${mais}`, menos && `−${menos}`].filter(Boolean).join(" ");
-  const lado = modoDiff === "split";
+function drawDiff(file: FileDiff): HTMLElement {
+  const { lines, more, less } = diffLines(file);
+  const el = element("div", "chat-diff");
+  diffFileOf.set(el, file);
+  const summary = element("div", "chat-diff-summary");
+  const name = element("span", "chat-diff-file");
+  name.textContent = file.path.split("/").pop() ?? file.path;
+  name.title = file.path;
+  const parts = [more && `+${more}`, less && `−${less}`].filter(Boolean).join(" ");
+  const side = modeDiff === "split";
   // The icon is the one for the mode the click leads to.
-  const modo = elemento("button", "chat-diff-modo");
-  modo.innerHTML = lado ? ICONE_UNIFICADO : ICONE_LADO_A_LADO;
-  modo.title = lado ? T.verUnificado : T.verLadoALado;
-  modo.addEventListener("mousedown", (e) => e.preventDefault());
-  modo.addEventListener("click", () => {
-    const novo: ViewMode = lado ? "unified" : "split";
-    trocarModoDiff(novo);
-    saveViewMode(novo).catch((e) => jlog(`save diff mode: ${e}`));
+  const mode = element("button", "chat-diff-mode");
+  mode.innerHTML = side ? ICON_UNIFIED : ICON_SIDE_SIDE;
+  mode.title = side ? T.viewUnified : T.viewSideBySide;
+  mode.addEventListener("mousedown", (e) => e.preventDefault());
+  mode.addEventListener("click", () => {
+    const fresh: ViewMode = side ? "unified" : "split";
+    switchModeDiff(fresh);
+    saveViewMode(fresh).catch((e) => jlog(`save diff mode: ${e}`));
   });
-  resumo.append(nome, ` ${partes}`, modo);
+  summary.append(name, ` ${parts}`, mode);
   // The numbers column is as wide as the largest of them.
-  const largura = String(Math.max(0, ...linhas.map((l) => l.numero ?? 0))).length;
-  const classe = (l?: LinhaDiff) =>
-    !l ? "vazia" : l.tipo === "+" ? "mais" : l.tipo === "-" ? "menos" : l.tipo === "…" ? "pulo" : "";
-  const pre = elemento("pre", lado ? "chat-diff-linhas lado-a-lado" : "chat-diff-linhas");
+  const width = String(Math.max(0, ...lines.map((l) => l.num ?? 0))).length;
+  const cls = (l?: LineDiff) =>
+    !l ? "empty" : l.kind === "+" ? "more" : l.kind === "-" ? "less" : l.kind === "…" ? "jump" : "";
+  const pre = element("pre", side ? "chat-diff-lines side-by-side" : "chat-diff-lines");
   let total: number;
-  if (lado) {
-    const pares = ladoALado(linhas);
-    total = pares.length;
-    const metade = (l?: LinhaDiff) => {
-      const c = elemento("div", `chat-diff-linha ${classe(l)}`);
-      c.textContent = l ? `${String(l.numero ?? "").padStart(largura)} ${l.texto}` : "";
+  if (side) {
+    const pairs = sideBySide(lines);
+    total = pairs.length;
+    const half = (l?: LineDiff) => {
+      const c = element("div", `chat-diff-line ${cls(l)}`);
+      c.textContent = l ? `${String(l.num ?? "").padStart(width)} ${l.text}` : "";
       return c;
     };
-    for (const p of pares.slice(0, DIFF_MAXIMO)) {
-      if (p.pulo) {
-        const linha = elemento("div", "chat-diff-linha pulo inteira");
-        linha.textContent = "⋯";
-        pre.append(linha);
-      } else pre.append(metade(p.antes), metade(p.depois));
+    for (const p of pairs.slice(0, DIFF_MAX)) {
+      if (p.jump) {
+        const line = element("div", "chat-diff-line jump whole");
+        line.textContent = "⋯";
+        pre.append(line);
+      } else pre.append(half(p.before), half(p.after));
     }
   } else {
-    total = linhas.length;
-    for (const l of linhas.slice(0, DIFF_MAXIMO)) {
-      const linha = elemento("div", `chat-diff-linha ${classe(l)}`);
-      linha.textContent =
-        l.tipo === "…" ? "⋯" : `${String(l.numero ?? "").padStart(largura)} ${l.tipo} ${l.texto}`;
-      pre.append(linha);
+    total = lines.length;
+    for (const l of lines.slice(0, DIFF_MAX)) {
+      const line = element("div", `chat-diff-line ${cls(l)}`);
+      line.textContent =
+        l.kind === "…" ? "⋯" : `${String(l.num ?? "").padStart(width)} ${l.kind} ${l.text}`;
+      pre.append(line);
     }
   }
-  const mostradas = Math.min(total, DIFF_MAXIMO);
-  el.append(resumo, emPrevia(pre, mostradas, mostradas > LONGA_LINHAS));
-  if (total > DIFF_MAXIMO) {
-    const nota = elemento("div", "chat-diff-resumo");
-    nota.textContent = T.maisLinhas(total - DIFF_MAXIMO);
-    el.append(nota);
+  const shown = Math.min(total, DIFF_MAX);
+  el.append(summary, inPreview(pre, shown, shown > LONG_LINES));
+  if (total > DIFF_MAX) {
+    const note = element("div", "chat-diff-summary");
+    note.textContent = T.moreLines(total - DIFF_MAX);
+    el.append(note);
   }
   return el;
 }
@@ -2534,138 +2536,138 @@ function desenharDiff(arquivo: ArquivoDiff): HTMLElement {
 /// From how many lines (or characters, for whoever pastes one huge
 /// line) a text starts collapsed. A pasted log took the whole screen and
 /// pushed the answer far away.
-const LONGA_LINHAS = 10;
-const LONGA_CHARS = 900;
+const LONG_LINES = 10;
+const LONG_CHARS = 900;
 
 /// Your bubble: what you typed, what you pasted (without the `<pasted_content>` tags
 /// Claude Code puts around it) and the images, each where the text cites it.
-function desenharSeu(el: HTMLElement, texto: string, imagens: string[]) {
-  for (const p of partesDoSeu(texto, imagens.length)) {
-    if (p.tipo === "imagem") {
-      const img = elemento("img", "chat-imagem");
-      img.src = imagens[p.indice];
-      img.alt = `imagem ${p.indice + 1}`;
-      img.addEventListener("click", () => ampliarImagem(img.src));
+function drawYour(el: HTMLElement, text: string, images: string[]) {
+  for (const p of partsOfYour(text, images.length)) {
+    if (p.kind === "image") {
+      const img = element("img", "chat-image");
+      img.src = images[p.index];
+      img.alt = `imagem ${p.index + 1}`;
+      img.addEventListener("click", () => expandImage(img.src));
       el.append(img);
-    } else if (p.tipo === "colado") {
-      const caixa = elemento("div", "chat-colado");
-      const linhas = p.texto.split("\n").length;
-      const titulo = elemento("div", "chat-colado-titulo");
-      titulo.textContent = T.textoColado(linhas);
-      caixa.append(titulo, recolhivel(p.texto));
-      el.append(caixa);
-    } else el.append(recolhivel(p.texto));
+    } else if (p.kind === "pasted") {
+      const box = element("div", "chat-pasted");
+      const lines = p.text.split("\n").length;
+      const title = element("div", "chat-pasted-title");
+      title.textContent = T.pastedText(lines);
+      box.append(title, collapsible(p.text));
+      el.append(box);
+    } else el.append(collapsible(p.text));
   }
 }
 
 /// A text that, when long, starts collapsed to a few lines with a button to
 /// open it. Short, it is just the text.
-function recolhivel(texto: string): HTMLElement {
-  const corpo = elemento("div", "");
-  corpo.textContent = texto;
-  const linhas = texto.split("\n").length;
-  return emPrevia(corpo, linhas, linhas > LONGA_LINHAS || texto.length > LONGA_CHARS);
+function collapsible(text: string): HTMLElement {
+  const body = element("div", "");
+  body.textContent = text;
+  const lines = text.split("\n").length;
+  return inPreview(body, lines, lines > LONG_LINES || text.length > LONG_CHARS);
 }
 
-/// The same for any content (an edit's diff): `longo` says whether it
-/// starts collapsed with the button, and `linhas` is what the button counts.
-function emPrevia(corpo: HTMLElement, linhas: number, longo: boolean): HTMLElement {
-  const el = elemento("div", "chat-recolhivel");
-  corpo.classList.add("chat-recolhivel-corpo");
-  el.append(corpo);
-  if (!longo) return el;
-  const botao = elemento("button", "chat-recolhivel-botao");
-  const rotulo = () => {
-    botao.textContent = el.classList.contains("recolhida") ? T.mostrarTudo(linhas) : T.recolher;
+/// The same for any content (an edit's diff): `long` says whether it
+/// starts collapsed with the button, and `lines` is what the button counts.
+function inPreview(body: HTMLElement, lines: number, long: boolean): HTMLElement {
+  const el = element("div", "chat-collapsible");
+  body.classList.add("chat-collapsible-body");
+  el.append(body);
+  if (!long) return el;
+  const button = element("button", "chat-collapsible-button");
+  const label = () => {
+    button.textContent = el.classList.contains("folded") ? T.showAll(lines) : T.collapse;
   };
-  botao.addEventListener("click", () => {
-    el.classList.toggle("recolhida");
-    rotulo();
+  button.addEventListener("click", () => {
+    el.classList.toggle("folded");
+    label();
     // Collapsed from the middle (the button floats), the start of the text would be up
     // there, off screen: bring it back so you don't lose your place.
-    if (el.classList.contains("recolhida")) el.scrollIntoView({ block: "nearest" });
+    if (el.classList.contains("folded")) el.scrollIntoView({ block: "nearest" });
   });
-  el.classList.add("recolhida");
-  el.append(botao);
-  rotulo();
+  el.classList.add("folded");
+  el.append(button);
+  label();
   return el;
 }
 
 /// The image at screen size, over everything. Click or esc closes it.
-function ampliarImagem(src: string) {
-  const fundo = elemento("div", "chat-imagem-ampliada");
-  const img = elemento("img", "");
+function expandImage(src: string) {
+  const background = element("div", "chat-image-enlarged");
+  const img = element("img", "");
   img.src = src;
-  fundo.append(img);
-  const fechar = () => {
-    fundo.remove();
+  background.append(img);
+  const close = () => {
+    background.remove();
     removeEventListener("keydown", esc, true);
   };
   const esc = (e: KeyboardEvent) => {
     if (e.key !== "Escape") return;
     e.preventDefault();
     e.stopPropagation();
-    fechar();
+    close();
   };
-  fundo.addEventListener("click", fechar);
+  background.addEventListener("click", close);
   addEventListener("keydown", esc, true);
-  document.body.append(fundo);
+  document.body.append(background);
 }
 
-type Trecho = { texto: string; fim: number; do_zero: boolean; cortado: boolean };
+type Snippet = { text: string; end: number; from_start: boolean; truncated: boolean };
 
 /// Reads what the transcript gained and adds it to the end of the conversation.
-async function lerChat(folha: Folha) {
-  const chat = folha.chat;
-  if (!chat || chat.lendo || folha.morta) return;
+async function readChat(leaf: Leaf) {
+  const chat = leaf.chat;
+  if (!chat || chat.reading || leaf.dead) return;
   // The session ended: the last conversation stays on screen, it just doesn't grow anymore.
-  const caminho = folha.claude?.transcricao ?? chat.caminho;
-  if (!caminho) return;
-  const outra = caminho !== chat.caminho;
-  chat.lendo = true;
+  const path = leaf.claude?.transcript ?? chat.path;
+  if (!path) return;
+  const other = path !== chat.path;
+  chat.reading = true;
   try {
-    const t = await invoke<Trecho>("transcricao_ler", { caminho, desde: outra ? 0 : chat.fim });
-    const falas = lerFalas(t.texto);
-    const doZero = outra || t.do_zero;
-    if (doZero) {
-      chat.lista.replaceChildren(chat.mais);
-      chat.pendentes = [];
-      if (t.cortado) {
-        const nota = elemento("div", "chat-nota");
-        nota.textContent = T.comecoNoTerminal;
-        chat.lista.prepend(nota);
+    const t = await invoke<Snippet>("transcript_read", { path: path, since: other ? 0 : chat.end });
+    const messages = readMessages(t.text);
+    const fromScratch = other || t.from_start;
+    if (fromScratch) {
+      chat.list.replaceChildren(chat.more);
+      chat.pending = [];
+      if (t.truncated) {
+        const note = element("div", "chat-note");
+        note.textContent = T.startInTerminal;
+        chat.list.prepend(note);
       }
-      chat.falas = [];
+      chat.messages = [];
       // Of the conversation that already existed, only the end goes on screen.
-      chat.desde = Math.max(0, falas.length - CHAT_JANELA);
-      chat.mais.hidden = chat.desde === 0;
-      chat.noFim = true;
+      chat.since = Math.max(0, messages.length - CHAT_WINDOW);
+      chat.more.hidden = chat.since === 0;
+      chat.atEnd = true;
     }
-    chat.caminho = caminho;
-    chat.fim = t.fim;
-    if (!falas.length) return;
-    const primeira = Math.max(chat.desde - chat.falas.length, 0);
-    chat.falas.push(...falas);
+    chat.path = path;
+    chat.end = t.end;
+    if (!messages.length) return;
+    const first = Math.max(chat.since - chat.messages.length, 0);
+    chat.messages.push(...messages);
     // Each of your turns that arrives takes the place of its provisional bubble.
-    for (const f of falas) {
-      if (f.quem !== "voce") continue;
-      const n = provisoriosResolvidos(
-        chat.pendentes.map((p) => p.texto),
-        f.texto,
+    for (const f of messages) {
+      if (f.who !== "you") continue;
+      const n = provisionalResolved(
+        chat.pending.map((p) => p.text),
+        f.text,
       );
-      for (const p of chat.pendentes.splice(0, n)) p.el.remove();
+      for (const p of chat.pending.splice(0, n)) p.el.remove();
     }
-    chat.lista.append(...falas.slice(primeira).map(desenharFala));
+    chat.list.append(...messages.slice(first).map(drawMessage));
     // Only those already at the end follow it: whoever scrolled up to reread isn't
     // pulled back on every new turn.
-    if (chat.aberto) reporRolagem(chat);
+    if (chat.isOpen) restoreScroll(chat);
     // A resumed conversation brings prompts the hook didn't see go by.
-    lembrarPrompts(folha, falas.flatMap((f) => (f.quem === "voce" ? [f.texto] : [])));
+    rememberPrompts(leaf, messages.flatMap((f) => (f.who === "you" ? [f.text] : [])));
   } catch (e) {
     // Claude only creates the file on the first turn: until then, there is nothing to read.
     if (!String(e).includes("No such file")) jlog(`chat: ${e}`);
   } finally {
-    chat.lendo = false;
+    chat.reading = false;
   }
 }
 
@@ -2673,485 +2675,488 @@ async function lerChat(folha: Folha) {
 /// screen split, one may be in chat and the neighbor in the terminal.
 /// ⌘ or ⌃ click opens the link in the browser; a plain click is left for
 /// selecting and positioning, like in iTerm.
-function abrirLink(e: MouseEvent, url: string) {
+function openLink(e: MouseEvent, url: string) {
   if (!e.metaKey && !e.ctrlKey) return;
-  invoke("abrir_link", { url }).catch((err) => jlog(`open link: ${err}`));
+  invoke("open_link", { url }).catch((err) => jlog(`open link: ${err}`));
 }
 
 /// Shorter than maximize's: it is a layer appearing, not the layout moving.
-const DURACAO_CHAT = 180;
+const CHAT_DURATION = 180;
 
 /// The chat comes in or goes out over the terminal: fades with a slight slide. On the
 /// way out it only vanishes at the end, and meanwhile it doesn't hold clicks — the
 /// terminal below is already the panel.
-function transicionarChat(chat: { el: HTMLElement; aberto: boolean; transicao?: Animation }) {
-  const { el, aberto } = chat;
-  const meio = chat.transicao?.playState === "running" ? chat.transicao.currentTime : null;
-  chat.transicao?.cancel();
-  chat.transicao = undefined;
-  el.style.pointerEvents = aberto ? "" : "none";
-  if (aberto) el.hidden = false;
-  if (movimentoReduzido.matches) {
-    el.hidden = !aberto;
+function transitionChat(chat: { el: HTMLElement; isOpen: boolean; transition?: Animation }) {
+  const { el, isOpen } = chat;
+  const meio = chat.transition?.playState === "running" ? chat.transition.currentTime : null;
+  chat.transition?.cancel();
+  chat.transition = undefined;
+  el.style.pointerEvents = isOpen ? "" : "none";
+  if (isOpen) el.hidden = false;
+  if (reducedMotion.matches) {
+    el.hidden = !isOpen;
     return;
   }
-  const quadros = [
+  const frames = [
     { opacity: 0, transform: "translateY(8px)" },
     { opacity: 1, transform: "none" },
   ];
-  const t = el.animate(aberto ? quadros : quadros.reverse(), {
-    duration: DURACAO_CHAT,
-    easing: aberto ? "cubic-bezier(0.2, 0.7, 0.3, 1)" : "ease-in",
+  const t = el.animate(isOpen ? frames : frames.reverse(), {
+    duration: CHAT_DURATION,
+    easing: isOpen ? "cubic-bezier(0.2, 0.7, 0.3, 1)" : "ease-in",
   });
   // Turning around midway starts from the mirrored point, without a jump.
-  if (typeof meio === "number") t.currentTime = Math.max(0, DURACAO_CHAT - meio);
-  chat.transicao = t;
+  if (typeof meio === "number") t.currentTime = Math.max(0, CHAT_DURATION - meio);
+  chat.transition = t;
   t.onfinish = () => {
-    if (chat.transicao !== t) return;
-    chat.transicao = undefined;
-    if (!chat.aberto) el.hidden = true;
+    if (chat.transition !== t) return;
+    chat.transition = undefined;
+    if (!chat.isOpen) el.hidden = true;
   };
 }
 
-function alternarChat(folha: Folha) {
-  if (folha.chat?.aberto) {
-    const chat = folha.chat;
-    chat.aberto = false;
-    transicionarChat(chat);
-    chat.recado = undefined;
-    chat.sessoes = undefined;
-    desenharComandos(chat);
-    clearInterval(chat.pulso);
-    chat.pulso = undefined;
+function toggleChat(leaf: Leaf) {
+  if (leaf.chat?.isOpen) {
+    const chat = leaf.chat;
+    chat.isOpen = false;
+    transitionChat(chat);
+    chat.flash = undefined;
+    chat.sessions = undefined;
+    drawCommands(chat);
+    clearInterval(chat.pulse);
+    chat.pulse = undefined;
   } else {
     // With no Claude session in the panel, the button opens one: the chat is the way to
     // start a conversation in that folder, not only to see one that already exists.
-    if (!folha.claude) return void abrirClaudeNoChat(folha);
-    const chat = (folha.chat ??= criarChat(folha));
-    chat.aberto = true;
-    transicionarChat(chat);
-    void carregarComandos(folha);
-    // Escondida, a lista perdeu a rolagem.
-    reporRolagem(chat);
-    void lerChat(folha);
-    chat.pulso = setInterval(() => {
-      void lerChat(folha);
-      desenharPensando(folha);
+    if (!leaf.claude) return void openClaudeInChat(leaf);
+    const chat = (leaf.chat ??= createChat(leaf));
+    chat.isOpen = true;
+    transitionChat(chat);
+    void loadCommands(leaf);
+    // Escondida, a list perdeu a scrollPos.
+    restoreScroll(chat);
+    void readChat(leaf);
+    chat.pulse = setInterval(() => {
+      void readChat(leaf);
+      drawThinking(leaf);
     }, CHAT_MS);
   }
-  desenharBarra(folha);
-  desenharAviso(folha);
-  if (abaDe(folha)?.foco === folha) teclado(folha);
+  drawBar(leaf);
+  drawNotice(leaf);
+  if (tabOf(leaf)?.focus === leaf) keyboard(leaf);
 }
 
 /// Opens Claude Code in the panel's shell, in the folder it is in, and goes straight
 /// into chat mode. The conversation shows up when the `SessionStart` hook says which
 /// transcript is its own.
-async function abrirClaudeNoChat(folha: Folha) {
+async function openClaudeInChat(leaf: Leaf) {
   // With another program in front of the shell, `claude` would be typed inside
   // it — in a vim, in a running server.
-  if (await invoke<boolean>("pty_ocupado", { id: folha.id }).catch(() => false)) {
-    return avisar(folha, T.programaRodando);
+  if (await invoke<boolean>("pty_busy", { id: leaf.id }).catch(() => false)) {
+    return notify(leaf, T.programRunning);
   }
-  // O clique repetido enquanto a pergunta acima ia e voltava.
-  if (folha.morta || folha.claude || folha.chat?.aberto) return;
-  await invoke("pty_write", { id: folha.id, data: "claude\r" }).catch((e) => jlog(`open claude: ${e}`));
+  // O clique repetido enquanto a question up ia e voltava.
+  if (leaf.dead || leaf.claude || leaf.chat?.isOpen) return;
+  await invoke("pty_write", { id: leaf.id, data: "claude\r" }).catch((e) => jlog(`open claude: ${e}`));
   // Marked right away: it is what makes the second click close the chat instead of
   // typing `claude` again. The rest arrives with the session's first event.
-  folha.claude = { nome: folha.titulo, estado: "ocioso" };
-  alternarChat(folha);
+  leaf.claude = { name: leaf.title, state: "idle" };
+  toggleChat(leaf);
 }
 
 // ---------- the viewer: a file inside the panel ----------
 
 /// What to show: a file, the line (or range) to mark and, with `ref`, its
 /// version at that point in git instead of the one on disk.
-type PedidoVer = { caminho: string; linha?: number; ate?: number; ref?: string };
+type ViewRequest = { path: string; line?: number; to?: number; ref?: string };
 
-/// What arrives through the socket when someone runs `termiau ver` (see hooks/termiau).
-type PedidoDoSocket = {
-  painel: number;
-  ver: { caminho?: string; linha?: number | null; ate?: number | null; ref?: string | null };
+/// What arrives through the socket when someone runs `termiau view` (see hooks/termiau).
+type SocketViewRequest = {
+  panel: number;
+  view: { path?: string; line?: number | null; to?: number | null; ref?: string | null };
 };
 
 /// The file beside the terminal (or the chat), or over it: the terminal
 /// stays alive, with Claude running, and the bar button shows and hides the
-/// file. How it is arranged in the panel is `arranjoVisor`.
-type Visor = {
+/// file. How it is arranged in the panel is `layoutViewer`.
+type Viewer = {
   el: HTMLDivElement;
   /// The border between the file and the terminal, which can be dragged. Split mode only.
-  alca: HTMLDivElement;
-  corpo: HTMLDivElement;
-  caminho: HTMLSpanElement;
+  handle: HTMLDivElement;
+  body: HTMLDivElement;
+  path: HTMLSpanElement;
   ref: HTMLSpanElement;
-  voltar: HTMLButtonElement;
-  avancar: HTMLButtonElement;
-  modo: HTMLButtonElement;
-  arranjo: HTMLButtonElement;
+  goBack: HTMLButtonElement;
+  advance: HTMLButtonElement;
+  mode: HTMLButtonElement;
+  layout: HTMLButtonElement;
   /// Reading or editing: the eye and the pencil, side by side, the current one lit.
-  modos: HTMLDivElement;
-  ler: HTMLButtonElement;
-  editar: HTMLButtonElement;
-  salvar: HTMLButtonElement;
-  fechar: HTMLButtonElement;
+  modes: HTMLDivElement;
+  read: HTMLButtonElement;
+  editButton: HTMLButtonElement;
+  save: HTMLButtonElement;
+  close: HTMLButtonElement;
   /// Edit mode. Meanwhile nothing redraws the viewer.
-  edicao?: Edicao;
-  aberto: boolean;
-  transicao?: Animation;
+  edit?: Edit;
+  isOpen: boolean;
+  transition?: Animation;
   /// In split mode, who has the keyboard: the file or the terminal/chat. It is the
   /// side you clicked last.
-  comTeclado: boolean;
+  withKeyboard: boolean;
   /// Where you left the scroll. It isn't read from `scrollTop` at redraw time:
   /// caught in the middle of a write, the file arrives short (or empty), the scroll
   /// shrinks along, and the next reread would go back to the top.
-  rolagem: number;
+  scrollPos: number;
   /// The scroll events the redraw itself causes aren't you scrolling.
-  segurando: number;
+  holding: number;
   /// The files open in this panel, one tab each, and the one on screen. ‹ and › move
   /// between them too.
-  historico: PedidoVer[];
+  history: ViewRequest[];
   pos: number;
   /// What each tab not on screen had when it was left — its lines, its scroll, its
   /// edit in progress. The one on screen lives in the fields below.
-  estados: Map<PedidoVer, EstadoAba>;
+  states: Map<ViewRequest, TabState>;
   /// The tab strip, between the header and the body.
-  abas: HTMLDivElement;
+  tabs: HTMLDivElement;
   /// A .md shown rendered, not as source.
-  renderizado: boolean;
+  rendered: boolean;
   /// The shown file's stamp: changed on disk, the viewer rereads it.
-  carimbo?: string;
-  linhas?: string[];
-  /// A binary image (`ehImagem`), as a data URL. Then there are no `linhas`.
-  imagem?: string;
+  stamp?: string;
+  lines?: string[];
+  /// A binary image (`isImage`), as a data URL. Then there are no `lines`.
+  image?: string;
   /// Leaving the edit to a rendered .md: how far down it was, as a fraction — the
   /// rendered page has another height, and pixels wouldn't land on the same place.
-  fracao?: number;
-  pulso?: ReturnType<typeof setInterval>;
+  fraction?: number;
+  pulse?: ReturnType<typeof setInterval>;
   /// Responses arriving out of order (‹ › pressed quickly) don't draw
   /// over the newest one.
-  vez: number;
+  turn: number;
 };
 
 /// A tab that is not on screen, as it was left.
-type EstadoAba = {
-  linhas?: string[];
-  imagem?: string;
-  carimbo?: string;
-  edicao?: Edicao;
-  renderizado: boolean;
-  rolagem: number;
+type TabState = {
+  lines?: string[];
+  image?: string;
+  stamp?: string;
+  edit?: Edit;
+  rendered: boolean;
+  scrollPos: number;
 };
 
 /// How many tabs the viewer keeps open. Past that, the oldest one without unsaved
 /// changes closes.
-const VISOR_HISTORICO = 30;
+const VIEWER_HISTORY = 30;
 /// How often the open viewer checks whether the file changed on disk.
-const VISOR_MS = 1000;
+const VIEWER_MS = 1000;
 
 /// How the viewer is arranged in the panel: beside the terminal, above it, or
 /// over it, covering it. Applies to all panels, and so does the (viewer's) share.
-type Arranjo = "lado" | "abaixo" | "sobre";
-const ARRANJOS: Arranjo[] = ["lado", "abaixo", "sobre"];
-const ROTULO_ARRANJO: Record<Arranjo, string> = {
-  lado: T.arranjoLado,
-  abaixo: T.arranjoAbaixo,
-  sobre: T.arranjoSobre,
+type Layout = "side" | "below" | "over";
+const LAYOUTS: Layout[] = ["side", "below", "over"];
+const LAYOUT_LABEL: Record<Layout, string> = {
+  side: T.layoutSide,
+  below: T.layoutBelow,
+  over: T.layoutOver,
 };
-const CHAVE_VISOR = "termiau:visor";
+const VIEWER_KEY = "termiau:visor";
 
-let { arranjo: arranjoVisor, fatia: fatiaVisor } = lerPrefVisor();
+let { layout: layoutViewer, share: shareViewer } = readPrefViewer();
 
-function lerPrefVisor(): { arranjo: Arranjo; fatia: number } {
+function readPrefViewer(): { layout: Layout; share: number } {
   try {
-    const salvo = JSON.parse(localStorage.getItem(CHAVE_VISOR) ?? "{}");
+    const savedItem = fromLegacy(JSON.parse(localStorage.getItem(VIEWER_KEY) ?? "{}"), LEGACY_VIEWER_PREF) as {
+      layout?: Layout;
+      share?: number;
+    };
     return {
-      arranjo: ARRANJOS.includes(salvo.arranjo) ? salvo.arranjo : "lado",
-      fatia: typeof salvo.fatia === "number" ? Math.min(0.85, Math.max(0.15, salvo.fatia)) : 0.5,
+      layout: savedItem.layout && LAYOUTS.includes(savedItem.layout) ? savedItem.layout : "side",
+      share: typeof savedItem.share === "number" ? Math.min(0.85, Math.max(0.15, savedItem.share)) : 0.5,
     };
   } catch {
-    return { arranjo: "lado", fatia: 0.5 };
+    return { layout: "side", share: 0.5 };
   }
 }
 
-function lembrarPrefVisor() {
+function rememberPrefViewer() {
   try {
-    localStorage.setItem(CHAVE_VISOR, JSON.stringify({ arranjo: arranjoVisor, fatia: fatiaVisor }));
+    localStorage.setItem(VIEWER_KEY, JSON.stringify({ layout: layoutViewer, share: shareViewer }));
   } catch {
     // Just a convenience.
   }
 }
 
-function receberVer(bruto: PedidoDoSocket) {
-  const folha = folhaPorPainel(bruto.painel);
-  const { caminho, linha, ate, ref } = bruto.ver ?? {};
-  if (!folha || typeof caminho !== "string" || !caminho.startsWith("/")) return;
-  abrirArquivo(folha, {
-    caminho,
-    linha: typeof linha === "number" && linha > 0 ? linha : undefined,
-    ate: typeof ate === "number" && ate > 0 ? ate : undefined,
+function receiveView(raw: SocketViewRequest) {
+  const leaf = leafByPanel(raw.panel);
+  const { path, line, to, ref } = raw.view ?? {};
+  if (!leaf || typeof path !== "string" || !path.startsWith("/")) return;
+  openFile(leaf, {
+    path: path,
+    line: typeof line === "number" && line > 0 ? line : undefined,
+    to: typeof to === "number" && to > 0 ? to : undefined,
     ref: typeof ref === "string" && ref ? ref : undefined,
   });
 }
 
 /// Shows the file in the panel's viewer, opening it if it was closed. In a
 /// drawer terminal, the owner panel shows it.
-function abrirArquivo(folha: Folha, pedido: PedidoVer) {
-  const dono = folha.dono ?? folha;
-  if (dono.morta) return;
-  const v = (dono.visor ??= criarVisor(dono));
+function openFile(leaf: Leaf, request: ViewRequest) {
+  const owner = leaf.owner ?? leaf;
+  if (owner.dead) return;
+  const v = (owner.viewer ??= createViewer(owner));
   // Already open: its tab comes to the front, as it was left. A requested line moves it
   // there — in a rendered .md, to the block that line became.
-  const i = v.historico.findIndex((p) => p.caminho === pedido.caminho && p.ref === pedido.ref);
+  const i = v.history.findIndex((p) => p.path === request.path && p.ref === request.ref);
   if (i >= 0) {
-    const ja = v.historico[i];
-    if (pedido.linha) {
-      ja.linha = pedido.linha;
-      ja.ate = pedido.ate;
+    const already = v.history[i];
+    if (request.line) {
+      already.line = request.line;
+      already.to = request.to;
     }
-    let guardada = true;
+    let stored = true;
     if (i !== v.pos) {
-      guardarAba(v);
-      guardada = ativarAba(v, i);
+      storeTab(v);
+      stored = activateTab(v, i);
     }
-    if (!v.aberto) alternarVisor(dono, !!pedido.linha || !guardada);
-    else mostrarAba(dono, !!pedido.linha || !guardada);
+    if (!v.isOpen) toggleViewer(owner, !!request.line || !stored);
+    else showTab(owner, !!request.line || !stored);
     return;
   }
   // A new tab, right after the one on screen.
-  if (v.historico.length) guardarAba(v);
-  v.historico.splice(v.pos + 1, 0, pedido);
-  v.pos = Math.min(v.pos + 1, v.historico.length - 1);
-  v.linhas = v.imagem = v.carimbo = v.edicao = undefined;
-  v.rolagem = 0;
-  v.renderizado = temRenderizado(pedido.caminho);
-  podarAbas(v);
-  if (v.aberto) void carregarVisor(dono, true);
-  else alternarVisor(dono, true);
+  if (v.history.length) storeTab(v);
+  v.history.splice(v.pos + 1, 0, request);
+  v.pos = Math.min(v.pos + 1, v.history.length - 1);
+  v.lines = v.image = v.stamp = v.edit = undefined;
+  v.scrollPos = 0;
+  v.rendered = hasRendered(request.path);
+  pruneTabs(v);
+  if (v.isOpen) void loadViewer(owner, true);
+  else toggleViewer(owner, true);
 }
 
 /// The tab on screen, kept as it is: lines, scroll, the edit in progress (with its box,
 /// out of the page but alive, undo included).
-function guardarAba(v: Visor) {
-  const p = v.historico[v.pos];
+function storeTab(v: Viewer) {
+  const p = v.history[v.pos];
   if (!p) return;
-  const ed = v.edicao;
-  if (ed) ed.rolagem = [ed.area.scrollLeft, ed.area.scrollTop];
-  v.estados.set(p, {
-    linhas: v.linhas,
-    imagem: v.imagem,
-    carimbo: v.carimbo,
-    edicao: ed,
-    renderizado: v.renderizado,
-    rolagem: v.rolagem,
+  const ed = v.edit;
+  if (ed) ed.scrollPos = [ed.area.scrollLeft, ed.area.scrollTop];
+  v.states.set(p, {
+    lines: v.lines,
+    image: v.image,
+    stamp: v.stamp,
+    edit: ed,
+    rendered: v.rendered,
+    scrollPos: v.scrollPos,
   });
 }
 
 /// Puts tab `i` on the viewer's fields, without drawing. False when it had never been
 /// shown (there is nothing kept, it has to be read).
-function ativarAba(v: Visor, i: number): boolean {
+function activateTab(v: Viewer, i: number): boolean {
   v.pos = i;
-  v.vez++;
-  const p = v.historico[i];
-  const e = v.estados.get(p);
-  v.estados.delete(p);
-  v.linhas = e?.linhas;
-  v.imagem = e?.imagem;
-  v.carimbo = e?.carimbo;
-  v.edicao = e?.edicao;
-  v.renderizado = e?.renderizado ?? temRenderizado(p.caminho);
-  v.rolagem = e?.rolagem ?? 0;
+  v.turn++;
+  const p = v.history[i];
+  const e = v.states.get(p);
+  v.states.delete(p);
+  v.lines = e?.lines;
+  v.image = e?.image;
+  v.stamp = e?.stamp;
+  v.edit = e?.edit;
+  v.rendered = e?.rendered ?? hasRendered(p.path);
+  v.scrollPos = e?.scrollPos ?? 0;
   return !!e;
 }
 
 /// Draws the tab on screen: an edit in progress goes back as it was; the rest is reread
 /// from disk, which may have changed meanwhile.
-function mostrarAba(folha: Folha, rolar: boolean) {
-  const v = folha.visor;
-  const ed = v?.edicao;
+function showTab(leaf: Leaf, scroll: boolean) {
+  const v = leaf.viewer;
+  const ed = v?.edit;
   if (!v) return;
-  if (!ed) return void carregarVisor(folha, rolar);
-  legendaVisor(folha);
-  v.corpo.replaceChildren(ed.raiz);
-  const [x, y] = ed.rolagem ?? [0, 0];
+  if (!ed) return void loadViewer(leaf, scroll);
+  viewerCaption(leaf);
+  v.body.replaceChildren(ed.root);
+  const [x, y] = ed.scrollPos ?? [0, 0];
   ed.area.scrollLeft = x;
   ed.area.scrollTop = y;
   ed.area.dispatchEvent(new Event("scroll"));
   ed.area.focus({ preventScroll: true });
 }
 
-function trocarAba(folha: Folha, i: number) {
-  const v = folha.visor;
-  if (!v || i < 0 || i >= v.historico.length || i === v.pos) return;
-  guardarAba(v);
-  const guardada = ativarAba(v, i);
-  mostrarAba(folha, !guardada);
+function switchTab(leaf: Leaf, i: number) {
+  const v = leaf.viewer;
+  if (!v || i < 0 || i >= v.history.length || i === v.pos) return;
+  storeTab(v);
+  const stored = activateTab(v, i);
+  showTab(leaf, !stored);
 }
 
 /// Closes a file's tab. With unsaved changes it comes to the front and asks first.
-async function fecharArquivo(folha: Folha, i: number) {
-  const v = folha.visor;
-  if (!v || i < 0 || i >= v.historico.length) return;
-  if (i !== v.pos) trocarAba(folha, i);
-  if (!(await podeLargarEdicao(folha))) return;
-  if (v.edicao) clearTimeout(v.edicao.espera);
-  v.edicao = undefined;
+async function closeFile(leaf: Leaf, i: number) {
+  const v = leaf.viewer;
+  if (!v || i < 0 || i >= v.history.length) return;
+  if (i !== v.pos) switchTab(leaf, i);
+  if (!(await canDropEdit(leaf))) return;
+  if (v.edit) clearTimeout(v.edit.wait);
+  v.edit = undefined;
   // The last one: the viewer closes, and is born empty the next time.
-  if (v.historico.length === 1) {
-    if (v.aberto) alternarVisor(folha);
-    v.historico = [];
+  if (v.history.length === 1) {
+    if (v.isOpen) toggleViewer(leaf);
+    v.history = [];
     v.pos = 0;
-    v.linhas = v.imagem = v.carimbo = undefined;
-    desenharBarra(folha);
+    v.lines = v.image = v.stamp = undefined;
+    drawBar(leaf);
     return;
   }
-  v.historico.splice(i, 1);
-  const guardada = ativarAba(v, Math.min(i, v.historico.length - 1));
-  mostrarAba(folha, !guardada);
+  v.history.splice(i, 1);
+  const stored = activateTab(v, Math.min(i, v.history.length - 1));
+  showTab(leaf, !stored);
 }
 
 /// Loose, the drawer is a passing thing: a click outside it closes it, like a menu.
 /// Pinned it is part of the panel, and stays. The folder button on the bar doesn't count
 /// as outside — it closes it by itself, and counting it would reopen it right away.
-function vigiarFora(folha: Folha) {
-  const ex = folha.explorador;
+function watchOutside(leaf: Leaf) {
+  const ex = leaf.explorer;
   if (!ex) return;
-  const vigiar = ex.aberto && !ex.fixo;
-  if (vigiar && !ex.fora) {
-    ex.fora = (e) => {
-      const alvo = e.target as Node;
-      if (ex.el.contains(alvo) || folha.barra?.explorar.contains(alvo)) return;
-      alternarExplorador(folha);
+  const watch = ex.isOpen && !ex.fixed;
+  if (watch && !ex.outside) {
+    ex.outside = (e) => {
+      const target = e.target as Node;
+      if (ex.el.contains(target) || leaf.bar?.explore.contains(target)) return;
+      toggleExplorer(leaf);
     };
-    document.addEventListener("mousedown", ex.fora, true);
-  } else if (!vigiar && ex.fora) {
-    document.removeEventListener("mousedown", ex.fora, true);
-    ex.fora = undefined;
+    document.addEventListener("mousedown", ex.outside, true);
+  } else if (!watch && ex.outside) {
+    document.removeEventListener("mousedown", ex.outside, true);
+    ex.outside = undefined;
   }
 }
 
 /// Past the limit, the oldest tabs without unsaved changes close.
-function podarAbas(v: Visor) {
-  while (v.historico.length > VISOR_HISTORICO) {
-    const j = v.historico.findIndex((p, k) => {
-      const ed = v.estados.get(p)?.edicao;
-      return k !== v.pos && !(ed && ed.area.value !== ed.salvo);
+function pruneTabs(v: Viewer) {
+  while (v.history.length > VIEWER_HISTORY) {
+    const j = v.history.findIndex((p, k) => {
+      const ed = v.states.get(p)?.edit;
+      return k !== v.pos && !(ed && ed.area.value !== ed.savedItem);
     });
     if (j < 0) return;
-    v.estados.delete(v.historico[j]);
-    v.historico.splice(j, 1);
+    v.states.delete(v.history[j]);
+    v.history.splice(j, 1);
     if (j < v.pos) v.pos--;
   }
 }
 
 /// The tabs, the one on screen lit. One with unsaved changes shows a dot in place of ✕
 /// (the ✕ comes back under the mouse).
-function desenharAbasVisor(v: Visor) {
-  v.abas.replaceChildren(
-    ...v.historico.map((p, i) => {
-      const ed = i === v.pos ? v.edicao : v.estados.get(p)?.edicao;
-      const aba = elemento("div", "visor-aba");
-      aba.dataset.i = String(i);
-      aba.classList.toggle("atual", i === v.pos);
-      aba.classList.toggle("suja", !!ed && ed.area.value !== ed.salvo);
-      aba.title = p.ref ? `${p.caminho} @ ${p.ref}` : p.caminho;
-      const nome = elemento("span", "visor-aba-nome");
-      nome.textContent = p.caminho.slice(p.caminho.lastIndexOf("/") + 1);
-      aba.append(nome);
+function drawTabsViewer(v: Viewer) {
+  v.tabs.replaceChildren(
+    ...v.history.map((p, i) => {
+      const ed = i === v.pos ? v.edit : v.states.get(p)?.edit;
+      const tab = element("div", "viewer-tab");
+      tab.dataset.i = String(i);
+      tab.classList.toggle("current", i === v.pos);
+      tab.classList.toggle("dirty", !!ed && ed.area.value !== ed.savedItem);
+      tab.title = p.ref ? `${p.path} @ ${p.ref}` : p.path;
+      const name = element("span", "viewer-tab-name");
+      name.textContent = p.path.slice(p.path.lastIndexOf("/") + 1);
+      tab.append(name);
       if (p.ref) {
-        const ref = elemento("span", "visor-aba-ref");
+        const ref = element("span", "viewer-tab-ref");
         ref.textContent = p.ref;
-        aba.append(ref);
+        tab.append(ref);
       }
-      const fechar = elemento("span", "visor-aba-fechar");
-      fechar.innerHTML = ICONE_FECHAR_ABA;
-      fechar.title = T.fecharArquivo;
-      aba.append(fechar);
-      return aba;
+      const close = element("span", "viewer-tab-close");
+      close.innerHTML = ICON_CLOSE_TAB;
+      close.title = T.closeFile;
+      tab.append(close);
+      return tab;
     }),
   );
-  v.abas.querySelector(".atual")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  v.tabs.querySelector(".current")?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 // ---------- the file explorer ----------
 
-type Entrada = { nome: string; pasta: boolean };
+type Input = { name: string; folder: boolean };
 
-type Explorador = {
+type Explorer = {
   el: HTMLDivElement;
-  titulo: HTMLSpanElement;
-  arvore: HTMLDivElement;
-  aberto: boolean;
+  title: HTMLSpanElement;
+  tree: HTMLDivElement;
+  isOpen: boolean;
   /// The project's folder (the repository's root, or the shell's folder).
-  raiz: string;
+  root: string;
   /// The folders expanded in the tree, which stay so between openings.
-  abertas: Set<string>;
+  openOnes: Set<string>;
   /// Each folder's listing, read once per opening: reopening shows what changed.
-  listas: Map<string, Entrada[]>;
+  lists: Map<string, Input[]>;
   /// Responses arriving out of order don't draw over the newest tree.
-  vez: number;
+  turn: number;
   /// Pinned: it stops floating and takes the panel's left side, and choosing a file
   /// doesn't close it.
-  fixo: boolean;
-  alfinete: HTMLButtonElement;
+  fixed: boolean;
+  pin: HTMLButtonElement;
   /// Open and loose, a click anywhere else closes it: the listener for that, while it exists.
-  fora?: (e: MouseEvent) => void;
+  outside?: (e: MouseEvent) => void;
 };
 
 /// A drawer from the left, over the terminal, the chat and the viewer — it pushes nothing
 /// aside. Choosing a file opens it in the viewer and closes the drawer.
-function criarExplorador(folha: Folha): Explorador {
-  const el = elemento("div", "explorador");
-  const cabeca = elemento("div", "explorador-cabeca");
-  const titulo = elemento("span", "explorador-titulo");
-  const fechar = elemento("button", "visor-btn visor-btn-icone");
-  fechar.innerHTML = ICONE_FECHAR;
-  fechar.title = T.fecharExplorador;
-  fechar.addEventListener("mousedown", (e) => e.preventDefault());
-  fechar.addEventListener("click", () => alternarExplorador(folha));
-  const alfinete = elemento("button", "visor-btn visor-btn-icone explorador-alfinete");
-  alfinete.innerHTML = ICONE_ALFINETE;
-  alfinete.title = T.fixarExplorador;
-  alfinete.addEventListener("mousedown", (e) => e.preventDefault());
-  alfinete.addEventListener("click", () => fixarExplorador(folha, !ex.fixo));
-  cabeca.append(titulo, alfinete, fechar);
-  const arvore = elemento("div", "explorador-arvore");
-  arvore.tabIndex = 0;
-  el.append(cabeca, arvore);
-  folha.el.querySelector(".folha-termo")?.append(el);
-  const ex: Explorador = {
+function createExplorer(leaf: Leaf): Explorer {
+  const el = element("div", "explorer");
+  const head = element("div", "explorer-head");
+  const title = element("span", "explorer-title");
+  const close = element("button", "viewer-btn viewer-btn-icon");
+  close.innerHTML = ICON_CLOSE;
+  close.title = T.closeExplorer;
+  close.addEventListener("mousedown", (e) => e.preventDefault());
+  close.addEventListener("click", () => toggleExplorer(leaf));
+  const pin = element("button", "viewer-btn viewer-btn-icon explorer-pin");
+  pin.innerHTML = ICON_PIN;
+  pin.title = T.pinExplorer;
+  pin.addEventListener("mousedown", (e) => e.preventDefault());
+  pin.addEventListener("click", () => pinExplorer(leaf, !ex.fixed));
+  head.append(title, pin, close);
+  const tree = element("div", "explorer-tree");
+  tree.tabIndex = 0;
+  el.append(head, tree);
+  leaf.el.querySelector(".leaf-term")?.append(el);
+  const ex: Explorer = {
     el,
-    titulo,
-    arvore,
-    aberto: false,
-    raiz: "",
-    abertas: new Set(),
-    listas: new Map(),
-    vez: 0,
-    fixo: false,
-    alfinete,
+    title,
+    tree,
+    isOpen: false,
+    root: "",
+    openOnes: new Set(),
+    lists: new Map(),
+    turn: 0,
+    fixed: false,
+    pin,
   };
   el.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     e.preventDefault();
     e.stopPropagation();
     // Pinned, esc only gives the keyboard back: the tree stays.
-    if (ex.fixo) teclado(folha);
-    else alternarExplorador(folha);
+    if (ex.fixed) keyboard(leaf);
+    else toggleExplorer(leaf);
   });
-  ligarArrastoDoExplorador(arvore);
-  arvore.addEventListener("click", (e) => {
-    const item = (e.target as HTMLElement).closest<HTMLElement>(".explorador-item");
-    const caminho = item?.dataset.caminho;
-    if (!item || !caminho) return;
-    if (item.dataset.pasta) {
-      if (!ex.abertas.delete(caminho)) ex.abertas.add(caminho);
-      void desenharExplorador(folha);
+  wireExplorerDrag(tree);
+  tree.addEventListener("click", (e) => {
+    const item = (e.target as HTMLElement).closest<HTMLElement>(".explorer-item");
+    const path = item?.dataset.path;
+    if (!item || !path) return;
+    if (item.dataset.folder) {
+      if (!ex.openOnes.delete(path)) ex.openOnes.add(path);
+      void drawExplorer(leaf);
       return;
     }
-    if (!ex.fixo) alternarExplorador(folha);
-    abrirArquivo(folha, { caminho });
+    if (!ex.fixed) toggleExplorer(leaf);
+    openFile(leaf, { path });
     // Pinned, the tree stays on screen: the chosen file is the one that lights up now.
-    if (ex.fixo) void desenharExplorador(folha);
+    if (ex.fixed) void drawExplorer(leaf);
   });
   return ex;
 }
@@ -3160,107 +3165,107 @@ function criarExplorador(folha: Folha): Explorador {
 /// field or on its terminal's line, like a drag from Finder. Followed by hand, with
 /// pointer events: Tauri keeps the window's native drags for itself, and the page's own
 /// HTML5 drag-and-drop doesn't come through.
-function ligarArrastoDoExplorador(arvore: HTMLElement) {
-  arvore.addEventListener("pointerdown", (e) => {
-    const item = (e.target as HTMLElement).closest<HTMLElement>(".explorador-item");
-    const caminho = item?.dataset.caminho;
-    if (!item || !caminho || e.button !== 0) return;
+function wireExplorerDrag(tree: HTMLElement) {
+  tree.addEventListener("pointerdown", (e) => {
+    const item = (e.target as HTMLElement).closest<HTMLElement>(".explorer-item");
+    const path = item?.dataset.path;
+    if (!item || !path || e.button !== 0) return;
     const [x0, y0] = [e.clientX, e.clientY];
-    let fantasma: HTMLElement | undefined;
-    const alvo = (ev: PointerEvent) => {
+    let ghost: HTMLElement | undefined;
+    const target = (ev: PointerEvent) => {
       // Over the explorer itself there is nowhere to drop.
       const sob = document.elementFromPoint(ev.clientX, ev.clientY);
-      return sob?.closest(".explorador") ? undefined : folhaNoPonto(ev.clientX, ev.clientY);
+      return sob?.closest(".explorer") ? undefined : leafAtPoint(ev.clientX, ev.clientY);
     };
     const mover = (ev: PointerEvent) => {
-      if (!fantasma) {
+      if (!ghost) {
         // A few pixels before it counts as a drag: a click stays a click.
         if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
-        fantasma = elemento("div", "arrasto-fantasma");
-        fantasma.textContent = caminho.slice(caminho.lastIndexOf("/") + 1);
-        document.body.append(fantasma);
-        document.body.classList.add("arrastando");
+        ghost = element("div", "drag-ghost");
+        ghost.textContent = path.slice(path.lastIndexOf("/") + 1);
+        document.body.append(ghost);
+        document.body.classList.add("dragging");
       }
-      fantasma.style.transform = `translate(${ev.clientX + 12}px, ${ev.clientY + 8}px)`;
-      marcarRecebendo(alvo(ev));
+      ghost.style.transform = `translate(${ev.clientX + 12}px, ${ev.clientY + 8}px)`;
+      markReceiving(target(ev));
     };
-    const soltar = (ev: PointerEvent) => {
+    const release = (ev: PointerEvent) => {
       window.removeEventListener("pointermove", mover);
-      window.removeEventListener("pointerup", soltar);
-      window.removeEventListener("pointercancel", soltar);
-      if (!fantasma) return;
-      fantasma.remove();
-      document.body.classList.remove("arrastando");
-      marcarRecebendo(undefined);
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", release);
+      if (!ghost) return;
+      ghost.remove();
+      document.body.classList.remove("dragging");
+      markReceiving(undefined);
       // The click that follows the release is not a choice in the tree.
-      arvore.addEventListener("click", (c) => c.stopImmediatePropagation(), { capture: true, once: true });
-      const folha = ev.type === "pointerup" ? alvo(ev) : undefined;
-      if (folha) soltarCaminhos(folha, [caminho]);
+      tree.addEventListener("click", (c) => c.stopImmediatePropagation(), { capture: true, once: true });
+      const leaf = ev.type === "pointerup" ? target(ev) : undefined;
+      if (leaf) releasePaths(leaf, [path]);
     };
     // On the window, not with pointer capture: captured, the click that follows goes to
     // the tree instead of the item, and a plain click no longer opens anything.
     window.addEventListener("pointermove", mover);
-    window.addEventListener("pointerup", soltar);
-    window.addEventListener("pointercancel", soltar);
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
   });
 }
 
 /// Pinned, the drawer becomes part of the panel: the terminal and the viewer step aside
-/// for it (`.explorador-fixo`, padding on the side) instead of being covered.
-function fixarExplorador(folha: Folha, fixo: boolean) {
-  const ex = folha.explorador;
+/// for it (`.explorer-fixed`, padding on the side) instead of being covered.
+function pinExplorer(leaf: Leaf, fixed: boolean) {
+  const ex = leaf.explorer;
   if (!ex) return;
-  ex.fixo = fixo;
-  ex.el.classList.toggle("fixo", fixo);
-  ex.alfinete.classList.toggle("ligado", fixo);
-  ex.alfinete.title = fixo ? T.soltarExplorador : T.fixarExplorador;
-  encaixarExplorador(folha);
+  ex.fixed = fixed;
+  ex.el.classList.toggle("docked", fixed);
+  ex.pin.classList.toggle("on", fixed);
+  ex.pin.title = fixed ? T.releaseExplorer : T.pinExplorer;
+  fitExplorer(leaf);
 }
 
-function encaixarExplorador(folha: Folha) {
-  vigiarFora(folha);
-  const ex = folha.explorador;
-  const termo = folha.el.querySelector(".folha-termo");
-  const fixo = !!ex?.fixo && ex.aberto;
-  if (!termo || termo.classList.contains("explorador-fixo") === fixo) return;
-  termo.classList.toggle("explorador-fixo", fixo);
+function fitExplorer(leaf: Leaf) {
+  watchOutside(leaf);
+  const ex = leaf.explorer;
+  const termHost = leaf.el.querySelector(".leaf-term");
+  const fixed = !!ex?.fixed && ex.isOpen;
+  if (!termHost || termHost.classList.contains("explorer-docked") === fixed) return;
+  termHost.classList.toggle("explorer-docked", fixed);
   // The terminal changed width without the window changing: it is measured again here.
-  const aba = abaDe(folha);
-  if (aba && aba === ativa && !noDiff) {
-    medir(aba);
-    agendarSync(aba);
+  const tab = tabOf(leaf);
+  if (tab && tab === active && !inDiff) {
+    measure(tab);
+    scheduleSync(tab);
   }
 }
 
-function alternarExplorador(folha: Folha) {
-  const raiz = folha.barra?.repo ?? folha.barra?.pasta;
-  const nova = !folha.explorador;
-  const ex = (folha.explorador ??= criarExplorador(folha));
+function toggleExplorer(leaf: Leaf) {
+  const root = leaf.bar?.repo ?? leaf.bar?.folder;
+  const newOne = !leaf.explorer;
+  const ex = (leaf.explorer ??= createExplorer(leaf));
   // Just created, the drawer has never been drawn closed: without a layout first, the
   // browser goes straight to open and there is no slide.
-  if (nova) void ex.el.offsetWidth;
-  ex.aberto = !ex.aberto && !!raiz;
-  ex.el.classList.toggle("aberto", ex.aberto);
-  encaixarExplorador(folha);
-  if (ex.aberto && raiz) {
-    if (ex.raiz !== raiz) {
-      ex.raiz = raiz;
-      ex.abertas.clear();
+  if (newOne) void ex.el.offsetWidth;
+  ex.isOpen = !ex.isOpen && !!root;
+  ex.el.classList.toggle("opened", ex.isOpen);
+  fitExplorer(leaf);
+  if (ex.isOpen && root) {
+    if (ex.root !== root) {
+      ex.root = root;
+      ex.openOnes.clear();
     }
-    ex.listas.clear();
-    ex.titulo.textContent = raiz.slice(raiz.lastIndexOf("/") + 1) || raiz;
-    ex.titulo.title = raiz;
-    void desenharExplorador(folha);
-    ex.arvore.focus({ preventScroll: true });
-  } else if (abaDe(folha)?.foco === folha) {
-    teclado(folha);
+    ex.lists.clear();
+    ex.title.textContent = root.slice(root.lastIndexOf("/") + 1) || root;
+    ex.title.title = root;
+    void drawExplorer(leaf);
+    ex.tree.focus({ preventScroll: true });
+  } else if (tabOf(leaf)?.focus === leaf) {
+    keyboard(leaf);
   }
-  desenharBarra(folha);
+  drawBar(leaf);
 }
 
 /// The little mark before the name, by extension: as in an editor's tree, it is what
 /// lets you find the file by eye.
-const MARCAS_DO_EXPLORADOR: Record<string, [string, string]> = {
+const EXPLORER_MARKS: Record<string, [string, string]> = {
   ts: ["TS", "cyan"],
   tsx: ["TS", "cyan"],
   js: ["JS", "yellow"],
@@ -3284,570 +3289,570 @@ const MARCAS_DO_EXPLORADOR: Record<string, [string, string]> = {
   svg: ["▣", "pink"],
 };
 
-async function desenharExplorador(folha: Folha) {
-  const ex = folha.explorador;
+async function drawExplorer(leaf: Leaf) {
+  const ex = leaf.explorer;
   if (!ex) return;
-  const vez = ++ex.vez;
-  const atual = folha.visor?.historico[folha.visor.pos]?.caminho;
-  const linhas: HTMLElement[] = [];
-  const aviso = (texto: string, nivel: number) => {
-    const el = elemento("div", "explorador-aviso");
-    el.style.paddingLeft = `${22 + nivel * 12}px`;
-    el.textContent = texto;
-    linhas.push(el);
+  const turn = ++ex.turn;
+  const current = leaf.viewer?.history[leaf.viewer.pos]?.path;
+  const lines: HTMLElement[] = [];
+  const notice = (text: string, level: number) => {
+    const el = element("div", "explorer-notice");
+    el.style.paddingLeft = `${22 + level * 12}px`;
+    el.textContent = text;
+    lines.push(el);
   };
-  const descer = async (pasta: string, nivel: number) => {
-    let itens = ex.listas.get(pasta);
-    if (!itens) {
+  const goDown = async (folder: string, level: number) => {
+    let items = ex.lists.get(folder);
+    if (!items) {
       try {
-        itens = await invoke<Entrada[]>("pasta_listar", { caminho: pasta });
+        items = await invoke<Input[]>("folder_list", { path: folder });
       } catch (e) {
-        aviso(T.naoDeuParaListar(String(e)), nivel);
+        notice(T.couldNotList(String(e)), level);
         return;
       }
-      ex.listas.set(pasta, itens);
+      ex.lists.set(folder, items);
     }
-    if (!itens.length) aviso(T.pastaVazia, nivel);
-    for (const it of itens) {
-      const caminho = `${pasta}/${it.nome}`;
-      const aberta = it.pasta && ex.abertas.has(caminho);
-      const linha = elemento("div", "explorador-item");
-      linha.dataset.caminho = caminho;
-      if (it.pasta) linha.dataset.pasta = "1";
-      linha.style.paddingLeft = `${8 + nivel * 12}px`;
-      linha.classList.toggle("aberta", aberta);
-      linha.classList.toggle("atual", caminho === atual);
-      const marca = elemento("span", "explorador-marca");
-      if (it.pasta) marca.textContent = "›";
+    if (!items.length) notice(T.emptyFolder, level);
+    for (const it of items) {
+      const path = `${folder}/${it.name}`;
+      const open = it.folder && ex.openOnes.has(path);
+      const line = element("div", "explorer-item");
+      line.dataset.path = path;
+      if (it.folder) line.dataset.folder = "1";
+      line.style.paddingLeft = `${8 + level * 12}px`;
+      line.classList.toggle("open", open);
+      line.classList.toggle("current", path === current);
+      const marker = element("span", "explorer-mark");
+      if (it.folder) marker.textContent = "›";
       else {
-        const ext = it.nome.slice(it.nome.lastIndexOf(".") + 1).toLowerCase();
-        const [texto, cor] = MARCAS_DO_EXPLORADOR[ext] ?? ["≡", "fg-dim"];
-        marca.textContent = texto;
-        marca.style.color = `var(--${cor})`;
+        const ext = it.name.slice(it.name.lastIndexOf(".") + 1).toLowerCase();
+        const [text, color] = EXPLORER_MARKS[ext] ?? ["≡", "fg-dim"];
+        marker.textContent = text;
+        marker.style.color = `var(--${color})`;
       }
-      const nome = elemento("span", "explorador-nome");
-      nome.textContent = it.nome;
-      linha.append(marca, nome);
-      linhas.push(linha);
-      if (aberta) await descer(caminho, nivel + 1);
+      const name = element("span", "explorer-name");
+      name.textContent = it.name;
+      line.append(marker, name);
+      lines.push(line);
+      if (open) await goDown(path, level + 1);
     }
   };
-  await descer(ex.raiz, 0);
-  if (vez === ex.vez) ex.arvore.replaceChildren(...linhas);
+  await goDown(ex.root, 0);
+  if (turn === ex.turn) ex.tree.replaceChildren(...lines);
 }
 
 /// Shows or hides the viewer. Hiding and showing again goes back to where you
-/// were; `rolar` is for a newly requested file, which opens at the top (or at the line).
-function alternarVisor(folha: Folha, rolar = false) {
-  const v = folha.visor;
-  if (!v?.historico.length) return;
-  v.aberto = !v.aberto;
+/// were; `scroll` is for a newly requested file, which opens at the top (or at the line).
+function toggleViewer(leaf: Leaf, scroll = false) {
+  const v = leaf.viewer;
+  if (!v?.history.length) return;
+  v.isOpen = !v.isOpen;
   // When opening split, the keyboard stays where it was: in the chat, in the terminal.
-  if (v.aberto) v.comTeclado = false;
-  if (arranjoVisor === "sobre") transicionarChat(v);
+  if (v.isOpen) v.withKeyboard = false;
+  if (layoutViewer === "over") transitionChat(v);
   else {
     // Split, the terminal changes size along with it: no animation, which would get it
     // measured midway.
-    v.transicao?.cancel();
-    v.transicao = undefined;
+    v.transition?.cancel();
+    v.transition = undefined;
     v.el.style.pointerEvents = "";
-    v.el.hidden = !v.aberto;
+    v.el.hidden = !v.isOpen;
   }
-  arrumarVisor(folha);
-  clearInterval(v.pulso);
-  v.pulso = undefined;
-  if (v.aberto) {
-    void carregarVisor(folha, rolar);
-    v.pulso = setInterval(() => void conferirVisor(folha), VISOR_MS);
+  tidyViewer(leaf);
+  clearInterval(v.pulse);
+  v.pulse = undefined;
+  if (v.isOpen) {
+    void loadViewer(leaf, scroll);
+    v.pulse = setInterval(() => void checkViewer(leaf), VIEWER_MS);
   }
-  desenharBarra(folha);
-  if (abaDe(folha)?.foco === folha) teclado(folha);
+  drawBar(leaf);
+  if (tabOf(leaf)?.focus === leaf) keyboard(leaf);
 }
 
 /// Puts the viewer in its arrangement's place: shares the terminal's space with it, or
 /// leaves it on top. The terminal that changed size is measured again.
-function arrumarVisor(folha: Folha) {
-  const v = folha.visor;
+function tidyViewer(leaf: Leaf) {
+  const v = leaf.viewer;
   const host = v?.el.parentElement;
   if (!v || !host) return;
-  const dividido = v.aberto && arranjoVisor !== "sobre";
-  const antes = host.className;
-  host.classList.toggle("visor-lado", dividido && arranjoVisor === "lado");
-  host.classList.toggle("visor-abaixo", dividido && arranjoVisor === "abaixo");
-  host.style.setProperty("--visor-fatia", `${(fatiaVisor * 100).toFixed(2)}%`);
-  v.arranjo.innerHTML = ICONE_ARRANJO[arranjoVisor];
-  v.arranjo.title = T.cliqueParaTrocar(ROTULO_ARRANJO[arranjoVisor]);
-  if (host.className === antes) return;
-  const aba = abaDe(folha);
-  if (aba && aba === ativa && !noDiff) {
-    medir(aba);
-    agendarSync(aba);
+  const divided = v.isOpen && layoutViewer !== "over";
+  const before = host.className;
+  host.classList.toggle("viewer-side", divided && layoutViewer === "side");
+  host.classList.toggle("viewer-below", divided && layoutViewer === "below");
+  host.style.setProperty("--viewer-share", `${(shareViewer * 100).toFixed(2)}%`);
+  v.layout.innerHTML = ICON_LAYOUT[layoutViewer];
+  v.layout.title = T.clickToSwitch(LAYOUT_LABEL[layoutViewer]);
+  if (host.className === before) return;
+  const tab = tabOf(leaf);
+  if (tab && tab === active && !inDiff) {
+    measure(tab);
+    scheduleSync(tab);
   }
 }
 
 /// Dragging the border changes how much of the panel is the file's; double click, half and half.
-function ligarAlcaVisor(folha: Folha, v: Visor) {
+function wireViewerHandle(leaf: Leaf, v: Viewer) {
   const host = () => v.el.parentElement;
-  const aplicar = (fatia: number) => {
-    fatiaVisor = Math.min(0.85, Math.max(0.15, fatia));
-    host()?.style.setProperty("--visor-fatia", `${(fatiaVisor * 100).toFixed(2)}%`);
-    const aba = abaDe(folha);
-    if (!aba) return;
-    medir(aba);
-    agendarSync(aba);
+  const apply = (share: number) => {
+    shareViewer = Math.min(0.85, Math.max(0.15, share));
+    host()?.style.setProperty("--viewer-share", `${(shareViewer * 100).toFixed(2)}%`);
+    const tab = tabOf(leaf);
+    if (!tab) return;
+    measure(tab);
+    scheduleSync(tab);
   };
-  v.alca.addEventListener("pointerdown", (e) => {
+  v.handle.addEventListener("pointerdown", (e) => {
     const h = host();
     if (!h) return;
     e.preventDefault();
     e.stopPropagation();
-    v.alca.setPointerCapture(e.pointerId);
-    v.alca.classList.add("arrastando");
+    v.handle.setPointerCapture(e.pointerId);
+    v.handle.classList.add("dragging");
     const mover = (ev: PointerEvent) => {
       const r = h.getBoundingClientRect();
-      aplicar(arranjoVisor === "lado" ? (r.right - ev.clientX) / r.width : (ev.clientY - r.top) / r.height);
+      apply(layoutViewer === "side" ? (r.right - ev.clientX) / r.width : (ev.clientY - r.top) / r.height);
     };
-    const soltar = () => {
-      v.alca.removeEventListener("pointermove", mover);
-      v.alca.removeEventListener("pointerup", soltar);
-      v.alca.removeEventListener("pointercancel", soltar);
-      v.alca.classList.remove("arrastando");
-      lembrarPrefVisor();
+    const release = () => {
+      v.handle.removeEventListener("pointermove", mover);
+      v.handle.removeEventListener("pointerup", release);
+      v.handle.removeEventListener("pointercancel", release);
+      v.handle.classList.remove("dragging");
+      rememberPrefViewer();
     };
-    v.alca.addEventListener("pointermove", mover);
-    v.alca.addEventListener("pointerup", soltar);
-    v.alca.addEventListener("pointercancel", soltar);
+    v.handle.addEventListener("pointermove", mover);
+    v.handle.addEventListener("pointerup", release);
+    v.handle.addEventListener("pointercancel", release);
   });
-  v.alca.addEventListener("dblclick", () => {
-    aplicar(0.5);
-    lembrarPrefVisor();
+  v.handle.addEventListener("dblclick", () => {
+    apply(0.5);
+    rememberPrefViewer();
   });
 }
 
-function criarVisor(folha: Folha): Visor {
-  const el = elemento("div", "visor");
+function createViewer(leaf: Leaf): Viewer {
+  const el = element("div", "viewer");
   el.hidden = true;
-  const cabeca = elemento("div", "visor-cabeca");
-  const voltar = elemento("button", "visor-btn");
-  voltar.textContent = "‹";
-  voltar.title = T.arquivoAnterior;
-  const avancar = elemento("button", "visor-btn");
-  avancar.textContent = "›";
-  avancar.title = T.proximoArquivo;
-  const caminho = elemento("span", "visor-caminho");
-  const ref = elemento("span", "visor-ref");
-  const modo = elemento("button", "visor-btn visor-btn-texto");
-  const arranjo = elemento("button", "visor-btn visor-btn-icone");
-  const ler = elemento("button", "visor-btn visor-btn-icone");
-  ler.innerHTML = ICONE_OLHO;
-  ler.title = T.lerDica;
-  const editar = elemento("button", "visor-btn visor-btn-icone");
-  editar.innerHTML = ICONE_LAPIS;
-  editar.title = T.editarDica;
-  const modos = elemento("div", "visor-modos");
-  modos.append(ler, editar);
-  const salvar = elemento("button", "visor-btn visor-btn-icone visor-btn-salvar");
-  salvar.innerHTML = ICONE_DISQUETE;
-  salvar.title = T.salvarDica;
-  salvar.hidden = true;
-  const editor = elemento("button", "visor-btn visor-btn-texto");
-  editor.textContent = T.abrirNoEditor;
-  editor.title = T.editorNasPreferencias;
-  const copiar = elemento("button", "visor-btn visor-btn-icone");
-  const voltarCopiar = () => {
-    copiar.innerHTML = ICONE_COPIAR;
-    copiar.title = T.copiarCaminho;
-    copiar.classList.remove("copiado");
+  const head = element("div", "viewer-head");
+  const goBack = element("button", "viewer-btn");
+  goBack.textContent = "‹";
+  goBack.title = T.previousFile;
+  const advance = element("button", "viewer-btn");
+  advance.textContent = "›";
+  advance.title = T.nextFile;
+  const path = element("span", "viewer-path");
+  const ref = element("span", "viewer-ref");
+  const mode = element("button", "viewer-btn viewer-btn-text");
+  const layout = element("button", "viewer-btn viewer-btn-icon");
+  const read = element("button", "viewer-btn viewer-btn-icon");
+  read.innerHTML = ICON_EYE;
+  read.title = T.readHint;
+  const editButton = element("button", "viewer-btn viewer-btn-icon");
+  editButton.innerHTML = ICON_PENCIL;
+  editButton.title = T.editHint;
+  const modes = element("div", "viewer-modes");
+  modes.append(read, editButton);
+  const save = element("button", "viewer-btn viewer-btn-icon viewer-btn-save");
+  save.innerHTML = ICON_FLOPPY;
+  save.title = T.saveHint;
+  save.hidden = true;
+  const editor = element("button", "viewer-btn viewer-btn-text");
+  editor.textContent = T.openInEditor;
+  editor.title = T.editorInPreferences;
+  const copy = element("button", "viewer-btn viewer-btn-icon");
+  const copyBack = () => {
+    copy.innerHTML = ICON_COPY;
+    copy.title = T.copyPath;
+    copy.classList.remove("copied");
   };
-  voltarCopiar();
-  const finder = elemento("button", "visor-btn visor-btn-icone");
-  finder.innerHTML = ICONE_PASTA;
-  finder.title = T.mostrarNoFinder;
-  const fechar = elemento("button", "visor-btn visor-btn-icone");
-  fechar.innerHTML = ICONE_FECHAR;
-  fechar.title = T.voltarAoTerminal;
-  cabeca.append(voltar, avancar, caminho, ref, modo, arranjo, salvar, modos, copiar, finder, editor, fechar);
-  const abas = elemento("div", "visor-abas");
-  const corpo = elemento("div", "visor-corpo");
-  corpo.tabIndex = 0;
-  el.append(cabeca, abas, corpo);
-  const alca = elemento("div", "visor-alca");
+  copyBack();
+  const finder = element("button", "viewer-btn viewer-btn-icon");
+  finder.innerHTML = ICON_FOLDER;
+  finder.title = T.showInFinder;
+  const close = element("button", "viewer-btn viewer-btn-icon");
+  close.innerHTML = ICON_CLOSE;
+  close.title = T.backToTerminal;
+  head.append(goBack, advance, path, ref, mode, layout, save, modes, copy, finder, editor, close);
+  const tabs = element("div", "viewer-tabs");
+  const body = element("div", "viewer-body");
+  body.tabIndex = 0;
+  el.append(head, tabs, body);
+  const handle = element("div", "viewer-handle");
   // Inside the terminal's element, beside its screen: split, the viewer
   // takes a share of it; on top, it covers it entirely.
-  folha.el.querySelector(".folha-termo")?.append(alca, el);
+  leaf.el.querySelector(".leaf-term")?.append(handle, el);
 
-  const v: Visor = {
+  const v: Viewer = {
     el,
-    alca,
-    corpo,
-    caminho,
+    handle,
+    body,
+    path,
     ref,
-    voltar,
-    avancar,
-    modo,
-    arranjo,
-    modos,
-    ler,
-    editar,
-    salvar,
-    fechar,
-    aberto: false,
-    comTeclado: false,
-    rolagem: 0,
-    segurando: 0,
-    historico: [],
+    goBack,
+    advance,
+    mode,
+    layout,
+    modes,
+    read,
+    editButton,
+    save,
+    close,
+    isOpen: false,
+    withKeyboard: false,
+    scrollPos: 0,
+    holding: 0,
+    history: [],
     pos: 0,
-    estados: new Map(),
-    abas,
-    renderizado: false,
-    vez: 0,
+    states: new Map(),
+    tabs,
+    rendered: false,
+    turn: 0,
   };
-  ligarAlcaVisor(folha, v);
-  corpo.addEventListener("scroll", () => {
-    if (!v.segurando) v.rolagem = corpo.scrollTop;
+  wireViewerHandle(leaf, v);
+  body.addEventListener("scroll", () => {
+    if (!v.holding) v.scrollPos = body.scrollTop;
   });
   // The buttons don't take the keyboard from the body: esc keeps closing.
-  for (const b of [voltar, avancar, modo, arranjo, ler, editar, salvar, copiar, finder, editor, fechar]) {
+  for (const b of [goBack, advance, mode, layout, read, editButton, save, copy, finder, editor, close]) {
     b.addEventListener("mousedown", (e) => e.preventDefault());
   }
-  arranjo.addEventListener("click", () => {
-    arranjoVisor = ARRANJOS[(ARRANJOS.indexOf(arranjoVisor) + 1) % ARRANJOS.length];
-    lembrarPrefVisor();
-    v.transicao?.cancel();
-    v.transicao = undefined;
-    arrumarVisor(folha);
-    if (abaDe(folha)?.foco === folha) teclado(folha);
+  layout.addEventListener("click", () => {
+    layoutViewer = LAYOUTS[(LAYOUTS.indexOf(layoutViewer) + 1) % LAYOUTS.length];
+    rememberPrefViewer();
+    v.transition?.cancel();
+    v.transition = undefined;
+    tidyViewer(leaf);
+    if (tabOf(leaf)?.focus === leaf) keyboard(leaf);
   });
-  voltar.addEventListener("click", () => trocarAba(folha, v.pos - 1));
-  avancar.addEventListener("click", () => trocarAba(folha, v.pos + 1));
+  goBack.addEventListener("click", () => switchTab(leaf, v.pos - 1));
+  advance.addEventListener("click", () => switchTab(leaf, v.pos + 1));
   // A click on a tab shows it; on its ✕, or with the middle button, it closes.
-  abas.addEventListener("mousedown", (e) => {
-    const aba = (e.target as HTMLElement).closest<HTMLElement>(".visor-aba");
-    if (!aba || e.button !== 0) return;
+  tabs.addEventListener("mousedown", (e) => {
+    const tab = (e.target as HTMLElement).closest<HTMLElement>(".viewer-tab");
+    if (!tab || e.button !== 0) return;
     e.preventDefault();
-    const i = Number(aba.dataset.i);
-    if ((e.target as HTMLElement).closest(".visor-aba-fechar")) void fecharArquivo(folha, i);
-    else trocarAba(folha, i);
+    const i = Number(tab.dataset.i);
+    if ((e.target as HTMLElement).closest(".viewer-tab-close")) void closeFile(leaf, i);
+    else switchTab(leaf, i);
   });
-  abas.addEventListener("auxclick", (e) => {
-    const aba = (e.target as HTMLElement).closest<HTMLElement>(".visor-aba");
-    if (aba && e.button === 1) void fecharArquivo(folha, Number(aba.dataset.i));
+  tabs.addEventListener("auxclick", (e) => {
+    const tab = (e.target as HTMLElement).closest<HTMLElement>(".viewer-tab");
+    if (tab && e.button === 1) void closeFile(leaf, Number(tab.dataset.i));
   });
-  modo.addEventListener("click", () => {
-    v.renderizado = !v.renderizado;
-    desenharVisor(folha, true);
+  mode.addEventListener("click", () => {
+    v.rendered = !v.rendered;
+    drawViewer(leaf, true);
   });
   editor.addEventListener("click", () => {
-    const p = v.historico[v.pos];
+    const p = v.history[v.pos];
     void (async () => {
-      const comando = (await loadSettings().catch(() => undefined))?.editor.trim() || null;
-      await invoke("abrir_no_editor", { caminho: p.caminho, linha: p.linha ?? null, comando });
-    })().catch((e) => avisar(folha, T.editorErro(String(e))));
+      const command = (await loadSettings().catch(() => undefined))?.editor.trim() || null;
+      await invoke("open_in_editor", { path: p.path, line: p.line ?? null, command: command });
+    })().catch((e) => notify(leaf, T.editorError(String(e))));
   });
   // The absolute path, as the header's tooltip shows it: ready to paste anywhere.
-  copiar.addEventListener("click", () => {
+  copy.addEventListener("click", () => {
     navigator.clipboard
-      .writeText(v.historico[v.pos].caminho)
+      .writeText(v.history[v.pos].path)
       .then(() => {
-        copiar.innerHTML = ICONE_COPIADO;
-        copiar.title = T.caminhoCopiado;
-        copiar.classList.add("copiado");
-        setTimeout(voltarCopiar, 1500);
+        copy.innerHTML = ICON_COPIED;
+        copy.title = T.copiedPath;
+        copy.classList.add("copied");
+        setTimeout(copyBack, 1500);
       })
       .catch((err) => jlog(`copy: ${err}`));
   });
   finder.addEventListener("click", () => {
-    invoke("mostrar_no_finder", { caminho: v.historico[v.pos].caminho }).catch((e) => avisar(folha, T.finderErro(String(e))));
+    invoke("reveal_in_finder", { path: v.history[v.pos].path }).catch((e) => notify(leaf, T.finderError(String(e))));
   });
-  ler.addEventListener("click", () => void sairEdicao(folha));
-  editar.addEventListener("click", () => entrarEdicao(folha));
-  salvar.addEventListener("click", () => void salvarEdicao(folha));
-  fechar.addEventListener("click", () => (v.edicao ? void sairEdicao(folha) : alternarVisor(folha)));
-  corpo.addEventListener("keydown", (e) => {
+  read.addEventListener("click", () => void leaveEdit(leaf));
+  editButton.addEventListener("click", () => enterEdit(leaf));
+  save.addEventListener("click", () => void saveEdit(leaf));
+  close.addEventListener("click", () => (v.edit ? void leaveEdit(leaf) : toggleViewer(leaf)));
+  body.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     e.preventDefault();
-    alternarVisor(folha);
+    toggleViewer(leaf);
   });
-  corpo.addEventListener("click", (e) => {
-    if (cliqueEmReferencia(folha, e, pastaDe(v.historico[v.pos].caminho))) return;
+  body.addEventListener("click", (e) => {
+    if (referenceClick(leaf, e, folderOf(v.history[v.pos].path))) return;
     const a = (e.target as HTMLElement).closest("a");
     if (!a) return;
     e.preventDefault();
-    abrirLink(e, a.href);
+    openLink(e, a.href);
   });
-  corpo.addEventListener("change", (e) => {
-    const caixa = e.target as HTMLInputElement;
-    if (!caixa.matches("input.tarefa[data-linha]")) return;
-    if (caixa.checked) {
-      caixa.classList.add("marcou");
-      caixa.addEventListener("animationend", () => caixa.classList.remove("marcou"), { once: true });
+  body.addEventListener("change", (e) => {
+    const box = e.target as HTMLInputElement;
+    if (!box.matches("input.task[data-line]")) return;
+    if (box.checked) {
+      box.classList.add("just-marked");
+      box.addEventListener("animationend", () => box.classList.remove("just-marked"), { once: true });
     }
-    void marcarTarefa(folha, caixa);
+    void markTask(leaf, box);
   });
   return v;
 }
 
 /// A checkbox clicked in a rendered .md: `[ ]` ↔ `[x]` on that line of the file, on
-/// disk. The line changes in `v.linhas` before Rust answers, so a second quick click
+/// disk. The line changes in `v.lines` before Rust answers, so a second quick click
 /// already starts from it.
-async function marcarTarefa(folha: Folha, caixa: HTMLInputElement) {
-  const v = folha.visor;
-  const linhas = v?.linhas;
-  const n = Number(caixa.dataset.linha);
-  const antes = linhas?.[n];
-  if (!v || !linhas || antes === undefined) return;
-  const coluna = caixa.dataset.coluna === undefined ? undefined : Number(caixa.dataset.coluna);
-  const depois = marcarNaLinha(antes, caixa.checked, coluna);
-  linhas[n] = depois;
+async function markTask(leaf: Leaf, box: HTMLInputElement) {
+  const v = leaf.viewer;
+  const lines = v?.lines;
+  const n = Number(box.dataset.line);
+  const before = lines?.[n];
+  if (!v || !lines || before === undefined) return;
+  const column = box.dataset.column === undefined ? undefined : Number(box.dataset.column);
+  const after = markOnLine(before, box.checked, column);
+  lines[n] = after;
   try {
-    v.carimbo = await invoke<string>("arquivo_marcar", { caminho: v.historico[v.pos].caminho, linha: n, antes, depois });
+    v.stamp = await invoke<string>("file_replace_line", { path: v.history[v.pos].path, line: n, before: before, after: after });
   } catch (e) {
-    linhas[n] = antes;
-    caixa.checked = !caixa.checked;
-    avisar(folha, T.naoDeuParaMarcar(String(e)));
+    lines[n] = before;
+    box.checked = !box.checked;
+    notify(leaf, T.couldNotMark(String(e)));
   }
 }
 
-const pastaDe = (caminho: string) => caminho.slice(0, caminho.lastIndexOf("/")) || "/";
+const folderOf = (path: string) => path.slice(0, path.lastIndexOf("/")) || "/";
 
 /// The path as read on the bar: from the panel's folder, or with `~`.
-function caminhoCurto(folha: Folha, caminho: string): string {
-  const base = folha.barra?.repo ?? folha.barra?.pasta;
-  if (base && caminho.startsWith(`${base}/`)) return caminho.slice(base.length + 1);
-  const home = caminho.match(/^\/Users\/[^/]+\//)?.[0];
-  return home ? `~/${caminho.slice(home.length)}` : caminho;
+function shortPath(leaf: Leaf, path: string): string {
+  const base = leaf.bar?.repo ?? leaf.bar?.folder;
+  if (base && path.startsWith(`${base}/`)) return path.slice(base.length + 1);
+  const home = path.match(/^\/Users\/[^/]+\//)?.[0];
+  return home ? `~/${path.slice(home.length)}` : path;
 }
 
 /// The header follows the tab on screen: its path (with the line), its ref, its buttons.
-function legendaVisor(folha: Folha) {
-  const v = folha.visor;
-  const p = v?.historico[v.pos];
+function viewerCaption(leaf: Leaf) {
+  const v = leaf.viewer;
+  const p = v?.history[v.pos];
   if (!v || !p) return;
-  v.caminho.textContent = caminhoCurto(folha, p.caminho) + (p.linha ? `:${p.linha}${p.ate ? `-${p.ate}` : ""}` : "");
-  v.caminho.title = p.caminho;
+  v.path.textContent = shortPath(leaf, p.path) + (p.line ? `:${p.line}${p.to ? `-${p.to}` : ""}` : "");
+  v.path.title = p.path;
   v.ref.textContent = p.ref ?? "";
   v.ref.hidden = !p.ref;
-  botoesVisor(v);
+  buttonsViewer(v);
 }
 
-async function carregarVisor(folha: Folha, rolar: boolean) {
-  const v = folha.visor;
-  if (!v || v.edicao) return;
-  const p = v.historico[v.pos];
-  const vez = ++v.vez;
-  legendaVisor(folha);
+async function loadViewer(leaf: Leaf, scroll: boolean) {
+  const v = leaf.viewer;
+  if (!v || v.edit) return;
+  const p = v.history[v.pos];
+  const turn = ++v.turn;
+  viewerCaption(leaf);
   try {
-    if (ehImagem(p.caminho)) {
-      const img = await invoke<{ url: string; carimbo: string }>("arquivo_imagem", { caminho: p.caminho, rf: p.ref ?? null });
-      if (vez !== v.vez) return;
-      v.linhas = undefined;
-      v.imagem = img.url;
-      v.carimbo = img.carimbo;
+    if (isImage(p.path)) {
+      const img = await invoke<{ url: string; stamp: string }>("file_image", { path: p.path, gitRef: p.ref ?? null });
+      if (turn !== v.turn) return;
+      v.lines = undefined;
+      v.image = img.url;
+      v.stamp = img.stamp;
     } else {
-      const arq = await invoke<{ linhas: string[]; carimbo: string }>("arquivo_ler", { caminho: p.caminho, rf: p.ref ?? null });
-      if (vez !== v.vez) return;
-      v.linhas = arq.linhas;
-      v.imagem = undefined;
-      v.carimbo = arq.carimbo;
+      const fileData = await invoke<{ lines: string[]; stamp: string }>("file_read", { path: p.path, gitRef: p.ref ?? null });
+      if (turn !== v.turn) return;
+      v.lines = fileData.lines;
+      v.image = undefined;
+      v.stamp = fileData.stamp;
     }
   } catch (e) {
-    if (vez !== v.vez) return;
-    v.linhas = undefined;
-    v.imagem = undefined;
-    v.carimbo = undefined;
-    const erro = elemento("div", "visor-erro");
-    erro.textContent = T.naoDeuParaAbrir(String(e));
-    v.corpo.replaceChildren(erro);
-    v.modo.hidden = true;
-    botoesVisor(v);
+    if (turn !== v.turn) return;
+    v.lines = undefined;
+    v.image = undefined;
+    v.stamp = undefined;
+    const error = element("div", "viewer-error");
+    error.textContent = T.couldNotOpen(String(e));
+    v.body.replaceChildren(error);
+    v.mode.hidden = true;
+    buttonsViewer(v);
     return;
   }
-  desenharVisor(folha, rolar);
+  drawViewer(leaf, scroll);
 }
 
 /// Claude edited the open file: the viewer follows, without losing the scroll.
-async function conferirVisor(folha: Folha) {
-  const v = folha.visor;
-  if (!v?.aberto || !v.carimbo || v.edicao) return;
-  const p = v.historico[v.pos];
+async function checkViewer(leaf: Leaf) {
+  const v = leaf.viewer;
+  if (!v?.isOpen || !v.stamp || v.edit) return;
+  const p = v.history[v.pos];
   if (p.ref) return;
-  const agora = await invoke<string | null>("arquivo_carimbo", { caminho: p.caminho }).catch(() => null);
-  if (agora && agora !== v.carimbo && v.historico[v.pos] === p) void carregarVisor(folha, false);
+  const now = await invoke<string | null>("file_stamp", { path: p.path }).catch(() => null);
+  if (now && now !== v.stamp && v.history[v.pos] === p) void loadViewer(leaf, false);
 }
 
-function desenharVisor(folha: Folha, rolar: boolean) {
-  const v = folha.visor;
-  const linhas = v?.linhas;
-  if (!v || (!linhas && !v.imagem) || v.edicao) return;
-  const p = v.historico[v.pos];
-  const md = ehMarkdown(p.caminho);
-  v.modo.hidden = !temRenderizado(p.caminho);
-  botoesVisor(v);
-  v.modo.textContent = v.renderizado ? T.verFonte : T.verRenderizado;
+function drawViewer(leaf: Leaf, scroll: boolean) {
+  const v = leaf.viewer;
+  const lines = v?.lines;
+  if (!v || (!lines && !v.image) || v.edit) return;
+  const p = v.history[v.pos];
+  const md = isMarkdown(p.path);
+  v.mode.hidden = !hasRendered(p.path);
+  buttonsViewer(v);
+  v.mode.textContent = v.rendered ? T.viewFont : T.viewRendered;
   // The scroll the redraw moves (the content disappears and comes back) isn't yours: only
   // what you do after two frames counts.
-  const segurando = ++v.segurando;
+  const holding = ++v.holding;
   requestAnimationFrame(() =>
     requestAnimationFrame(() => {
-      if (v.segurando === segurando) v.segurando = 0;
+      if (v.holding === holding) v.holding = 0;
     }),
   );
-  const topo = rolar ? 0 : v.rolagem;
+  const top = scroll ? 0 : v.scrollPos;
 
-  if (v.imagem || (linhas && ehSvg(p.caminho) && v.renderizado)) {
-    const url = v.imagem ?? `data:image/svg+xml;charset=utf-8,${encodeURIComponent((linhas ?? []).join("\n"))}`;
-    v.corpo.replaceChildren(imagemDoVisor(url));
+  if (v.image || (lines && isSvg(p.path) && v.rendered)) {
+    const url = v.image ?? `data:image/svg+xml;charset=utf-8,${encodeURIComponent((lines ?? []).join("\n"))}`;
+    v.body.replaceChildren(viewerImage(url));
     return;
   }
-  if (!linhas) return;
+  if (!lines) return;
 
-  if (md && v.renderizado) {
-    const html = elemento("div", "visor-md chat-claude");
-    html.innerHTML = markdown(linhas.join("\n"), 0, p.ref ? "ver" : "marcar", true);
-    const marcados = marcarBlocos(html, p.linha, p.ate);
-    botoesDeCopiar(html);
-    v.corpo.replaceChildren(html);
-    void desenharMermaid(v, html);
-    if (rolar && marcados[0]) {
+  if (md && v.rendered) {
+    const html = element("div", "viewer-md chat-claude");
+    html.innerHTML = markdown(lines.join("\n"), 0, p.ref ? "view" : "mark", true);
+    const markedOnes = markBlocks(html, p.line, p.to);
+    copyButtons(html);
+    v.body.replaceChildren(html);
+    void drawMermaid(v, html);
+    if (scroll && markedOnes[0]) {
       // As in the source: a third below the top.
-      const topoDoBloco = marcados[0].getBoundingClientRect().top - v.corpo.getBoundingClientRect().top + v.corpo.scrollTop;
-      v.corpo.scrollTop = topoDoBloco - v.corpo.clientHeight / 3;
-      v.fracao = undefined;
-    } else if (v.fracao !== undefined) {
-      v.corpo.scrollTop = v.fracao * (v.corpo.scrollHeight - v.corpo.clientHeight);
-      v.rolagem = v.corpo.scrollTop;
-      v.fracao = undefined;
-    } else v.corpo.scrollTop = topo;
-    if (rolar) v.rolagem = 0;
+      const blockTop = markedOnes[0].getBoundingClientRect().top - v.body.getBoundingClientRect().top + v.body.scrollTop;
+      v.body.scrollTop = blockTop - v.body.clientHeight / 3;
+      v.fraction = undefined;
+    } else if (v.fraction !== undefined) {
+      v.body.scrollTop = v.fraction * (v.body.scrollHeight - v.body.clientHeight);
+      v.scrollPos = v.body.scrollTop;
+      v.fraction = undefined;
+    } else v.body.scrollTop = top;
+    if (scroll) v.scrollPos = 0;
     return;
   }
 
-  const de = p.linha ?? 0;
-  const ate = Math.max(de, p.ate ?? de);
-  const codigo = elemento("div", "visor-codigo");
-  codigo.style.setProperty("--digitos", String(String(linhas.length).length));
-  codigo.innerHTML = linhas
+  const from = p.line ?? 0;
+  const to = Math.max(from, p.to ?? from);
+  const code = element("div", "viewer-code");
+  code.style.setProperty("--digits", String(String(lines.length).length));
+  code.innerHTML = lines
     .map((l, i) => {
       const n = i + 1;
-      const marcada = n >= de && n <= ate ? " marcada" : "";
-      return `<div class="visor-linha${marcada}"><span class="visor-num">${n}</span><span class="visor-texto">${escapar(l) || " "}</span></div>`;
+      const marked = n >= from && n <= to ? " marked" : "";
+      return `<div class="viewer-line${marked}"><span class="viewer-num">${n}</span><span class="viewer-text">${escape(l) || " "}</span></div>`;
     })
     .join("");
-  v.corpo.replaceChildren(codigo);
-  if (rolar && de) {
-    const alvo = codigo.children[de - 1] as HTMLElement | undefined;
+  v.body.replaceChildren(code);
+  if (scroll && from) {
+    const target = code.children[from - 1] as HTMLElement | undefined;
     // A third below the top: lets you see what comes before the line.
-    if (alvo) v.corpo.scrollTop = alvo.offsetTop - v.corpo.clientHeight / 3;
+    if (target) v.body.scrollTop = target.offsetTop - v.body.clientHeight / 3;
   } else {
-    v.corpo.scrollTop = topo;
+    v.body.scrollTop = top;
   }
-  if (rolar) v.rolagem = v.corpo.scrollTop;
-  void colorirVisor(v, codigo, p.caminho, linhas);
+  if (scroll) v.scrollPos = v.body.scrollTop;
+  void colorizeViewer(v, code, p.path, lines);
 }
 
-/// In a rendered .md, the blocks the lines `de`–`ate` became, lit like the source's
+/// In a rendered .md, the blocks the lines `from`–`to` became, lit like the source's
 /// lines. The innermost ones: a list item or a table row, not the whole list or table.
-function marcarBlocos(html: HTMLElement, de?: number, ate?: number): HTMLElement[] {
-  if (!de) return [];
-  const fim = Math.max(de, ate ?? de);
-  const tocados = [...html.querySelectorAll<HTMLElement>("[data-de]")].filter(
-    (b) => Number(b.dataset.de) <= fim && Number(b.dataset.ate) >= de,
+function markBlocks(html: HTMLElement, from?: number, to?: number): HTMLElement[] {
+  if (!from) return [];
+  const end = Math.max(from, to ?? from);
+  const touched = [...html.querySelectorAll<HTMLElement>("[data-from]")].filter(
+    (b) => Number(b.dataset.from) <= end && Number(b.dataset.to) >= from,
   );
-  const marcados = tocados.filter((b) => !tocados.some((o) => o !== b && b.contains(o)));
-  for (const b of marcados) b.classList.add("marcada");
-  return marcados;
+  const markedOnes = touched.filter((b) => !touched.some((o) => o !== b && b.contains(o)));
+  for (const b of markedOnes) b.classList.add("marked");
+  return markedOnes;
 }
 
 /// The edit mode: the file in a text box over its own colored copy. The box's text
 /// is transparent — only the caret and the selection show —, and below it a <pre>
 /// draws the same lines with the read mode's colors, following the scroll. The numbers
 /// go in a margin of their own, outside what is selected.
-type Edicao = {
+type Edit = {
   area: HTMLTextAreaElement;
-  cores: HTMLPreElement;
-  numeros: HTMLPreElement;
-  raiz: HTMLDivElement;
+  colors: HTMLPreElement;
+  numbers: HTMLPreElement;
+  root: HTMLDivElement;
   /// The text as it was last saved: what tells whether there is something to save.
-  salvo: string;
+  savedItem: string;
   /// The colored HTML of each line, by its text, from the last tokenization: while typing,
   /// the lines that didn't change keep their colors until the next one.
-  pintadas: Map<string, string>;
+  painted: Map<string, string>;
   total: number;
-  espera?: ReturnType<typeof setTimeout>;
+  wait?: ReturnType<typeof setTimeout>;
   /// Where the box was scrolled when its tab was left.
-  rolagem?: [number, number];
+  scrollPos?: [number, number];
 };
 
 /// The viewer's buttons follow the mode: editing, the source/rendered switch rests, Save
 /// shows up (lit only with something to save) and ✕ leaves editing. The tabs too.
-function botoesVisor(v: Visor) {
-  const ed = v.edicao;
-  const p = v.historico[v.pos];
-  v.el.classList.toggle("editando", !!ed);
-  v.modos.hidden = !!p?.ref || !v.linhas;
-  v.ler.classList.toggle("ligado", !ed);
-  v.editar.classList.toggle("ligado", !!ed);
-  v.salvar.hidden = !ed;
-  v.salvar.disabled = !ed || ed.area.value === ed.salvo;
-  v.voltar.disabled = v.pos === 0;
-  v.avancar.disabled = v.pos === v.historico.length - 1;
-  if (ed) v.modo.hidden = true;
-  v.fechar.title = ed ? T.sairDaEdicao : T.voltarAoTerminal;
-  desenharAbasVisor(v);
+function buttonsViewer(v: Viewer) {
+  const ed = v.edit;
+  const p = v.history[v.pos];
+  v.el.classList.toggle("is-editing", !!ed);
+  v.modes.hidden = !!p?.ref || !v.lines;
+  v.read.classList.toggle("on", !ed);
+  v.editButton.classList.toggle("on", !!ed);
+  v.save.hidden = !ed;
+  v.save.disabled = !ed || ed.area.value === ed.savedItem;
+  v.goBack.disabled = v.pos === 0;
+  v.advance.disabled = v.pos === v.history.length - 1;
+  if (ed) v.mode.hidden = true;
+  v.close.title = ed ? T.leaveEditing : T.backToTerminal;
+  drawTabsViewer(v);
 }
 
 /// A line's tokens as HTML, with the theme's colors — the same in reading and in editing.
-function htmlDosTokens(linha: { content: string; color?: string; fontStyle?: number }[]): string {
-  return linha
+function htmlFromTokens(line: { content: string; color?: string; fontStyle?: number }[]): string {
+  return line
     .map((t) => {
-      const estilo = [t.color ? `color:${t.color}` : "", t.fontStyle === 1 ? "font-style:italic" : ""].filter(Boolean).join(";");
-      return estilo ? `<span style="${estilo}">${escapar(t.content)}</span>` : escapar(t.content);
+      const style = [t.color ? `color:${t.color}` : "", t.fontStyle === 1 ? "font-style:italic" : ""].filter(Boolean).join(";");
+      return style ? `<span style="${style}">${escape(t.content)}</span>` : escape(t.content);
     })
     .join("");
 }
 
 /// Edit mode: right in the viewer. Not for a git version, which has nowhere to be saved.
-function entrarEdicao(folha: Folha) {
-  const v = folha.visor;
-  if (!v?.linhas || v.edicao || v.historico[v.pos]?.ref) return;
-  const raiz = elemento("div", "visor-editor");
-  const margem = elemento("div", "visor-editor-margem");
-  const numeros = elemento("pre", "visor-editor-numeros");
-  margem.append(numeros);
-  const campo = elemento("div", "visor-editor-campo");
-  const cores = elemento("pre", "visor-editor-cores");
-  const area = elemento("textarea", "visor-edicao");
+function enterEdit(leaf: Leaf) {
+  const v = leaf.viewer;
+  if (!v?.lines || v.edit || v.history[v.pos]?.ref) return;
+  const root = element("div", "viewer-editor");
+  const margin = element("div", "viewer-editor-margin");
+  const numbers = element("pre", "viewer-editor-numbers");
+  margin.append(numbers);
+  const campo = element("div", "viewer-editor-field");
+  const colors = element("pre", "viewer-editor-colors");
+  const area = element("textarea", "viewer-edit");
   area.spellcheck = false;
-  area.value = v.linhas.join("\n");
-  campo.append(cores, area);
-  raiz.append(margem, campo);
-  const ed: Edicao = { area, cores, numeros, raiz, salvo: area.value, pintadas: new Map(), total: 0 };
-  v.edicao = ed;
+  area.value = v.lines.join("\n");
+  campo.append(colors, area);
+  root.append(margin, campo);
+  const ed: Edit = { area, colors, numbers, root, savedItem: area.value, painted: new Map(), total: 0 };
+  v.edit = ed;
   // Tab indents the way the file already does.
-  const recuo = v.linhas.some((l) => l.startsWith("\t")) ? "\t" : "  ";
+  const indent = v.lines.some((l) => l.startsWith("\t")) ? "\t" : "  ";
   area.addEventListener("input", () => {
-    pintarEdicao(ed);
-    botoesVisor(v);
-    clearTimeout(ed.espera);
-    ed.espera = setTimeout(() => void colorirEdicao(folha, ed), 200);
+    paintEdit(ed);
+    buttonsViewer(v);
+    clearTimeout(ed.wait);
+    ed.wait = setTimeout(() => void colorizeEdit(leaf, ed), 200);
   });
   area.addEventListener("scroll", () => {
-    cores.style.transform = `translate(${-area.scrollLeft}px, ${-area.scrollTop}px)`;
-    numeros.style.transform = `translateY(${-area.scrollTop}px)`;
+    colors.style.transform = `translate(${-area.scrollLeft}px, ${-area.scrollTop}px)`;
+    numbers.style.transform = `translateY(${-area.scrollTop}px)`;
   });
   area.addEventListener("keydown", (e) => {
     const cmd = e.metaKey && !e.altKey && !e.ctrlKey;
     if (cmd && e.key.toLowerCase() === "s") {
       e.preventDefault();
-      void salvarEdicao(folha);
+      void saveEdit(leaf);
     } else if (e.key === "Escape") {
       // Not up to the body, where esc closes the viewer.
       e.preventDefault();
       e.stopPropagation();
-      void sairEdicao(folha);
+      void leaveEdit(leaf);
     } else if (e.key === "Tab" && !cmd && !e.shiftKey) {
       e.preventDefault();
-      document.execCommand("insertText", false, recuo);
+      document.execCommand("insertText", false, indent);
     } else if (cmd && e.key.toLowerCase() === "z") {
       // The Edit menu has no Undo — it would reach the terminal too —, so ⌘Z is handled here.
       e.preventDefault();
@@ -3857,121 +3862,121 @@ function entrarEdicao(folha: Folha) {
       document.execCommand("cut");
     }
   });
-  pintarEdicao(ed);
+  paintEdit(ed);
   // The edit opens where reading was. The source has the same lines, font and padding as
   // the box, so the same scroll; rendered, the same fraction of the way. And the caret
   // goes to the first line on screen: left at the end, where the box puts it, the
   // scroll would jump down there.
-  const ler = v.corpo;
-  const doCodigo = !v.renderizado;
-  const topo = ler.scrollTop;
-  const fracao = ler.scrollHeight > ler.clientHeight ? topo / (ler.scrollHeight - ler.clientHeight) : 0;
-  ler.replaceChildren(raiz);
-  area.scrollTop = doCodigo ? topo : fracao * (area.scrollHeight - area.clientHeight);
-  const alturaLinha = parseFloat(getComputedStyle(area).lineHeight) || 18.6;
-  const primeira = Math.max(0, Math.floor(area.scrollTop / alturaLinha));
-  const linhas = area.value.split("\n");
-  const inicio = linhas.slice(0, primeira).reduce((n, l) => n + l.length + 1, 0);
-  area.setSelectionRange(inicio, inicio);
+  const read = v.body;
+  const fromCode = !v.rendered;
+  const top = read.scrollTop;
+  const fraction = read.scrollHeight > read.clientHeight ? top / (read.scrollHeight - read.clientHeight) : 0;
+  read.replaceChildren(root);
+  area.scrollTop = fromCode ? top : fraction * (area.scrollHeight - area.clientHeight);
+  const lineHeight = parseFloat(getComputedStyle(area).lineHeight) || 18.6;
+  const first = Math.max(0, Math.floor(area.scrollTop / lineHeight));
+  const lines = area.value.split("\n");
+  const beginning = lines.slice(0, first).reduce((n, l) => n + l.length + 1, 0);
+  area.setSelectionRange(beginning, beginning);
   area.focus({ preventScroll: true });
   area.dispatchEvent(new Event("scroll"));
-  botoesVisor(v);
-  void colorirEdicao(folha, ed);
+  buttonsViewer(v);
+  void colorizeEdit(leaf, ed);
 }
 
 /// Redraws the colored copy and the numbers from the box's text. A changed line goes
 /// plain until the next tokenization colors it.
-function pintarEdicao(ed: Edicao) {
-  const linhas = ed.area.value.split("\n");
+function paintEdit(ed: Edit) {
+  const lines = ed.area.value.split("\n");
   // The trailing space keeps a last empty line: a <pre> drops the final line break.
-  ed.cores.innerHTML = `${linhas.map((l) => ed.pintadas.get(l) ?? escapar(l)).join("\n")}\n `;
-  if (linhas.length !== ed.total) {
-    ed.total = linhas.length;
-    ed.numeros.textContent = Array.from({ length: linhas.length }, (_, i) => i + 1).join("\n");
-    ed.raiz.style.setProperty("--digitos", String(String(linhas.length).length));
+  ed.colors.innerHTML = `${lines.map((l) => ed.painted.get(l) ?? escape(l)).join("\n")}\n `;
+  if (lines.length !== ed.total) {
+    ed.total = lines.length;
+    ed.numbers.textContent = Array.from({ length: lines.length }, (_, i) => i + 1).join("\n");
+    ed.root.style.setProperty("--digits", String(String(lines.length).length));
   }
 }
 
-async function colorirEdicao(folha: Folha, ed: Edicao) {
-  const v = folha.visor;
+async function colorizeEdit(leaf: Leaf, ed: Edit) {
+  const v = leaf.viewer;
   if (!v) return;
   const { langFor, tokenizeFresh } = await import("./differ/lib/highlight");
-  const lang = langFor(v.historico[v.pos].caminho);
+  const lang = langFor(v.history[v.pos].path);
   if (!lang) return;
-  const linhas = ed.area.value.split("\n");
-  const tokens = await tokenizeFresh(linhas, lang);
-  if (!tokens || v.edicao !== ed) return;
-  ed.pintadas = new Map(tokens.map((t, i) => [linhas[i], htmlDosTokens(t)]));
-  pintarEdicao(ed);
+  const lines = ed.area.value.split("\n");
+  const tokens = await tokenizeFresh(lines, lang);
+  if (!tokens || v.edit !== ed) return;
+  ed.painted = new Map(tokens.map((t, i) => [lines[i], htmlFromTokens(t)]));
+  paintEdit(ed);
 }
 
-async function salvarEdicao(folha: Folha): Promise<boolean> {
-  const v = folha.visor;
-  const ed = v?.edicao;
+async function saveEdit(leaf: Leaf): Promise<boolean> {
+  const v = leaf.viewer;
+  const ed = v?.edit;
   if (!v || !ed) return false;
-  const texto = ed.area.value;
+  const text = ed.area.value;
   try {
-    v.carimbo = await invoke<string>("arquivo_salvar", {
-      caminho: v.historico[v.pos].caminho,
-      texto,
-      desde: v.carimbo ?? "",
+    v.stamp = await invoke<string>("file_save", {
+      path: v.history[v.pos].path,
+      text: text,
+      since: v.stamp ?? "",
     });
   } catch (e) {
-    avisar(folha, T.naoDeuParaSalvar(String(e)));
+    notify(leaf, T.couldNotSave(String(e)));
     return false;
   }
-  v.linhas = texto.split("\n");
-  ed.salvo = texto;
-  botoesVisor(v);
+  v.lines = text.split("\n");
+  ed.savedItem = text;
+  buttonsViewer(v);
   return true;
 }
 
 /// Whether the edit on screen can go: nothing unsaved, or the question answered with
 /// save (and saved) or discard.
-async function podeLargarEdicao(folha: Folha): Promise<boolean> {
-  const ed = folha.visor?.edicao;
-  if (!ed || ed.area.value === ed.salvo) return true;
-  const r = await escolher("visor-sair-edicao", {
-    titulo: T.salvarAlteracoesTitulo,
-    texto: T.salvarAlteracoesTexto,
-    confirmar: T.salvar,
-    alternativa: T.descartar,
-    cancelar: T.cancelar,
+async function canDropEdit(leaf: Leaf): Promise<boolean> {
+  const ed = leaf.viewer?.edit;
+  if (!ed || ed.area.value === ed.savedItem) return true;
+  const r = await choose("visor-sair-edicao", {
+    title: T.saveChangesTitle,
+    text: T.saveChangesText,
+    confirm: T.save,
+    alternative: T.discard,
+    cancel: T.cancel,
   });
-  if (r === "alternativa" || (r === "sim" && (await salvarEdicao(folha)))) return true;
+  if (r === "alternative" || (r === "yes" && (await saveEdit(leaf)))) return true;
   ed.area.focus();
   return false;
 }
 
 /// Back to reading. With unsaved changes it asks first: save, discard or stay.
-async function sairEdicao(folha: Folha) {
-  const v = folha.visor;
-  const ed = v?.edicao;
-  if (!v || !ed || !(await podeLargarEdicao(folha))) return;
-  clearTimeout(ed.espera);
-  // Reading comes back where the edit was (see `entrarEdicao`).
+async function leaveEdit(leaf: Leaf) {
+  const v = leaf.viewer;
+  const ed = v?.edit;
+  if (!v || !ed || !(await canDropEdit(leaf))) return;
+  clearTimeout(ed.wait);
+  // Reading comes back where the edit was (see `enterEdit`).
   const a = ed.area;
-  if (v.renderizado) v.fracao = a.scrollHeight > a.clientHeight ? a.scrollTop / (a.scrollHeight - a.clientHeight) : 0;
-  else v.rolagem = a.scrollTop;
-  v.edicao = undefined;
+  if (v.rendered) v.fraction = a.scrollHeight > a.clientHeight ? a.scrollTop / (a.scrollHeight - a.clientHeight) : 0;
+  else v.scrollPos = a.scrollTop;
+  v.edit = undefined;
   // What was saved may be older than the disk: rereading also brings the stamp up to date.
-  await carregarVisor(folha, false);
-  v.corpo.focus({ preventScroll: true });
+  await loadViewer(leaf, false);
+  v.body.focus({ preventScroll: true });
 }
 
 /// An image, fitted to the viewer; a click switches to actual size and back. The
 /// checkerboard behind it is what shows a transparent area as transparent.
-function imagemDoVisor(url: string): HTMLElement {
-  const caixa = elemento("div", "visor-imagem");
-  const img = elemento("img", "");
+function viewerImage(url: string): HTMLElement {
+  const box = element("div", "viewer-image");
+  const img = element("img", "");
   img.alt = "";
-  const tamanho = elemento("div", "visor-imagem-tamanho");
-  img.addEventListener("load", () => (tamanho.textContent = `${img.naturalWidth} × ${img.naturalHeight}`));
-  img.addEventListener("error", () => (tamanho.textContent = T.imagemIlegivel));
-  img.addEventListener("click", () => caixa.classList.toggle("real"));
+  const size = element("div", "viewer-image-size");
+  img.addEventListener("load", () => (size.textContent = `${img.naturalWidth} × ${img.naturalHeight}`));
+  img.addEventListener("error", () => (size.textContent = T.unreadableImage));
+  img.addEventListener("click", () => box.classList.toggle("real"));
   img.src = url;
-  caixa.append(img, tamanho);
-  return caixa;
+  box.append(img, size);
+  return box;
 }
 
 let mermaidPronto: Promise<typeof import("mermaid").default> | null = null;
@@ -3980,26 +3985,26 @@ let mermaidN = 0;
 /// The ```mermaid blocks of a rendered .md, as drawings. The import only happens when a
 /// file has one: mermaid weighs more than the rest of the viewer. A diagram that
 /// doesn't parse stays as code.
-async function desenharMermaid(v: Visor, html: HTMLElement) {
-  const blocos = [...html.querySelectorAll<HTMLElement>("pre.mermaid")];
-  if (!blocos.length) return;
-  const vez = v.vez;
+async function drawMermaid(v: Viewer, html: HTMLElement) {
+  const blocks = [...html.querySelectorAll<HTMLElement>("pre.mermaid")];
+  if (!blocks.length) return;
+  const turn = v.turn;
   mermaidPronto ??= import("mermaid").then(({ default: m }) => {
     m.initialize({ startOnLoad: false, theme: "dark", securityLevel: "strict", fontFamily: "inherit" });
     return m;
   });
   const mermaid = await mermaidPronto;
-  for (const bloco of blocos) {
+  for (const block of blocks) {
     try {
-      const { svg } = await mermaid.render(`mermaid-${++mermaidN}`, bloco.textContent ?? "");
-      if (vez !== v.vez || !bloco.isConnected) return;
-      const desenho = elemento("div", "visor-mermaid");
-      const area = elemento("div", "visor-mermaid-area");
+      const { svg } = await mermaid.render(`mermaid-${++mermaidN}`, block.textContent ?? "");
+      if (turn !== v.turn || !block.isConnected) return;
+      const drawing = element("div", "viewer-mermaid");
+      const area = element("div", "viewer-mermaid-area");
       area.innerHTML = svg;
-      desenho.append(area);
-      bloco.replaceWith(desenho);
-      const figura = area.querySelector("svg");
-      if (figura) zoomDoMermaid(desenho, area, figura);
+      drawing.append(area);
+      block.replaceWith(drawing);
+      const figure = area.querySelector("svg");
+      if (figure) mermaidZoom(drawing, area, figure);
     } catch (e) {
       jlog(`mermaid: ${e}`);
     }
@@ -4009,45 +4014,45 @@ async function desenharMermaid(v: Visor, html: HTMLElement) {
 /// Zoom on a diagram: the buttons, a trackpad pinch (WebKit delivers it as
 /// `gesturechange`) or ⌘ + scroll, keeping the point under the pointer in place. It
 /// starts fitting the width; dragging moves it when it is larger than the box.
-function zoomDoMermaid(desenho: HTMLElement, area: HTMLElement, svg: SVGSVGElement) {
-  const caixa = svg.viewBox.baseVal;
-  const largura = caixa?.width || svg.getBoundingClientRect().width || 1;
-  const altura = caixa?.height || svg.getBoundingClientRect().height || 1;
+function mermaidZoom(drawing: HTMLElement, area: HTMLElement, svg: SVGSVGElement) {
+  const box = svg.viewBox.baseVal;
+  const width = box?.width || svg.getBoundingClientRect().width || 1;
+  const height = box?.height || svg.getBoundingClientRect().height || 1;
   svg.removeAttribute("width");
   svg.removeAttribute("height");
   svg.style.maxWidth = "none";
-  let escala = 1;
-  const pct = elemento("button", "visor-mermaid-pct");
-  const aplicar = (nova: number, x = area.clientWidth / 2, y = area.clientHeight / 2) => {
-    nova = Math.min(8, Math.max(0.1, nova));
-    const px = (area.scrollLeft + x) / escala;
-    const py = (area.scrollTop + y) / escala;
-    escala = nova;
-    svg.style.width = `${largura * escala}px`;
-    svg.style.height = `${altura * escala}px`;
-    area.scrollLeft = px * escala - x;
-    area.scrollTop = py * escala - y;
-    pct.textContent = `${Math.round(escala * 100)}%`;
+  let scale = 1;
+  const pct = element("button", "visor-mermaid-pct");
+  const apply = (newOne: number, x = area.clientWidth / 2, y = area.clientHeight / 2) => {
+    newOne = Math.min(8, Math.max(0.1, newOne));
+    const px = (area.scrollLeft + x) / scale;
+    const py = (area.scrollTop + y) / scale;
+    scale = newOne;
+    svg.style.width = `${width * scale}px`;
+    svg.style.height = `${height * scale}px`;
+    area.scrollLeft = px * scale - x;
+    area.scrollTop = py * scale - y;
+    pct.textContent = `${Math.round(scale * 100)}%`;
   };
   // 24px: the area's padding, on both sides.
-  const ajustada = () => Math.min(1, (area.clientWidth - 24) / largura);
-  aplicar(ajustada());
+  const adjusted = () => Math.min(1, (area.clientWidth - 24) / width);
+  apply(adjusted());
 
-  const menos = elemento("button", "visor-mermaid-botao");
-  menos.textContent = "−";
-  menos.title = T.zoomMenos;
-  menos.addEventListener("click", () => aplicar(escala / 1.25));
-  pct.title = T.zoomAjustar;
-  pct.addEventListener("click", () => aplicar(ajustada()));
-  const mais = elemento("button", "visor-mermaid-botao");
-  mais.textContent = "+";
-  mais.title = T.zoomMais;
-  mais.addEventListener("click", () => aplicar(escala * 1.25));
-  const barra = elemento("div", "visor-mermaid-zoom");
-  barra.append(menos, pct, mais);
-  desenho.append(barra);
+  const less = element("button", "visor-mermaid-botao");
+  less.textContent = "−";
+  less.title = T.zoomLess;
+  less.addEventListener("click", () => apply(scale / 1.25));
+  pct.title = T.zoomAdjust;
+  pct.addEventListener("click", () => apply(adjusted()));
+  const more = element("button", "visor-mermaid-botao");
+  more.textContent = "+";
+  more.title = T.zoomMore;
+  more.addEventListener("click", () => apply(scale * 1.25));
+  const bar = element("div", "viewer-mermaid-zoom");
+  bar.append(less, pct, more);
+  drawing.append(bar);
 
-  const ponto = (e: { clientX: number; clientY: number }) => {
+  const point = (e: { clientX: number; clientY: number }) => {
     const r = area.getBoundingClientRect();
     return [e.clientX - r.left, e.clientY - r.top] as const;
   };
@@ -4056,56 +4061,56 @@ function zoomDoMermaid(desenho: HTMLElement, area: HTMLElement, svg: SVGSVGEleme
     (e) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
-      aplicar(escala * Math.exp(-e.deltaY * 0.01), ...ponto(e));
+      apply(scale * Math.exp(-e.deltaY * 0.01), ...point(e));
     },
     { passive: false },
   );
-  let antesDoGesto = 1;
+  let beforeGesture = 1;
   area.addEventListener("gesturestart", (e) => {
     e.preventDefault();
-    antesDoGesto = escala;
+    beforeGesture = scale;
   });
   area.addEventListener("gesturechange", (e) => {
     e.preventDefault();
     const g = e as unknown as { scale: number; clientX: number; clientY: number };
-    aplicar(antesDoGesto * g.scale, ...ponto(g));
+    apply(beforeGesture * g.scale, ...point(g));
   });
 
   area.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
     const x0 = e.clientX;
     const y0 = e.clientY;
-    const esquerda = area.scrollLeft;
-    const topo = area.scrollTop;
+    const left = area.scrollLeft;
+    const top = area.scrollTop;
     area.setPointerCapture(e.pointerId);
-    area.classList.add("arrastando");
+    area.classList.add("dragging");
     const mover = (m: PointerEvent) => {
-      area.scrollLeft = esquerda - (m.clientX - x0);
-      area.scrollTop = topo - (m.clientY - y0);
+      area.scrollLeft = left - (m.clientX - x0);
+      area.scrollTop = top - (m.clientY - y0);
     };
-    const soltar = () => {
+    const release = () => {
       area.removeEventListener("pointermove", mover);
-      area.classList.remove("arrastando");
+      area.classList.remove("dragging");
     };
     area.addEventListener("pointermove", mover);
-    area.addEventListener("pointerup", soltar, { once: true });
-    area.addEventListener("pointercancel", soltar, { once: true });
+    area.addEventListener("pointerup", release, { once: true });
+    area.addEventListener("pointercancel", release, { once: true });
   });
 }
 
 /// Colors come later, from the same shiki as the differ: the file shows right away, and
 /// the import only weighs on the first time the viewer opens.
-async function colorirVisor(v: Visor, codigo: HTMLDivElement, caminho: string, linhas: string[]) {
-  const vez = v.vez;
+async function colorizeViewer(v: Viewer, code: HTMLDivElement, path: string, lines: string[]) {
+  const turn = v.turn;
   const { langFor, tokenizeFresh } = await import("./differ/lib/highlight");
-  const lang = langFor(caminho);
+  const lang = langFor(path);
   if (!lang) return;
-  const tokens = await tokenizeFresh(linhas, lang);
-  if (!tokens || vez !== v.vez || !codigo.isConnected) return;
-  const textos = codigo.querySelectorAll<HTMLElement>(".visor-texto");
-  tokens.forEach((linha, i) => {
-    const alvo = textos[i];
-    if (alvo && linha.length) alvo.innerHTML = htmlDosTokens(linha);
+  const tokens = await tokenizeFresh(lines, lang);
+  if (!tokens || turn !== v.turn || !code.isConnected) return;
+  const texts = code.querySelectorAll<HTMLElement>(".viewer-text");
+  tokens.forEach((line, i) => {
+    const target = texts[i];
+    if (target && line.length) target.innerHTML = htmlFromTokens(line);
   });
 }
 
@@ -4114,76 +4119,76 @@ async function colorirVisor(v: Visor, codigo: HTMLDivElement, caminho: string, l
 /// The folder the panel's relative paths start from: the one of the process in
 /// front of the shell, which with Claude running is its folder. Kept for a few
 /// seconds, because xterm asks on every line the mouse passes over.
-const pastas = new WeakMap<Folha, { em: number; pasta: Promise<string | null> }>();
-function pastaDoPainel(folha: Folha): Promise<string | null> {
-  const guardada = pastas.get(folha);
-  if (guardada && Date.now() - guardada.em < 3000) return guardada.pasta;
-  const pasta = invoke<string | null>("pty_cwd", { id: folha.id })
+const folders = new WeakMap<Leaf, { at: number; folder: Promise<string | null> }>();
+function panelFolder(leaf: Leaf): Promise<string | null> {
+  const stored = folders.get(leaf);
+  if (stored && Date.now() - stored.at < 3000) return stored.folder;
+  const folder = invoke<string | null>("pty_cwd", { id: leaf.id })
     .catch(() => null)
-    .then((p) => p ?? folha.claude?.pasta ?? folha.barra?.pasta ?? null);
-  pastas.set(folha, { em: Date.now(), pasta });
-  return pasta;
+    .then((p) => p ?? leaf.claude?.folder ?? leaf.bar?.folder ?? null);
+  folders.set(leaf, { at: Date.now(), folder });
+  return folder;
 }
 
 /// The references that really exist, already with the absolute path.
-async function resolver(base: string | null, refs: Referencia[]): Promise<(string | null)[]> {
+async function resolver(base: string | null, refs: Reference[]): Promise<(string | null)[]> {
   if (!base || !refs.length) return refs.map(() => null);
-  return invoke<(string | null)[]>("arquivos_existem", { base, candidatos: refs.map((r) => r.arquivo) }).catch(() =>
+  return invoke<(string | null)[]>("files_exist", { base, candidates: refs.map((r) => r.file) }).catch(() =>
     refs.map(() => null),
   );
 }
 
 /// A `path:line` in the terminal output becomes a link: ⌘-click opens it in the viewer.
 /// Only those that exist — the panel's folder says where a relative one starts from.
-function ligarLinksDeArquivo(folha: Folha) {
-  const term = folha.term;
+function wireFileLinks(leaf: Leaf) {
+  const term = leaf.term;
   term.registerLinkProvider({
-    provideLinks(y, devolver) {
+    provideLinks(y, callback) {
       const buf = term.buffer.active;
       const cols = term.cols;
       // A window of lines around it: no path spans more than that.
       const base = Math.max(0, y - 1 - 10);
-      const linhas: LinhaDaTela[] = [];
+      const lines: ScreenLine[] = [];
       for (let i = base; i < Math.min(buf.length, y + 10); i++) {
         const l = buf.getLine(i);
-        linhas.push({ texto: l?.translateToString(false) ?? "", quebrada: l?.isWrapped ?? false });
+        lines.push({ text: l?.translateToString(false) ?? "", broken: l?.isWrapped ?? false });
       }
-      const aqui = y - 1 - base;
+      const here = y - 1 - base;
       // With and without the continuation guess, upward and downward: joining two
       // lines that weren't one would spoil the whole reference in one of them.
-      type Achado = { ref: Referencia; de: { linha: number; col: number }; ate: { linha: number; col: number }; texto: string };
-      const achados: Achado[] = [];
-      const combinacoes: [boolean, boolean][] = [[false, false], [true, false], [false, true], [true, true]];
-      for (const [acima, abaixo] of combinacoes) {
-        const { texto, pos } = linhaLogica(linhas, aqui, cols, acima, abaixo);
-        for (const ref of acharReferencias(texto)) {
-          const trecho = pos.slice(ref.inicio, ref.fim);
-          if (!trecho.some((p) => p.linha === aqui)) continue;
-          const de = trecho[0];
-          const ate = trecho[trecho.length - 1];
-          if (achados.some((a) => a.de.linha === de.linha && a.de.col === de.col && a.ate.linha === ate.linha && a.ate.col === ate.col)) continue;
-          achados.push({ ref, de, ate, texto: texto.slice(ref.inicio, ref.fim) });
+      type Found = { ref: Reference; from: { line: number; col: number }; to: { line: number; col: number }; text: string };
+      const findings: Found[] = [];
+      const combinations: [boolean, boolean][] = [[false, false], [true, false], [false, true], [true, true]];
+      for (const [up, below] of combinations) {
+        const { text, pos } = logicalLine(lines, here, cols, up, below);
+        for (const ref of findReferences(text)) {
+          const snippet = pos.slice(ref.beginning, ref.end);
+          if (!snippet.some((p) => p.line === here)) continue;
+          const from = snippet[0];
+          const to = snippet[snippet.length - 1];
+          if (findings.some((a) => a.from.line === from.line && a.from.col === from.col && a.to.line === to.line && a.to.col === to.col)) continue;
+          findings.push({ ref, from, to, text: text.slice(ref.beginning, ref.end) });
         }
       }
-      if (!achados.length) return devolver(undefined);
+      if (!findings.length) return callback(undefined);
       void (async () => {
-        const caminhos = await resolver(await pastaDoPainel(folha), achados.map((a) => a.ref));
-        const vivos = achados.flatMap((a, i) => (caminhos[i] ? [{ ...a, caminho: caminhos[i] }] : []));
-        const ponto = (p: { linha: number; col: number }) => p.linha * cols + p.col;
+        const paths = await resolver(await panelFolder(leaf), findings.map((a) => a.ref));
+        const live = findings.flatMap((a, i) => (paths[i] ? [{ ...a, path: paths[i] }] : []));
+        const point = (p: { line: number; col: number }) => p.line * cols + p.col;
         // A piece that exists inside a larger path that also exists
         // (`lib/x.dart` inside `apps/lib/x.dart`): the larger one stays.
-        const links = vivos
-          .filter((a) => !vivos.some((b) => b !== a && ponto(b.de) <= ponto(a.de) && ponto(b.ate) >= ponto(a.ate) && b.texto.length > a.texto.length))
+        const links = live
+          .filter((a) => !live.some((b) => b !== a && point(b.from) <= point(a.from) && point(b.to) >= point(a.to) && b.text.length > a.text.length))
           .map((a) => ({
-            range: { start: { x: a.de.col + 1, y: base + a.de.linha + 1 }, end: { x: a.ate.col + 1, y: base + a.ate.linha + 1 } },
-            text: a.texto,
+            range: { start: { x: a.from.col + 1, y: base + a.from.line + 1 }, end: { x: a.to.col + 1, y: base + a.to.line + 1 } },
+            text: a.text,
             decorations: { pointerCursor: true, underline: true },
             activate: (e: MouseEvent) => {
               if (!e.metaKey && !e.ctrlKey) return;
-              abrirArquivo(folha, { caminho: a.caminho, linha: a.ref.linha, ate: a.ref.ate });
+              openFile(leaf, { path: a.path, line: a.ref.line, to: a.ref.to });
             },
           }));
-        devolver(links.length ? links : undefined);
+        callback(links.length ? links : undefined);
       })();
     },
   });
@@ -4191,309 +4196,72 @@ function ligarLinksDeArquivo(folha: Folha) {
 
 /// ⌘-click on a `<code>` that is just a path (in the chat, in a viewer .md).
 /// Returns whether the click was that, so the caller doesn't handle it again.
-function cliqueEmReferencia(folha: Folha, e: MouseEvent, base?: string): boolean {
+function referenceClick(leaf: Leaf, e: MouseEvent, base?: string): boolean {
   if (!e.metaKey && !e.ctrlKey) return false;
   const code = (e.target as HTMLElement).closest("code");
-  const ref = code && referenciaInteira(code.textContent ?? "");
+  const ref = code && referenceWhole(code.textContent ?? "");
   if (!ref) return false;
   e.preventDefault();
   void (async () => {
-    const [caminho] = await resolver(base ?? (await pastaDoPainel(folha)), [ref]);
-    if (caminho) abrirArquivo(folha, { caminho, linha: ref.linha, ate: ref.ate });
-    else avisar(folha.dono ?? folha, T.naoAchei(ref.arquivo));
+    const [path] = await resolver(base ?? (await panelFolder(leaf)), [ref]);
+    if (path) openFile(leaf, { path, line: ref.line, to: ref.to });
+    else notify(leaf.owner ?? leaf, T.notFound(ref.file));
   })();
   return true;
 }
 
-// ---------- auto-send ----------
+// ---------- paths: arrastar e paste files ----------
 
-/// After you stop speaking, the dictation goes on its own.
-const ESPERA_ENVIO_MS = 5000;
-/// Above this the microphone peak counts as speech: it is what the wave draws and
-/// what holds the Enter countdown while you are still speaking.
-const LIMIAR_FALA = 0.1;
-/// While the last syllable is recent, the strip shows the partial and not the
-/// countdown — otherwise the two would fight over the same line every 200 ms.
-const PARCIAL_MANDA_MS = 800;
-
-/// The scheduled Enter: the panel that got the dictation and when it goes.
-let envio: { folha: Folha; em: number } | undefined;
-let pulso: ReturnType<typeof setInterval> | undefined;
-let ultimaFala = 0;
-
-function pararPulso() {
-  clearInterval(pulso);
-  pulso = undefined;
-}
-
-/// Who rules the strip: while the last syllable is recent, the partial; from
-/// then on, the countdown. Both sides ask the SAME thing — if each one
-/// decided on its own, the partial (which arrives even in silence, sometimes empty)
-/// and the 200 ms pulse would write over each other and the line would flicker.
-function parcialMandaNaFaixa() {
-  return !envio || Date.now() - ultimaFala <= PARCIAL_MANDA_MS;
-}
-
-/// Closes the strip, or goes back to the partial, depending on whether the microphone is open.
-function encerrarContagem() {
-  pararPulso();
-  if (escutando) mostrarVoz(T.escutando);
-  else fecharVoz();
-}
-
-function agendarEnvio(folha: Folha) {
-  envio = { folha, em: Date.now() + ESPERA_ENVIO_MS };
-  if (!pulso) pulso = setInterval(baterEnvio, 200);
-}
-
-/// Started speaking again: the Enter waits.
-function adiarEnvio() {
-  if (envio) envio.em = Date.now() + ESPERA_ENVIO_MS;
-}
-
-/// The keyboard has the last word, and cancels for good. Counting again requires speaking
-/// again: rescheduling on the microphone's first peak would undo the choice of whoever
-/// just decided to type.
-function cancelarEnvio() {
-  if (!envio) return;
-  envio = undefined;
-  encerrarContagem();
-}
-
-function baterEnvio() {
-  if (!envio) return pararPulso();
-
-  // The panel may have closed in the middle of the countdown.
-  if (envio.folha.morta) {
-    envio = undefined;
-    return encerrarContagem();
-  }
-
-  const falta = envio.em - Date.now();
-  if (falta > 0) {
-    if (!parcialMandaNaFaixa()) {
-      mostrarVoz(T.enviaEm(Math.ceil(falta / 1000)));
-    }
-    return;
-  }
-
-  const { folha } = envio;
-  envio = undefined;
-  invoke("pty_write", { id: folha.id, data: "\r" }).catch((e) => jlog(`send: ${e}`));
-  encerrarContagem();
-}
-
-// ---------- dictation: speaking instead of typing ----------
-
-const voz = document.getElementById("voz") as HTMLDivElement;
-const vozOnda = voz.querySelector(".voz-onda") as HTMLSpanElement;
-const vozTexto = voz.querySelector(".voz-texto") as HTMLSpanElement;
-
-let escutando = false;
-/// Holds off a second ⌘E while the model downloads — it is hundreds of MB.
-let preparando = false;
-
-/// An open microphone with nobody speaking is battery and privacy going away, and
-/// an Enter waiting for a sentence that won't come anymore. One minute of silence and
-/// dictation turns itself off — ⌘E brings it back.
-const INATIVIDADE_MS = 60_000;
-let vigia: ReturnType<typeof setInterval> | undefined;
-
-/// One instant per little bar: at ~20 levels per second, it is a bit more than a
-/// second of history on screen. New ones come in from the right.
-const ONDA_BARRAS = 22;
-/// Silence doesn't erase the wave: a thin line still says "I'm open".
-const ONDA_MINIMA = 0.06;
-const onda = new Array<number>(ONDA_BARRAS).fill(0);
-const ondaBarras = Array.from({ length: ONDA_BARRAS }, () => {
-  const barra = document.createElement("span");
-  vozOnda.appendChild(barra);
-  return barra;
-});
-
-function empurrarOnda(nivel: number) {
-  onda.shift();
-  onda.push(nivel);
-  for (let i = 0; i < ONDA_BARRAS; i++) {
-    // The same gain the bar used: normal speech fills the strip without clipping.
-    const altura = Math.max(ONDA_MINIMA, Math.min(1, onda[i] * 3.2));
-    ondaBarras[i].style.transform = `scaleY(${altura})`;
-  }
-}
-
-function limparOnda() {
-  onda.fill(0);
-  for (const barra of ondaBarras) barra.style.transform = `scaleY(${ONDA_MINIMA})`;
-}
-
-/// The strip fits one line. Showing the start of a long sentence would hide
-/// precisely what you just said, so it cuts from the front.
-function mostrarVoz(texto: string) {
-  vozTexto.textContent = texto.length > 140 ? `…${texto.slice(-140)}` : texto;
-}
-
-/// Silences the strip. Its space stays: what goes away is the content, not the line.
-function fecharVoz() {
-  // A countdown in progress is the most important thing on screen: an Enter is on
-  // its way to a shell, and erasing the notice is worse than it staying one more second.
-  if (envio) return;
-  vozTexto.textContent = "";
-  voz.classList.remove("escutando");
-  limparOnda();
-}
-
-function pararVigia() {
-  clearInterval(vigia);
-  vigia = undefined;
-}
-
-/// Closes the microphone. It goes out through here and the idle watcher — both turn off
-/// through the same door, so neither leaves `escutando` lying.
-async function pararEscuta() {
-  escutando = false;
-  pararVigia();
-  voz.classList.remove("escutando");
-  limparOnda();
-  await invoke("escuta_parar").catch((e) => jlog(`escuta_parar: ${e}`));
-}
-
-/// One minute silent and the microphone closes. A countdown in progress delays nothing:
-/// it lives 5 s, well within the slack, and the last speech is recent by definition.
-async function baterInatividade() {
-  if (!escutando) return pararVigia();
-  if (Date.now() - ultimaFala < INATIVIDADE_MS) return;
-  await pararEscuta();
-  // The strip says why it went quiet: unexplained silence looks the same as frozen.
-  mostrarVoz(T.escutaDesligada);
-  setTimeout(fecharVoz, 5000);
-}
-
-async function alternarEscuta() {
-  if (preparando) return;
-  if (escutando) {
-    await pararEscuta();
-    fecharVoz();
-    return;
-  }
-
-  try {
-    preparando = true;
-    if (!(await invoke<boolean>("escuta_modelo_pronto"))) {
-      mostrarVoz(T.baixandoModelo);
-      await invoke("escuta_baixar_modelo");
-    }
-    mostrarVoz(T.escutando);
-    await invoke("escuta_comecar");
-    escutando = true;
-    voz.classList.add("escutando");
-    // Reset, `ultimaFala` is 1970: the watcher would kill dictation on the first tick.
-    ultimaFala = Date.now();
-    if (!vigia) vigia = setInterval(baterInatividade, 1000);
-  } catch (e) {
-    mostrarVoz(T.naoConseguiEscutar(String(e)));
-    setTimeout(fecharVoz, 4000);
-  } finally {
-    preparando = false;
-  }
-}
-
-async function ligarEscuta() {
-  // Partial: the guess while you speak, re-evaluated every 800 ms.
-  await listen<string>("escuta://parcial", (e) => {
-    if (parcialMandaNaFaixa()) mostrarVoz(e.payload);
-  });
-
-  // Final: the segment closed. It goes to the focused panel NOW, not to the one
-  // focused when you started speaking — which is what typing would do.
-  await listen<string>("escuta://final", (e) => {
-    const texto = e.payload.trim();
-    if (!texto || !ativa) return;
-    // Space at the end: two consecutive segments would stick into a single word.
-    const folha = ativa.foco;
-    invoke("pty_write", { id: folha.id, data: `${texto} ` })
-      .catch((err) => jlog(`voice pty_write: ${err}`));
-    // From here on silence counts as "I'm done": the countdown starts.
-    agendarEnvio(folha);
-  });
-
-  // The partial stays still while you don't speak; the wave is what shows the
-  // microphone is really open.
-  await listen<number>("escuta://nivel", (e) => {
-    empurrarOnda(e.payload);
-    if (e.payload > LIMIAR_FALA) {
-      ultimaFala = Date.now();
-      adiarEnvio();
-    }
-  });
-
-  await listen<number>("escuta://progresso", (e) => {
-    mostrarVoz(T.baixandoModeloPct(Math.round(e.payload * 100)));
-  });
-
-  await listen<string>("escuta://erro", (e) => {
-    escutando = false;
-    pararVigia();
-    voz.classList.remove("escutando");
-    limparOnda();
-    mostrarVoz(T.erroNaEscuta(String(e.payload)));
-    setTimeout(fecharVoz, 4000);
-  });
-
-  await listen("menu://escutar", () => alternarEscuta());
-}
-
-// ---------- caminhos: arrastar e colar arquivos ----------
-
-/// Several files become several arguments, each protected by `citar`.
+/// Several files become several arguments, each protected by `quote`.
 /// The space at the end is so the next
 /// file (or the rest of the command) doesn't stick to the previous one.
-const linhaDe = (caminhos: string[]) => caminhos.map(citar).join(" ") + " ";
+const lineOf = (paths: string[]) => paths.map(quote).join(" ") + " ";
 
 /// Hands the text to the panel through xterm's paste path, not through
 /// `pty_write` directly: xterm is what wraps it in bracketed paste when the program
 /// on the other side asked for it. Without that Claude Code (and vim, and zsh) would get the
 /// paste as if each character had been typed.
-function colar(folha: Folha, texto: string) {
-  if (!texto) return;
-  folha.term.paste(texto);
+function paste(leaf: Leaf, text: string) {
+  if (!text) return;
+  leaf.term.paste(text);
 }
 
 /// Which panel is under the pointer. The drag doesn't go through the DOM — Tauri
 /// reports it, and the position comes in physical pixels —, so dividing by the screen's
 /// scale is up to us. `devicePixelRatio` and not the `scaleFactor` stored at
 /// startup: the window may have moved to a monitor with another density in between.
-function folhaEm(p: { x: number; y: number }): Folha | undefined {
-  return folhaNoPonto(p.x / devicePixelRatio, p.y / devicePixelRatio);
+function leafIn(p: { x: number; y: number }): Leaf | undefined {
+  return leafAtPoint(p.x / devicePixelRatio, p.y / devicePixelRatio);
 }
 
 /// The same, in the page's own pixels (a drag the page itself follows).
-function folhaNoPonto(x: number, y: number): Folha | undefined {
-  if (!ativa) return;
-  const alvo = document.elementFromPoint(x, y);
-  if (!alvo) return;
-  for (const f of visiveis(ativa)) if (f.el.contains(alvo)) return f;
+function leafAtPoint(x: number, y: number): Leaf | undefined {
+  if (!active) return;
+  const target = document.elementFromPoint(x, y);
+  if (!target) return;
+  for (const f of visibleOnes(active)) if (f.el.contains(target)) return f;
 }
 
 /// The panel lit as the destination of a drag (Finder's or the explorer's).
-let recebendo: Folha | undefined;
-function marcarRecebendo(f?: Folha) {
-  if (recebendo === f) return;
-  recebendo?.el.classList.remove("recebendo");
-  recebendo = f;
-  recebendo?.el.classList.add("recebendo");
+let receiving: Leaf | undefined;
+function markReceiving(f?: Leaf) {
+  if (receiving === f) return;
+  receiving?.el.classList.remove("receiving");
+  receiving = f;
+  receiving?.el.classList.add("receiving");
 }
 
 /// Dropped paths go where you would type next: in the chat's field when the chat is
 /// on screen — the terminal is hidden behind it —, otherwise on the terminal's line.
 /// Dropping on a panel also picks it.
-function soltarCaminhos(folha: Folha, caminhos: string[]) {
-  if (!caminhos.length) return;
-  focar(folha);
-  const campo = folha.chat?.aberto ? folha.chat.campo : undefined;
-  if (!campo) return colar(folha, linhaDe(caminhos));
-  const antes = campo.value.slice(0, campo.selectionStart);
-  const espaco = antes && !/\s$/.test(antes) ? " " : "";
-  campo.setRangeText(espaco + linhaDe(caminhos), campo.selectionStart, campo.selectionEnd, "end");
+function releasePaths(leaf: Leaf, paths: string[]) {
+  if (!paths.length) return;
+  focusLeaf(leaf);
+  const campo = leaf.chat?.isOpen ? leaf.chat.campo : undefined;
+  if (!campo) return paste(leaf, lineOf(paths));
+  const before = campo.value.slice(0, campo.selectionStart);
+  const space = before && !/\s$/.test(before) ? " " : "";
+  campo.setRangeText(space + lineOf(paths), campo.selectionStart, campo.selectionEnd, "end");
   // The field grows and the `/` menu follows what was typed, as with the keyboard.
   campo.dispatchEvent(new Event("input"));
   campo.focus();
@@ -4501,21 +4269,21 @@ function soltarCaminhos(folha: Folha, caminhos: string[]) {
 
 /// Dragging a file from Finder and dropping it here writes its path on the line,
 /// in the panel under the pointer — not the one with the keyboard.
-async function ligarArrastar() {
-  const marcar = marcarRecebendo;
+async function wireDrag() {
+  const mark = markReceiving;
 
   await getCurrentWebview().onDragDropEvent(({ payload }) => {
     // With the diff in front there is no panel under the pointer, and the panel with the
     // keyboard is hidden: the path would end up in a terminal nobody sees.
-    if (noDiff) return;
-    if (payload.type === "leave") return marcar(undefined);
-    if (payload.type !== "drop") return marcar(folhaEm(payload.position));
+    if (inDiff) return;
+    if (payload.type === "leave") return mark(undefined);
+    if (payload.type !== "drop") return mark(leafIn(payload.position));
 
     // Dropping outside a panel (on the tab bar, on the voice strip) still has an
     // obvious destination: the panel with the keyboard.
-    const folha = folhaEm(payload.position) ?? ativa?.foco;
-    marcar(undefined);
-    if (folha) soltarCaminhos(folha, payload.paths);
+    const leaf = leafIn(payload.position) ?? active?.focus;
+    mark(undefined);
+    if (leaf) releasePaths(leaf, payload.paths);
   });
 }
 
@@ -4523,327 +4291,324 @@ async function ligarArrastar() {
 /// the text Finder left along with it — the file's *name*, with no folder at all,
 /// which is no use as an argument. With no file on the clipboard, it pastes the text and that's it: a
 /// key that does nothing looks like a broken key.
-async function colarCaminho() {
-  if (!ativa || noDiff) return;
-  const area = await invoke<{ arquivos: string[]; texto: string | null }>("area_colar");
-  const folha = ativa.foco;
-  if (area.arquivos.length) colar(folha, linhaDe(area.arquivos));
-  else if (area.texto) colar(folha, area.texto);
+async function pastePath() {
+  if (!active || inDiff) return;
+  const clipboard = await invoke<{ files: string[]; text: string | null }>("clipboard_paste");
+  const leaf = active.focus;
+  if (clipboard.files.length) paste(leaf, lineOf(clipboard.files));
+  else if (clipboard.text) paste(leaf, clipboard.text);
 }
 
 // ---------- panel bar: title, play, stop and diff ----------
 
 /// The project a panel is in, as its launch.json describes it.
-type Projeto = {
-  pasta: string;
+type Project = {
+  folder: string;
   home: string;
-  /// The ones play runs: without separators or CodeLens ones (see `listaDoPlay`).
+  /// The ones play runs: without separators or CodeLens ones (see `playList`).
   configs: ConfigLaunch[];
   /// The picker button's list, with group titles among the configurations.
   menu: (ConfigLaunch | string)[];
-  tarefas: Tarefa[];
+  tasks: Task[];
   /// A launch.json that couldn't be read: play explains instead of vanishing.
-  erro?: string;
+  error?: string;
 };
 
 /// An app a panel's play button launched. It runs in the panel's drawer, a
 /// plain shell where the command is typed: that is how the app inherits PATH and the
 /// rest of your .zshrc — which is, almost always, the only place where `flutter`
 /// is on PATH.
-type Execucao = {
-  /// O painel cujo play rodou o app.
-  dono: Folha;
+type Run = {
+  /// O panel cujo play rodou o app.
+  owner: Leaf;
   /// The drawer's terminal, where the app runs.
-  folha: Folha;
-  pasta: string;
-  nome: string;
-  plano: Plano;
-  rodando: boolean;
-  parando?: boolean;
+  leaf: Leaf;
+  folder: string;
+  name: string;
+  plan: Plan;
+  running: boolean;
+  stopping?: boolean;
 };
 
 /// A panel's bar. Each panel has its own: with the screen split into two
 /// projects, each one has its own play, its own running app and its own diff.
-type Barra = {
+type Bar = {
   el: HTMLDivElement;
-  titulo: HTMLSpanElement;
+  title: HTMLSpanElement;
   /// The Claude session's context: a single pill, the bar filling with what
   /// has been used and the number over it. Clicking compacts the conversation.
-  contexto: HTMLButtonElement;
-  contextoCheio: HTMLSpanElement;
-  contextoNum: HTMLSpanElement;
+  context: HTMLButtonElement;
+  contextFill: HTMLSpanElement;
+  contextNum: HTMLSpanElement;
   /// The session's model and effort, beside the context. Clicking opens the
   /// list to change them.
-  modelo: HTMLButtonElement;
-  esforco: HTMLButtonElement;
-  aviso: HTMLSpanElement;
-  acoes: HTMLSpanElement;
-  gaveta: HTMLButtonElement;
-  parar: HTMLButtonElement;
-  grupoPlay: HTMLDivElement;
+  model: HTMLButtonElement;
+  effort: HTMLButtonElement;
+  notice: HTMLSpanElement;
+  actions: HTMLSpanElement;
+  drawer: HTMLButtonElement;
+  stop: HTMLButtonElement;
+  groupPlay: HTMLDivElement;
   play: HTMLButtonElement;
-  playIcone: HTMLSpanElement;
+  playIcon: HTMLSpanElement;
   /// The name of the chosen configuration. It lives on the picker button, not on play:
   /// it is the list's label, and clicking it is how you switch configurations.
-  nome: HTMLSpanElement;
-  escolher: HTMLButtonElement;
+  name: HTMLSpanElement;
+  choose: HTMLButtonElement;
   diff: HTMLButtonElement;
   chat: HTMLButtonElement;
-  visor: HTMLButtonElement;
-  explorar: HTMLButtonElement;
-  maximizar: HTMLButtonElement;
-  fechar: HTMLButtonElement;
-  projeto: Projeto | null;
+  viewer: HTMLButtonElement;
+  explore: HTMLButtonElement;
+  maximize: HTMLButtonElement;
+  close: HTMLButtonElement;
+  project: Project | null;
   /// The root of the git repository this panel's shell is in, or `null` if
   /// it isn't in any. It says whether the diff button has somewhere to
   /// lead, and it is how we know whether the open diff is this panel's.
   repo: string | null;
-  /// The shell's folder and its branch. `mostrarRamos` decides whether the branch shows
+  /// The shell's folder and its branch. `showBranches` decides whether the branch shows
   /// on the bar: only when the tab's panels aren't all in the
   /// same folder — otherwise the tab chip's already says it all.
-  pasta: string | null;
+  folder: string | null;
   branch: string | null;
-  ramo: Ramo;
-  /// `carregarProjeto` responses arriving out of order (several `cd`s
+  branchChip: BranchChip;
+  /// `loadProject` responses arriving out of order (several `cd`s
   /// in a row) must not overwrite the newest one.
-  pedido: number;
-  esperaProjeto?: ReturnType<typeof setTimeout>;
-  esperaAviso?: ReturnType<typeof setTimeout>;
+  request: number;
+  waitProject?: ReturnType<typeof setTimeout>;
+  waitNotice?: ReturnType<typeof setTimeout>;
 };
 
-type Achado = { pasta: string; home: string; launch: string; tasks: string | null };
+type Found = { folder: string; home: string; launch: string; tasks: string | null };
 
-const traco = (d: string) =>
+const stroke = (d: string) =>
   `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
-const ICONE_PLAY = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M4.5 2.9v10.2a.6.6 0 0 0 .92.5l7.9-5.1a.6.6 0 0 0 0-1l-7.9-5.1a.6.6 0 0 0-.92.5Z"/></svg>`;
-const ICONE_PARAR = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/></svg>`;
-const ICONE_REINICIAR = traco("M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3");
-const ICONE_ESCOLHER = traco("M4.5 6.5 8 10l3.5-3.5");
+const ICON_PLAY = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M4.5 2.9v10.2a.6.6 0 0 0 .92.5l7.9-5.1a.6.6 0 0 0 0-1l-7.9-5.1a.6.6 0 0 0-.92.5Z"/></svg>`;
+const ICON_STOP = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/></svg>`;
+const ICON_RESTART = stroke("M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3");
+const ICON_CHOOSE = stroke("M4.5 6.5 8 10l3.5-3.5");
 /// The tab's ✕: the new tab's "+" (index.html), turned 45°.
-const ICONE_FECHAR_ABA = `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.75v8.5M1.75 6h8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" transform="rotate(45 6 6)"/></svg>`;
-/// A dialog's ✕ (the radio's list, the shortcuts): drawn like the differ's Preferences one —
-/// 16px and a 1.5 stroke, in a 24px button —, so every dialog closes with the same ✕.
-const ICONE_FECHAR_DIALOGO = `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 2.5v11M2.5 8h11" transform="rotate(45 8 8)"/></svg>`;
+const ICON_CLOSE_TAB = `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.75v8.5M1.75 6h8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" transform="rotate(45 6 6)"/></svg>`;
 /// The panel's ✕: the "+" turned 45°, like the tab's.
-const ICONE_FECHAR = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 2.5v11M2.5 8h11" transform="rotate(45 8 8)"/></svg>`;
-const ICONE_MAXIMIZAR = traco("M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9");
-const ICONE_RECOLHER = traco("M13.5 2.5 9 7M9 3.5V7h3.5M2.5 13.5 7 9M7 12.5V9H3.5");
-const ICONE_CHAT = traco("M3 3.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5v-2.5H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z");
-const ICONE_COPIAR = traco("M5.5 5.5h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1ZM2.5 10.5V3a1 1 0 0 1 1-1h7.5");
-const ICONE_COPIADO = traco("M3 8.5l3.2 3L13 4.5");
-const ICONE_OLHO = traco("M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8ZM8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z");
-const ICONE_LAPIS = traco("M11 2.5 13.5 5l-8 8-3 .5.5-3 8-8ZM9.5 4 12 6.5");
-const ICONE_DISQUETE = traco("M3 2.5h8l2.5 2.5v8a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5ZM5 2.5V6h5V2.5M5 13.5v-4h6v4");
-const ICONE_ALFINETE = traco("M6 1.5h4M7 1.5v4L4.5 8.5h7L9 5.5v-4M8 8.5v6");
-const ICONE_PASTA = traco("M1.5 4.5a1 1 0 0 1 1-1h3.4l1.5 1.6h6.1a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1Z");
-const ICONE_ARQUIVO = traco("M4 1.5h5.5L13 5v9a.5.5 0 0 1-.5.5h-8.5a.5.5 0 0 1-.5-.5v-12a.5.5 0 0 1 .5-.5ZM9.5 1.5V5H13M6 8.5h4M6 11h4");
-/// The viewer's arrangement button (see `Arranjo`).
-const ICONE_ARRANJO: Record<Arranjo, string> = {
-  lado: traco("M3 2.5h10a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1ZM8 2.5v11"),
-  abaixo: traco("M3 2.5h10a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1ZM2 8h12"),
-  sobre: traco("M3 2.5h10a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1ZM5 5.5h6v5H5Z"),
+const ICON_CLOSE = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 2.5v11M2.5 8h11" transform="rotate(45 8 8)"/></svg>`;
+const ICON_MAXIMIZE = stroke("M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9");
+const ICON_COLLAPSE = stroke("M13.5 2.5 9 7M9 3.5V7h3.5M2.5 13.5 7 9M7 12.5V9H3.5");
+const ICON_CHAT = stroke("M3 3.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5v-2.5H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z");
+const ICON_COPY = stroke("M5.5 5.5h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1ZM2.5 10.5V3a1 1 0 0 1 1-1h7.5");
+const ICON_COPIED = stroke("M3 8.5l3.2 3L13 4.5");
+const ICON_EYE = stroke("M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8ZM8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z");
+const ICON_PENCIL = stroke("M11 2.5 13.5 5l-8 8-3 .5.5-3 8-8ZM9.5 4 12 6.5");
+const ICON_FLOPPY = stroke("M3 2.5h8l2.5 2.5v8a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5ZM5 2.5V6h5V2.5M5 13.5v-4h6v4");
+const ICON_PIN = stroke("M6 1.5h4M7 1.5v4L4.5 8.5h7L9 5.5v-4M8 8.5v6");
+const ICON_FOLDER = stroke("M1.5 4.5a1 1 0 0 1 1-1h3.4l1.5 1.6h6.1a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1Z");
+const ICON_FILE = stroke("M4 1.5h5.5L13 5v9a.5.5 0 0 1-.5.5h-8.5a.5.5 0 0 1-.5-.5v-12a.5.5 0 0 1 .5-.5ZM9.5 1.5V5H13M6 8.5h4M6 11h4");
+/// The viewer's arrangement button (see `Layout`).
+const ICON_LAYOUT: Record<Layout, string> = {
+  side: stroke("M3 2.5h10a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1ZM8 2.5v11"),
+  below: stroke("M3 2.5h10a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1ZM2 8h12"),
+  over: stroke("M3 2.5h10a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1ZM5 5.5h6v5H5Z"),
 };
-const ICONE_GAVETA = traco("M3.5 2.5h9a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12V4a1.5 1.5 0 0 1 1.5-1.5ZM2 9.5h12");
+const ICON_DRAWER = stroke("M3.5 2.5h9a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12V4a1.5 1.5 0 0 1 1.5-1.5ZM2 9.5h12");
 
-function elemento<K extends keyof HTMLElementTagNameMap>(tag: K, classe: string): HTMLElementTagNameMap[K] {
+function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string): HTMLElementTagNameMap[K] {
   const el = document.createElement(tag);
-  el.className = classe;
+  el.className = cls;
   return el;
 }
 
 /// A bar button. The click doesn't take the keyboard from the terminal: the hot
 /// reload `r`, typed right after, keeps going to the app — and coming back from the
 /// diff tab finds the panel with the cursor.
-function botaoTarefa(classe: string, html: string): HTMLButtonElement {
-  const b = elemento("button", `tarefa-btn ${classe}`);
+function buttonTask(cls: string, html: string): HTMLButtonElement {
+  const b = element("button", `task-btn ${cls}`);
   b.innerHTML = html;
   b.addEventListener("mousedown", (e) => e.preventDefault());
   return b;
 }
 
-function criarBarra(): Barra {
-  const el = elemento("div", "painel-barra");
-  const titulo = elemento("span", "tarefa-titulo");
-  const aviso = elemento("span", "tarefa-aviso");
-  const controles = elemento("div", "tarefa-controles");
-  const acoes = elemento("span", "tarefa-acoes");
-  const gaveta = botaoTarefa("tarefa-gaveta", ICONE_GAVETA);
-  const parar = botaoTarefa("tarefa-parar", ICONE_PARAR);
+function createBar(): Bar {
+  const el = element("div", "panel-bar");
+  const title = element("span", "task-title");
+  const notice = element("span", "task-notice");
+  const controls = element("div", "task-controls");
+  const actions = element("span", "task-actions");
+  const drawer = buttonTask("task-drawer", ICON_DRAWER);
+  const stop = buttonTask("task-stop", ICON_STOP);
   // Two buttons, not one split: play runs, the dropdown picks. While the
   // configuration's name lived inside play, the whole box looked like a
   // list — and clicking the name, the biggest target and the one that looks most like a
   // dropdown label, ran the app. Now the name belongs to the dropdown, and play is just ▶.
-  const playIcone = elemento("span", "tarefa-icone");
-  const play = botaoTarefa("tarefa-play", "");
-  play.append(playIcone);
-  const nome = elemento("span", "tarefa-nome");
-  const seta = elemento("span", "tarefa-seta");
-  seta.innerHTML = ICONE_ESCOLHER;
-  const escolher = botaoTarefa("tarefa-escolher", "");
-  escolher.append(nome, seta);
-  const grupoPlay = elemento("div", "tarefa-play-grupo");
-  grupoPlay.append(play, escolher);
-  const diff = botaoTarefa("tarefa-diff", ICONE_DIFF);
-  diff.title = T.diffDestePainel;
-  const chat = botaoTarefa("tarefa-chat", ICONE_CHAT);
+  const playIcon = element("span", "task-icon");
+  const play = buttonTask("task-play", "");
+  play.append(playIcon);
+  const name = element("span", "task-name");
+  const seta = element("span", "task-arrow");
+  seta.innerHTML = ICON_CHOOSE;
+  const choose = buttonTask("task-choose", "");
+  choose.append(name, seta);
+  const groupPlay = element("div", "task-play-group");
+  groupPlay.append(play, choose);
+  const diff = buttonTask("task-diff", ICON_DIFF);
+  diff.title = T.thisPanelDiff;
+  const chat = buttonTask("task-chat", ICON_CHAT);
   // Only shows after the first file is opened: before that there is nothing to show.
-  const visor = botaoTarefa("tarefa-visor", ICONE_ARQUIVO);
-  visor.hidden = true;
-  const maximizar = botaoTarefa("tarefa-maximizar", ICONE_MAXIMIZAR);
-  // `desenharMaximizar` decides whether it shows, once the leaf has a tab.
-  maximizar.hidden = true;
-  const fechar = botaoTarefa("tarefa-fechar", ICONE_FECHAR);
-  fechar.title = T.fecharPainel;
-  // Like maximize: `desenharMaximizar` shows it once the leaf has a tab.
-  fechar.hidden = true;
-  controles.append(acoes, gaveta, parar, grupoPlay, diff, chat, visor, maximizar, fechar);
-  const ramo = criarRamo("tarefa-ramo");
-  const contexto = botaoTarefa("tarefa-contexto", "");
-  contexto.hidden = true;
-  const contextoCheio = elemento("span", "tarefa-contexto-cheio");
-  const contextoNum = elemento("span", "tarefa-contexto-num");
-  contexto.append(contextoCheio, contextoNum);
-  const modelo = botaoTarefa("tarefa-claude-opcao tarefa-modelo", "");
-  const esforco = botaoTarefa("tarefa-claude-opcao tarefa-esforco", "");
-  modelo.hidden = esforco.hidden = true;
+  const viewer = buttonTask("task-viewer", ICON_FILE);
+  viewer.hidden = true;
+  const maximize = buttonTask("task-maximize", ICON_MAXIMIZE);
+  // `drawMaximize` decides whether it shows, once the leaf has a tab.
+  maximize.hidden = true;
+  const close = buttonTask("task-close", ICON_CLOSE);
+  close.title = T.closePanel;
+  // Like maximize: `drawMaximize` shows it once the leaf has a tab.
+  close.hidden = true;
+  controls.append(actions, drawer, stop, groupPlay, diff, chat, viewer, maximize, close);
+  const branchChip = createBranchChip("task-branch");
+  const context = buttonTask("task-context", "");
+  context.hidden = true;
+  const contextFill = element("span", "task-context-full");
+  const contextNum = element("span", "task-context-num");
+  context.append(contextFill, contextNum);
+  const model = buttonTask("task-claude-option task-model", "");
+  const effort = buttonTask("task-claude-option task-effort", "");
+  model.hidden = effort.hidden = true;
   // On the left, like the drawer it opens.
-  const explorar = botaoTarefa("tarefa-explorar", ICONE_PASTA);
-  el.append(explorar, titulo, ramo.el, contexto, modelo, esforco, aviso, controles);
+  const explore = buttonTask("task-explore", ICON_FOLDER);
+  el.append(explore, title, branchChip.el, context, model, effort, notice, controls);
   return {
     el,
-    titulo,
-    contexto,
-    contextoCheio,
-    contextoNum,
-    modelo,
-    esforco,
-    pasta: null,
+    title,
+    context,
+    contextFill,
+    contextNum,
+    model,
+    effort,
+    folder: null,
     branch: null,
-    ramo,
-    aviso,
-    acoes,
-    gaveta,
-    parar,
-    grupoPlay,
+    branchChip,
+    notice,
+    actions,
+    drawer,
+    stop,
+    groupPlay,
     play,
-    playIcone,
-    nome,
-    escolher,
+    playIcon,
+    name,
+    choose,
     diff,
     chat,
-    visor,
-    explorar,
-    maximizar,
-    fechar,
-    projeto: null,
+    viewer,
+    explore,
+    maximize,
+    close,
+    project: null,
     repo: null,
-    pedido: 0,
+    request: 0,
   };
 }
 
-function ligarBarra(folha: Folha) {
-  const b = folha.barra;
+function wireBar(leaf: Leaf) {
+  const b = leaf.bar;
   if (!b) return;
-  b.contexto.addEventListener("click", () => compactar(folha));
-  b.explorar.addEventListener("click", () => alternarExplorador(folha));
-  b.modelo.addEventListener("click", () => alternarOpcoesDoClaude(folha, "modelo"));
-  b.esforco.addEventListener("click", () => alternarOpcoesDoClaude(folha, "esforco"));
+  b.context.addEventListener("click", () => compact(leaf));
+  b.explore.addEventListener("click", () => toggleExplorer(leaf));
+  b.model.addEventListener("click", () => toggleClaudeOptions(leaf, "model"));
+  b.effort.addEventListener("click", () => toggleClaudeOptions(leaf, "effort"));
   b.play.addEventListener("click", () => {
-    const cfg = configEscolhida(b.projeto);
-    if (cfg) void executar(folha, cfg);
+    const cfg = chosenConfig(b.project);
+    if (cfg) void execute(leaf, cfg);
   });
-  b.escolher.addEventListener("click", () => alternarMenu(folha));
-  b.gaveta.addEventListener("click", () => alternarGaveta(folha));
-  b.parar.addEventListener("click", () => {
-    if (folha.execucao?.rodando) void parar(folha.execucao);
+  b.choose.addEventListener("click", () => toggleMenu(leaf));
+  b.drawer.addEventListener("click", () => toggleDrawer(leaf));
+  b.stop.addEventListener("click", () => {
+    if (leaf.execution?.running) void stop(leaf.execution);
   });
   // The diff is of a repository, and the panel knows which one: each has its own
   // directory — with the screen split into three projects, each panel says its own.
-  b.diff.addEventListener("click", () => void abrirDiff(folha));
-  b.chat.addEventListener("click", () => alternarChat(folha));
-  b.visor.addEventListener("click", () => alternarVisor(folha));
-  b.maximizar.addEventListener("click", () => alternarMaximizar(folha));
-  b.fechar.addEventListener("click", () => fecharFolha(folha));
+  b.diff.addEventListener("click", () => void openDiff(leaf));
+  b.chat.addEventListener("click", () => toggleChat(leaf));
+  b.viewer.addEventListener("click", () => toggleViewer(leaf));
+  b.maximize.addEventListener("click", () => toggleMaximize(leaf));
+  b.close.addEventListener("click", () => closeLeaf(leaf));
   // Double-clicking the bar does the same — the big target, like a window's
   // title bar. Not on its buttons: two clicks on play are two plays.
   b.el.addEventListener("dblclick", (e) => {
     if ((e.target as HTMLElement).closest("button")) return;
-    alternarMaximizar(folha);
+    toggleMaximize(leaf);
   });
 }
 
 /// The button only exists with the screen split: with a single panel it already is the whole tab.
-function desenharMaximizar(folha: Folha) {
-  const b = folha.barra;
-  const aba = abaDe(folha);
-  if (!b || !aba) return;
-  const cheio = aba.maximizada === folha;
-  b.maximizar.hidden = aba.raiz.tipo === "folha";
-  b.maximizar.classList.toggle("ligado", cheio);
-  b.maximizar.innerHTML = cheio ? ICONE_RECOLHER : ICONE_MAXIMIZAR;
-  b.maximizar.title = cheio ? T.recolherPainel : T.ocuparAba;
+function drawMaximize(leaf: Leaf) {
+  const b = leaf.bar;
+  const tab = tabOf(leaf);
+  if (!b || !tab) return;
+  const full = tab.maximized === leaf;
+  b.maximize.hidden = tab.root.kind === "leaf";
+  b.maximize.classList.toggle("on", full);
+  b.maximize.innerHTML = full ? ICON_COLLAPSE : ICON_MAXIMIZE;
+  b.maximize.title = full ? T.collapsePanel : T.takeTab;
   // Alone in the tab, ⌘W and the tab's ✕ already close it: the bar's ✕ is for a split.
-  b.fechar.hidden = aba.raiz.tipo === "folha";
+  b.close.hidden = tab.root.kind === "leaf";
 }
 
-function desenharBarra(folha: Folha) {
-  const b = folha.barra;
+function drawBar(leaf: Leaf) {
+  const b = leaf.bar;
   if (!b) return;
-  b.titulo.textContent = folha.titulo;
-  b.titulo.title = folha.titulo;
+  b.title.textContent = leaf.title;
+  b.title.title = leaf.title;
 
   // The context fills as the conversation grows: yellow and red by the
   // limits in Preferences. The pill stays while there is a session, idle or
   // not — it is with Claude idle that you can compact. Before the first
   // status line it exists, just without a number.
-  const usado = folha.claude?.contexto;
-  b.contexto.hidden = !folha.claude;
-  let nivel: Nivel = "";
-  if (usado === undefined) {
-    b.contextoCheio.style.width = "0%";
-    b.contextoNum.textContent = T.contextoVazio;
-    b.contexto.title = T.contextoVazioDica;
+  const used = leaf.claude?.context;
+  b.context.hidden = !leaf.claude;
+  let level: Level = "";
+  if (used === undefined) {
+    b.contextFill.style.width = "0%";
+    b.contextNum.textContent = T.emptyContext;
+    b.context.title = T.emptyContextHint;
   } else {
-    const pct = Math.round(Math.min(100, Math.max(0, usado)));
-    nivel = nivelDoContexto(pct, limitesDoContexto);
-    b.contextoCheio.style.width = `${pct}%`;
-    b.contextoNum.textContent = T.contexto(pct);
-    b.contexto.title = T.contextoDica(pct);
+    const pct = Math.round(Math.min(100, Math.max(0, used)));
+    level = contextLevel(pct, contextLimits);
+    b.contextFill.style.width = `${pct}%`;
+    b.contextNum.textContent = T.context(pct);
+    b.context.title = T.contextHint(pct);
   }
-  b.contexto.dataset.nivel = nivel;
+  b.context.dataset.level = level;
   // In the red, the whole panel warns: the pill alone gets lost in the corner of the eye.
-  folha.el.classList.toggle("contexto-cheio", nivel === "perigo");
+  leaf.el.classList.toggle("context-full", level === "danger");
 
   // The model arrives with the first status line; effort only exists on models
   // that have it.
-  const c = folha.claude;
-  b.modelo.hidden = !c;
-  b.modelo.textContent = c?.modelo ?? T.modeloVazio;
-  b.modelo.title = c?.modelo ? T.modeloDica(c.modelo) : T.modeloVazioDica;
-  b.esforco.hidden = !c?.esforco;
-  const esf = ESFORCOS.find((e) => e.nivel === c?.esforco);
-  b.esforco.textContent = T.esforco(esf?.rotulo ?? c?.esforco ?? "");
-  b.esforco.title = T.esforcoDica;
+  const c = leaf.claude;
+  b.model.hidden = !c;
+  b.model.textContent = c?.model ?? T.emptyModel;
+  b.model.title = c?.model ? T.modelHint(c.model) : T.emptyModelHint;
+  b.effort.hidden = !c?.effort;
+  const esf = EFFORTS.find((e) => e.level === c?.effort);
+  b.effort.textContent = T.effort(esf?.label ?? c?.effort ?? "");
+  b.effort.title = T.effortHint;
 
-  const g = folha.gaveta;
-  b.gaveta.hidden = !g;
-  b.gaveta.classList.toggle("ligado", g?.aberta === true);
-  b.gaveta.title = g?.aberta ? T.esconderGaveta : T.mostrarGaveta;
+  const g = leaf.drawer;
+  b.drawer.hidden = !g;
+  b.drawer.classList.toggle("on", g?.open === true);
+  b.drawer.title = g?.open ? T.hideDrawer : T.showDrawer;
 
-  const ex = folha.execucao;
-  const rodando = ex?.rodando === true;
-  b.parar.hidden = !rodando;
-  b.parar.title = ex ? T.parar(ex.nome) : "";
-  b.acoes.replaceChildren();
-  if (ex && rodando) {
-    for (const acao of ex.plano.acoes ?? []) {
-      const botao = botaoTarefa("tarefa-acao", "");
-      botao.textContent = `${acao.icone} ${acao.rotulo}`;
-      botao.title = T.acaoDica(acao.rotulo, acao.tecla);
-      botao.addEventListener("click", () => {
-        invoke("pty_write", { id: ex.folha.id, data: acao.tecla }).catch((e) => jlog(`action: ${e}`));
+  const ex = leaf.execution;
+  const running = ex?.running === true;
+  b.stop.hidden = !running;
+  b.stop.title = ex ? T.stop(ex.name) : "";
+  b.actions.replaceChildren();
+  if (ex && running) {
+    for (const action of ex.plan.actions ?? []) {
+      const button = buttonTask("task-action", "");
+      button.textContent = `${action.icon} ${action.label}`;
+      button.title = T.actionHint(action.label, action.keyOf);
+      button.addEventListener("click", () => {
+        invoke("pty_write", { id: ex.leaf.id, data: action.keyOf }).catch((e) => jlog(`action: ${e}`));
       });
-      b.acoes.append(botao);
+      b.actions.append(button);
     }
   }
 
@@ -4851,124 +4616,124 @@ function desenharBarra(folha: Folha) {
   // play goes away where there is no launch.json — a dimmed button in every shell is noise.
   // Purple when this repository is the one open in the diff: the same color that
   // lights up on that tab's chip, and the pair of lit icons is what links one to the other.
-  const noDiffAgora = noRepoDoDiff(b);
+  const inDiffNow = inDiffRepo(b);
   b.diff.hidden = !b.repo;
-  b.diff.classList.toggle("ligado", noDiffAgora);
-  b.diff.title = noDiffAgora
-    ? T.abertoNoDiff
-    : T.diffDestePainel;
+  b.diff.classList.toggle("on", inDiffNow);
+  b.diff.title = inDiffNow
+    ? T.openInDiff
+    : T.thisPanelDiff;
 
   // Always at hand: with a Claude session it switches modes; without one, it opens one
   // in this folder, already in chat.
-  const noChat = folha.chat?.aberto === true;
+  const inChat = leaf.chat?.isOpen === true;
   b.chat.hidden = false;
-  b.chat.classList.toggle("ligado", noChat);
-  b.chat.title = noChat
-    ? T.voltarAoTerminalChat
-    : folha.claude
-      ? T.verEmModoChat
-      : T.abrirClaudeNoChat;
+  b.chat.classList.toggle("on", inChat);
+  b.chat.title = inChat
+    ? T.backToTerminalChat
+    : leaf.claude
+      ? T.viewInChatMode
+      : T.openClaudeInChat;
 
-  const explorando = folha.explorador?.aberto === true;
-  b.explorar.hidden = !(b.repo ?? b.pasta);
-  b.explorar.classList.toggle("ligado", explorando);
-  b.explorar.title = explorando ? T.fecharExplorador : T.abrirExplorador;
+  const exploring = leaf.explorer?.isOpen === true;
+  b.explore.hidden = !(b.repo ?? b.folder);
+  b.explore.classList.toggle("on", exploring);
+  b.explore.title = exploring ? T.closeExplorer : T.openExplorer;
 
-  const visor = folha.visor;
-  b.visor.hidden = !visor?.historico.length;
-  b.visor.classList.toggle("ligado", visor?.aberto === true);
-  b.visor.title = visor?.aberto ? T.esconderArquivo : T.mostrarArquivo;
+  const viewer = leaf.viewer;
+  b.viewer.hidden = !viewer?.history.length;
+  b.viewer.classList.toggle("on", viewer?.isOpen === true);
+  b.viewer.title = viewer?.isOpen ? T.hideFile : T.showFile;
 
   // No launch.json, no play: a dimmed button in every shell would be noise.
-  const proj = b.projeto;
-  b.grupoPlay.hidden = !proj;
-  const cfg = configEscolhida(proj);
-  const reiniciar = rodando && ex?.pasta === proj?.pasta && ex?.nome === cfg?.name;
-  b.playIcone.innerHTML = reiniciar ? ICONE_REINICIAR : ICONE_PLAY;
+  const proj = b.project;
+  b.groupPlay.hidden = !proj;
+  const cfg = chosenConfig(proj);
+  const restart = running && ex?.folder === proj?.folder && ex?.name === cfg?.name;
+  b.playIcon.innerHTML = restart ? ICON_RESTART : ICON_PLAY;
   b.play.disabled = !cfg;
   b.play.title =
-    proj?.erro ?? (cfg ? (reiniciar ? T.reiniciar(cfg.name) : T.rodar(cfg.name)) : T.semConfiguracoes);
+    proj?.error ?? (cfg ? (restart ? T.restart(cfg.name) : T.run(cfg.name)) : T.noConfigurations);
 
   // With a single configuration there is nothing to pick, but the name is still the
   // only clue to what ▶ will run. So the button stays, without the arrow and without the
   // click: it becomes a label. It only goes away when there is no name to show.
-  const varias = (proj?.configs.length ?? 0) > 1;
-  b.nome.textContent = cfg?.name ?? "";
-  b.escolher.hidden = !cfg;
-  b.escolher.disabled = !varias;
-  b.escolher.classList.toggle("rotulo", !varias);
-  b.escolher.title = varias ? T.escolherConfiguracao : (cfg?.name ?? "");
+  const several = (proj?.configs.length ?? 0) > 1;
+  b.name.textContent = cfg?.name ?? "";
+  b.choose.hidden = !cfg;
+  b.choose.disabled = !several;
+  b.choose.classList.toggle("label", !several);
+  b.choose.title = several ? T.chooseConfiguration : (cfg?.name ?? "");
 }
 
 /// Redone when the panel is created and on every new title — a `cd` changes the title, and
 /// may have changed project along with it.
-function agendarProjeto(folha: Folha) {
-  const b = folha.barra;
+function scheduleProject(leaf: Leaf) {
+  const b = leaf.bar;
   if (!b) return;
-  clearTimeout(b.esperaProjeto);
-  b.esperaProjeto = setTimeout(() => void carregarProjeto(folha), 250);
+  clearTimeout(b.waitProject);
+  b.waitProject = setTimeout(() => void loadProject(leaf), 250);
 }
 
-async function carregarProjeto(folha: Folha) {
-  const b = folha.barra;
-  if (!b || folha.morta) return;
-  const pedido = ++b.pedido;
-  let novo: Projeto | null = null;
-  const cwd = await invoke<string | null>("pty_cwd", { id: folha.id }).catch(() => null);
-  const achado = cwd ? await invoke<Achado | null>("launch_ler", { cwd }).catch(() => null) : null;
+async function loadProject(leaf: Leaf) {
+  const b = leaf.bar;
+  if (!b || leaf.dead) return;
+  const request = ++b.request;
+  let fresh: Project | null = null;
+  const cwd = await invoke<string | null>("pty_cwd", { id: leaf.id }).catch(() => null);
+  const found = cwd ? await invoke<Found | null>("launch_read", { cwd }).catch(() => null) : null;
   // Without a repository the diff button has nowhere to lead, and a `cd` may have
   // taken the panel out of one or put it in another.
-  const raiz = cwd
+  const root = cwd
     ? await invoke<string | null>("repo_root", { path: cwd }).catch(() => null)
     : null;
   // Outside a repository it doesn't even ask. With a detached HEAD it also returns null: there
   // is no branch name to show.
-  const branch = raiz
+  const branch = root
     ? await invoke<string | null>("repo_branch", { path: cwd }).catch(() => null)
     : null;
-  if (achado) {
-    const { pasta, home } = achado;
-    let tarefasDoProjeto: Tarefa[] = [];
+  if (found) {
+    const { folder: folder, home } = found;
+    let projectTasks: Task[] = [];
     try {
-      tarefasDoProjeto = achado.tasks ? tarefasDe(achado.tasks) : [];
+      projectTasks = found.tasks ? tasksOf(found.tasks) : [];
     } catch (e) {
-      jlog(`unreadable tasks.json in ${pasta}: ${e}`);
+      jlog(`unreadable tasks.json in ${folder}: ${e}`);
     }
     try {
-      novo = { pasta, home, ...listaDoPlay(configsDe(achado.launch)), tarefas: tarefasDoProjeto };
+      fresh = { folder, home, ...playList(configsOf(found.launch)), tasks: projectTasks };
     } catch (e) {
-      novo = { pasta, home, configs: [], menu: [], tarefas: [], erro: T.launchIlegivel(String(e)) };
+      fresh = { folder, home, configs: [], menu: [], tasks: [], error: T.unreadableLaunch(String(e)) };
     }
   }
-  if (pedido !== b.pedido || folha.morta) return;
-  b.repo = raiz;
-  b.projeto = novo;
-  b.pasta = cwd;
+  if (request !== b.request || leaf.dead) return;
+  b.repo = root;
+  b.project = fresh;
+  b.folder = cwd;
   b.branch = branch;
-  const aba = abaDe(folha);
-  if (aba) mostrarRamos(aba);
-  desenharBarra(folha);
+  const tab = tabOf(leaf);
+  if (tab) showBranches(tab);
+  drawBar(leaf);
   // The footer's progress says which branch the task is on.
-  if (folha.progresso) desenharProgresso();
+  if (leaf.progress) drawProgress();
   // A `cd` changes the folder the panel comes back in.
-  agendarSalvar();
+  scheduleSave();
 }
 
 /// The configuration play runs: the last one chosen in this project, or the first.
-function configEscolhida(projeto: Projeto | null): ConfigLaunch | undefined {
-  if (!projeto) return;
-  let nome: string | null = null;
+function chosenConfig(project: Project | null): ConfigLaunch | undefined {
+  if (!project) return;
+  let name: string | null = null;
   try {
-    nome = localStorage.getItem(`termiau:config:${projeto.pasta}`);
+    name = localStorage.getItem(`termiau:config:${project.folder}`);
   } catch {
     // Without storage, the first one stays.
   }
-  return projeto.configs.find((c) => c.name === nome) ?? projeto.configs[0];
+  return project.configs.find((c) => c.name === name) ?? project.configs[0];
 }
 
-function lembrarConfig(pasta: string, nome: string) {
+function rememberConfig(folder: string, name: string) {
   try {
-    localStorage.setItem(`termiau:config:${pasta}`, nome);
+    localStorage.setItem(`termiau:config:${folder}`, name);
   } catch {
     // Just a convenience.
   }
@@ -4976,241 +4741,241 @@ function lembrarConfig(pasta: string, nome: string) {
 
 /// The configuration list. A single one for the window, placed beside the button that
 /// opened it: inside a panel it would be clipped by the panel's edge.
-const menuEl = elemento("div", "tarefa-menu");
+const menuEl = element("div", "task-menu");
 /// The gap between the button and the list.
-const VAO_MENU = 4;
+const MENU_GAP = 4;
 /// How far the list keeps from the window's edge. Touching it, it looks clipped
 /// even when it fits entirely.
-const MARGEM_MENU = 24;
-let menuDe: Folha | undefined;
+const MENU_MARGIN = 24;
+let menuOf: Leaf | undefined;
 /// The button that opened the list: the same panel has three (configurations, model and
 /// effort), and clicking another switches the list instead of closing it.
 let menuAncora: HTMLElement | undefined;
 
-function montarMenu() {
+function buildMenu() {
   menuEl.hidden = true;
   document.body.append(menuEl);
   // Clicking outside closes the list, like any menu. The button that opens it is left
   // out: it toggles on its own.
   document.addEventListener("mousedown", (e) => {
-    const alvo = e.target as Element;
-    if (!menuEl.hidden && !menuEl.contains(alvo) && !alvo.closest?.(".tarefa-escolher, .tarefa-claude-opcao")) fecharMenu();
+    const target = e.target as Element;
+    if (!menuEl.hidden && !menuEl.contains(target) && !target.closest?.(".task-choose, .task-claude-option")) closeMenu();
   });
 }
 
-function fecharMenu() {
+function closeMenu() {
   menuEl.hidden = true;
-  menuDe = undefined;
+  menuOf = undefined;
   menuAncora = undefined;
 }
 
-function alternarMenu(folha: Folha) {
-  if (!menuEl.hidden && menuDe === folha && menuAncora === folha.barra?.escolher) return fecharMenu();
-  const b = folha.barra;
-  const proj = b?.projeto;
+function toggleMenu(leaf: Leaf) {
+  if (!menuEl.hidden && menuOf === leaf && menuAncora === leaf.bar?.choose) return closeMenu();
+  const b = leaf.bar;
+  const proj = b?.project;
   if (!b || !proj?.configs.length) return;
-  const atual = configEscolhida(proj);
+  const current = chosenConfig(proj);
   menuEl.replaceChildren(
     ...proj.menu.map((cfg) => {
       if (typeof cfg === "string") {
-        const grupo = elemento("div", "tarefa-menu-grupo");
-        grupo.textContent = cfg;
-        return grupo;
+        const group = element("div", "task-menu-group");
+        group.textContent = cfg;
+        return group;
       }
-      const item = elemento("button", cfg === atual ? "escolhida" : "");
+      const item = element("button", cfg === current ? "chosen" : "");
       item.textContent = cfg.name;
-      const tipo = elemento("span", "tarefa-menu-tipo");
-      tipo.textContent = cfg.type;
-      item.append(tipo);
+      const kind = element("span", "task-menu-kind");
+      kind.textContent = cfg.type;
+      item.append(kind);
       item.addEventListener("mousedown", (e) => e.preventDefault());
       // Choosing only chooses: play is what runs. The choice applies to the project,
       // so the other panels in it start showing the same one.
       item.addEventListener("click", () => {
-        lembrarConfig(proj.pasta, cfg.name);
-        fecharMenu();
-        for (const a of abas) {
-          for (const f of folhas(a.raiz)) if (f.barra?.projeto?.pasta === proj.pasta) desenharBarra(f);
+        rememberConfig(proj.folder, cfg.name);
+        closeMenu();
+        for (const a of tabs) {
+          for (const f of leaves(a.root)) if (f.bar?.project?.folder === proj.folder) drawBar(f);
         }
       });
       return item;
     }),
   );
-  abrirMenu(folha, b.escolher);
+  openMenu(leaf, b.choose);
 }
 
 /// Shows the already built list beside the button that opened it.
-function abrirMenu(folha: Folha, ancora: HTMLElement) {
+function openMenu(leaf: Leaf, ancora: HTMLElement) {
   // Measures the list at its natural height before deciding where it goes: that height
   // says whether it fits below. All in the same frame, so nothing flickers.
   menuEl.style.maxHeight = "";
   menuEl.style.top = "0px";
   menuEl.style.bottom = "";
   menuEl.hidden = false;
-  const altura = menuEl.offsetHeight;
+  const height = menuEl.offsetHeight;
 
   const r = ancora.getBoundingClientRect();
   menuEl.style.right = `${window.innerWidth - r.right}px`;
-  const embaixo = window.innerHeight - r.bottom - VAO_MENU - MARGEM_MENU;
-  const emCima = r.top - VAO_MENU - MARGEM_MENU;
+  const underneath = window.innerHeight - r.bottom - MENU_GAP - MENU_MARGIN;
+  const onTop = r.top - MENU_GAP - MENU_MARGIN;
   // Opens downward, like every dropdown. It only goes up when it doesn't fit below and
   // there is more room above: a panel in the bottom half of the window has its bar
   // near the edge, and below it the list would be two items tall — or
   // none, which is what happened when the math went negative and the browser
   // threw max-height away. On both sides the height is limited to the space
   // left: a launch.json with dozens of configurations scrolls instead of overflowing.
-  if (altura <= embaixo || embaixo >= emCima) {
-    menuEl.style.top = `${r.bottom + VAO_MENU}px`;
-    menuEl.style.maxHeight = `${Math.max(embaixo, 0)}px`;
+  if (height <= underneath || underneath >= onTop) {
+    menuEl.style.top = `${r.bottom + MENU_GAP}px`;
+    menuEl.style.maxHeight = `${Math.max(underneath, 0)}px`;
   } else {
     menuEl.style.top = "";
-    menuEl.style.bottom = `${window.innerHeight - r.top + VAO_MENU}px`;
-    menuEl.style.maxHeight = `${Math.max(emCima, 0)}px`;
+    menuEl.style.bottom = `${window.innerHeight - r.top + MENU_GAP}px`;
+    menuEl.style.maxHeight = `${Math.max(onTop, 0)}px`;
   }
-  menuEl.querySelector(".escolhida")?.scrollIntoView({ block: "nearest" });
-  menuDe = folha;
+  menuEl.querySelector(".chosen")?.scrollIntoView({ block: "nearest" });
+  menuOf = leaf;
   menuAncora = ancora;
 }
 
 /// The models `/model` accepts by alias. "Default" is the account's.
-const MODELOS = [
-  { apelido: "fable", rotulo: "Fable" },
-  { apelido: "opus", rotulo: "Opus" },
-  { apelido: "sonnet", rotulo: "Sonnet" },
-  { apelido: "haiku", rotulo: "Haiku" },
-  { apelido: "default", rotulo: T.padraoDaConta },
+const MODELS = [
+  { alias: "fable", label: "Fable" },
+  { alias: "opus", label: "Opus" },
+  { alias: "sonnet", label: "Sonnet" },
+  { alias: "haiku", label: "Haiku" },
+  { alias: "default", label: T.accountDefault },
 ];
 
 /// The `/effort` levels. Not every model has all of them: Claude refuses what
 /// doesn't exist, and the message shows in the terminal.
-const ESFORCOS = [
-  { nivel: "low", rotulo: T.esforcoBaixo },
-  { nivel: "medium", rotulo: T.esforcoMedio },
-  { nivel: "high", rotulo: T.esforcoAlto },
-  { nivel: "xhigh", rotulo: T.esforcoExtraAlto },
-  { nivel: "max", rotulo: T.esforcoMaximo },
-  { nivel: "auto", rotulo: T.esforcoAuto },
+const EFFORTS = [
+  { level: "low", label: T.effortLow },
+  { level: "medium", label: T.effortMedium },
+  { level: "high", label: T.effortHigh },
+  { level: "xhigh", label: T.effortExtraHigh },
+  { level: "max", label: T.effortMax },
+  { level: "auto", label: T.effortAuto },
 ];
 
-function alternarOpcoesDoClaude(folha: Folha, qual: "modelo" | "esforco") {
-  const b = folha.barra;
-  const c = folha.claude;
+function toggleClaudeOptions(leaf: Leaf, which: "model" | "effort") {
+  const b = leaf.bar;
+  const c = leaf.claude;
   if (!b || !c) return;
-  const ancora = b[qual];
-  if (!menuEl.hidden && menuAncora === ancora) return fecharMenu();
-  const opcoes =
-    qual === "modelo"
-      ? MODELOS.map((m) => ({
-          rotulo: m.rotulo,
-          dica: m.apelido,
-          comando: `/model ${m.apelido}`,
-          atual: m.apelido !== "default" && c.modelo?.toLowerCase().startsWith(m.apelido) === true,
+  const ancora = b[which];
+  if (!menuEl.hidden && menuAncora === ancora) return closeMenu();
+  const options =
+    which === "model"
+      ? MODELS.map((m) => ({
+          label: m.label,
+          hint: m.alias,
+          command: `/model ${m.alias}`,
+          current: m.alias !== "default" && c.model?.toLowerCase().startsWith(m.alias) === true,
         }))
-      : ESFORCOS.map((e) => ({ rotulo: e.rotulo, dica: e.nivel, comando: `/effort ${e.nivel}`, atual: e.nivel === c.esforco }));
+      : EFFORTS.map((e) => ({ label: e.label, hint: e.level, command: `/effort ${e.level}`, current: e.level === c.effort }));
   menuEl.replaceChildren(
-    ...opcoes.map((o) => {
-      const item = elemento("button", o.atual ? "escolhida" : "");
-      item.textContent = o.rotulo;
-      const dica = elemento("span", "tarefa-menu-tipo");
-      dica.textContent = o.dica;
-      item.append(dica);
+    ...options.map((o) => {
+      const item = element("button", o.current ? "chosen" : "");
+      item.textContent = o.label;
+      const hint = element("span", "task-menu-kind");
+      hint.textContent = o.hint;
+      item.append(hint);
       item.addEventListener("mousedown", (e) => e.preventDefault());
       item.addEventListener("click", () => {
-        fecharMenu();
-        mandarAoClaude(folha, o.comando, T.claudeTrabalhandoTroque);
+        closeMenu();
+        sendToClaude(leaf, o.command, T.claudeWorkingSwap);
       });
       return item;
     }),
   );
-  abrirMenu(folha, ancora);
+  openMenu(leaf, ancora);
 }
 
 /// A short message on the bar, beside the title: a play that couldn't run says why.
 /// Sends `/compact` to the panel's Claude, as if you typed it — the
 /// same path as the chat field. With it working the command would go into the
 /// queue, or into the middle of what you are typing: it only compacts when idle.
-function compactar(folha: Folha) {
-  mandarAoClaude(folha, "/compact", T.claudeTrabalhandoCompacte);
+function compact(leaf: Leaf) {
+  sendToClaude(leaf, "/compact", T.claudeWorkingCompact);
 }
 
-/// Types a command into the panel's Claude and presses Enter. `ocupado` is the notice for
+/// Types a command into the panel's Claude and presses Enter. `busy` is the notice for
 /// when it is working.
-function mandarAoClaude(folha: Folha, comando: string, ocupado: string) {
-  const dono = folha.dono ?? folha;
-  if (!dono.claude) return;
-  if (dono.claude.estado === "trabalhando") {
-    avisar(dono, ocupado);
+function sendToClaude(leaf: Leaf, command: string, busy: string) {
+  const owner = leaf.owner ?? leaf;
+  if (!owner.claude) return;
+  if (owner.claude.state === "working") {
+    notify(owner, busy);
     return;
   }
-  invoke("pty_write", { id: dono.id, data: comando }).catch((e) => jlog(`${comando}: ${e}`));
+  invoke("pty_write", { id: owner.id, data: command }).catch((e) => jlog(`${command}: ${e}`));
   setTimeout(() => {
-    invoke("pty_write", { id: dono.id, data: "\r" }).catch((e) => jlog(`${comando}: ${e}`));
+    invoke("pty_write", { id: owner.id, data: "\r" }).catch((e) => jlog(`${command}: ${e}`));
   }, 80);
 }
 
-function avisar(folha: Folha, texto: string) {
-  const b = folha.barra;
+function notify(leaf: Leaf, text: string) {
+  const b = leaf.bar;
   if (!b) return;
-  b.aviso.textContent = texto;
-  b.aviso.title = texto;
-  clearTimeout(b.esperaAviso);
-  b.esperaAviso = setTimeout(() => {
-    b.aviso.textContent = "";
-    b.aviso.title = "";
+  b.notice.textContent = text;
+  b.notice.title = text;
+  clearTimeout(b.waitNotice);
+  b.waitNotice = setTimeout(() => {
+    b.notice.textContent = "";
+    b.notice.title = "";
   }, 8000);
 }
 
-async function executar(dono: Folha, cfg: ConfigLaunch) {
-  fecharMenu();
-  const proj = dono.barra?.projeto;
-  if (!proj || dono.morta) return;
-  lembrarConfig(proj.pasta, cfg.name);
-  const runner = runnerPara(cfg.type);
-  if (!runner) return avisar(dono, T.tipoNaoSuportado(cfg.name, cfg.type));
+async function execute(owner: Leaf, cfg: ConfigLaunch) {
+  closeMenu();
+  const proj = owner.bar?.project;
+  if (!proj || owner.dead) return;
+  rememberConfig(proj.folder, cfg.name);
+  const runner = runnerFor(cfg.type);
+  if (!runner) return notify(owner, T.unsupportedKind(cfg.name, cfg.type));
 
-  let plano: Plano;
-  let linha: string;
+  let plan: Plan;
+  let line: string;
   try {
     const ctx = {
-      pasta: proj.pasta,
+      folder: proj.folder,
       home: proj.home,
-      ehFlutter: (pasta: string) => invoke<boolean>("projeto_flutter", { pasta }),
+      isFlutter: (folder: string) => invoke<boolean>("is_flutter_project", { folder: folder }),
     };
-    plano = await runner.montar(cfg, ctx);
-    linha = linhaDeComando(plano, tarefaAntes(cfg, proj.tarefas, ctx));
+    plan = await runner.build(cfg, ctx);
+    line = commandLine(plan, taskBefore(cfg, proj.tasks, ctx));
   } catch (e) {
-    return avisar(dono, `${cfg.name}: ${e instanceof Error ? e.message : e}`);
+    return notify(owner, `${cfg.name}: ${e instanceof Error ? e.message : e}`);
   }
 
   // Each panel has an app terminal, in its drawer. If it already exists, it is
   // reused — what play ran there before stops first; a command
   // you typed in it yourself, still running, isn't interrupted.
-  let folha: Folha | undefined;
-  const gaveta = dono.gaveta;
-  if (gaveta) {
-    folha = gaveta.folha;
-    if (dono.execucao?.rodando) await parar(dono.execucao);
-    else if (await invoke<boolean>("pty_ocupado", { id: folha.id }).catch(() => false)) {
-      return avisar(dono, T.gavetaOcupada);
+  let leaf: Leaf | undefined;
+  const drawer = owner.drawer;
+  if (drawer) {
+    leaf = drawer.leaf;
+    if (owner.execution?.running) await stop(owner.execution);
+    else if (await invoke<boolean>("pty_busy", { id: leaf.id }).catch(() => false)) {
+      return notify(owner, T.drawerBusy);
     }
     // The shell may have changed folders since last time.
-    linha = `cd ${palavra(plano.cwd)} && ${linha}`;
+    line = `cd ${word(plan.cwd)} && ${line}`;
   } else {
-    folha = await criarGaveta(dono, plano.cwd);
-    if (folha && !dono.gaveta?.aberta) avisar(dono, T.rodandoEscondido(cfg.name));
+    leaf = await createDrawer(owner, plan.cwd);
+    if (leaf && !owner.drawer?.open) notify(owner, T.runningHidden(cfg.name));
   }
-  if (!folha || folha.morta || dono.morta) return;
+  if (!leaf || leaf.dead || owner.dead) return;
 
-  const ex: Execucao = { dono, folha, pasta: proj.pasta, nome: cfg.name, plano, rodando: true };
-  dono.execucao = ex;
-  await invoke("pty_write", { id: folha.id, data: `${linha}\r` }).catch((e) => jlog(`play: ${e}`));
-  vigiar(ex);
-  desenharBarra(dono);
+  const ex: Run = { owner, leaf, folder: proj.folder, name: cfg.name, plan, running: true };
+  owner.execution = ex;
+  await invoke("pty_write", { id: leaf.id, data: `${line}\r` }).catch((e) => jlog(`play: ${e}`));
+  watch(ex);
+  drawBar(owner);
 }
 
 // ---------- drawer: the app terminal ----------
 
 /// Opens as you left it last time; the first time, hidden.
-function gavetaAbertaPadrao(): boolean {
+function drawerOpenByDefault(): boolean {
   try {
     return localStorage.getItem("termiau:gaveta") === "aberta";
   } catch {
@@ -5218,9 +4983,9 @@ function gavetaAbertaPadrao(): boolean {
   }
 }
 
-function lembrarGaveta(aberta: boolean) {
+function rememberDrawer(open: boolean) {
   try {
-    localStorage.setItem("termiau:gaveta", aberta ? "aberta" : "fechada");
+    localStorage.setItem("termiau:gaveta", open ? "aberta" : "fechada");
   } catch {
     // Just a convenience.
   }
@@ -5231,154 +4996,154 @@ function lembrarGaveta(aberta: boolean) {
 /// ran, and only shows when you ask. It is born visible and only then hides:
 /// xterm measures the font when opening, and in a hidden element the measure would come out
 /// zero and the grid, broken.
-async function criarGaveta(dono: Folha, cwd: string): Promise<Folha | undefined> {
-  if (ocupado) return;
-  ocupado = true;
+async function createDrawer(owner: Leaf, cwd: string): Promise<Leaf | undefined> {
+  if (busy) return;
+  busy = true;
   try {
-    const el = elemento("div", "gaveta");
-    const alca = elemento("div", "gaveta-alca");
-    el.append(alca);
-    dono.el.appendChild(el);
-    const folha = await criarFolha(cwd, (f) => el.appendChild(f), false);
-    if (!folha) {
+    const el = element("div", "drawer");
+    const handle = element("div", "drawer-handle");
+    el.append(handle);
+    owner.el.appendChild(el);
+    const leaf = await createLeaf(cwd, (f) => el.appendChild(f), false);
+    if (!leaf) {
       el.remove();
       return;
     }
     // The panel may have closed while the drawer's shell was opening.
-    if (dono.morta) {
-      destruirFolha(folha, false);
+    if (owner.dead) {
+      destroyLeaf(leaf, false);
       return;
     }
-    folha.dono = dono;
-    const aberta = gavetaAbertaPadrao();
-    el.hidden = !aberta;
-    dono.gaveta = { folha, el, aberta };
-    dono.el.classList.toggle("com-gaveta", aberta);
-    ligarAlca(dono, alca, el);
-    const aba = abaDe(dono);
-    if (aba) {
-      medir(aba);
-      sincronizar(aba);
+    leaf.owner = owner;
+    const open = drawerOpenByDefault();
+    el.hidden = !open;
+    owner.drawer = { leaf, el, open };
+    owner.el.classList.toggle("with-drawer", open);
+    wireHandle(owner, handle, el);
+    const tab = tabOf(owner);
+    if (tab) {
+      measure(tab);
+      sync(tab);
     }
-    return folha;
+    return leaf;
   } finally {
-    ocupado = false;
+    busy = false;
   }
 }
 
 /// The drawer's top edge changes its height, as the divider changes the share.
-function ligarAlca(dono: Folha, alca: HTMLDivElement, el: HTMLDivElement) {
-  alca.addEventListener("pointerdown", (e) => {
+function wireHandle(owner: Leaf, handle: HTMLDivElement, el: HTMLDivElement) {
+  handle.addEventListener("pointerdown", (e) => {
     e.preventDefault(); // otherwise the drag becomes text selection in the terminals
-    alca.setPointerCapture(e.pointerId);
+    handle.setPointerCapture(e.pointerId);
     const mover = (ev: PointerEvent) => {
-      const r = dono.el.getBoundingClientRect();
+      const r = owner.el.getBoundingClientRect();
       // A piece always remains on both sides: a terminal squeezed to zero
       // has no grid to measure.
       el.style.height = `${Math.min(r.height - 100, Math.max(60, r.bottom - ev.clientY))}px`;
-      const aba = abaDe(dono);
-      if (!aba) return;
-      medir(aba);
-      agendarSync(aba);
+      const tab = tabOf(owner);
+      if (!tab) return;
+      measure(tab);
+      scheduleSync(tab);
     };
-    const soltar = () => {
-      alca.removeEventListener("pointermove", mover);
-      alca.removeEventListener("pointerup", soltar);
+    const release = () => {
+      handle.removeEventListener("pointermove", mover);
+      handle.removeEventListener("pointerup", release);
     };
-    alca.addEventListener("pointermove", mover);
-    alca.addEventListener("pointerup", soltar);
+    handle.addEventListener("pointermove", mover);
+    handle.addEventListener("pointerup", release);
   });
 }
 
 /// Shows or hides the panel's drawer. Open, it gets the keyboard (that is
 /// what it is opened for: reading and typing); closed, the keyboard goes back to the panel. The app
 /// keeps running in both cases.
-function alternarGaveta(dono: Folha) {
-  const g = dono.gaveta;
-  const aba = abaDe(dono);
-  if (!g || !aba) return;
-  g.aberta = !g.aberta;
-  g.el.hidden = !g.aberta;
-  dono.el.classList.toggle("com-gaveta", g.aberta);
-  lembrarGaveta(g.aberta);
-  medir(aba);
-  sincronizar(aba);
-  if (g.aberta) focar(g.folha);
-  else if (aba.foco === g.folha) focar(dono);
-  desenharBarra(dono);
+function toggleDrawer(owner: Leaf) {
+  const g = owner.drawer;
+  const tab = tabOf(owner);
+  if (!g || !tab) return;
+  g.open = !g.open;
+  g.el.hidden = !g.open;
+  owner.el.classList.toggle("with-drawer", g.open);
+  rememberDrawer(g.open);
+  measure(tab);
+  sync(tab);
+  if (g.open) focusLeaf(g.leaf);
+  else if (tab.focus === g.leaf) focusLeaf(owner);
+  drawBar(owner);
 }
 
 /// The drawer's shell exited (`exit`, ⌘W with it focused): the drawer goes away, and the app
 /// running in it goes along.
-function fecharGaveta(dono: Folha, jaMorto: boolean) {
-  const g = dono.gaveta;
+function closeDrawer(owner: Leaf, alreadyDead: boolean) {
+  const g = owner.drawer;
   if (!g) return;
-  dono.gaveta = undefined;
-  dono.execucao = undefined;
-  destruirFolha(g.folha, jaMorto);
+  owner.drawer = undefined;
+  owner.execution = undefined;
+  destroyLeaf(g.leaf, alreadyDead);
   g.el.remove();
-  dono.el.classList.remove("com-gaveta");
-  const aba = abaDe(dono);
-  if (aba) {
-    medir(aba);
-    sincronizar(aba);
-    if (aba.foco === g.folha) focar(dono);
+  owner.el.classList.remove("with-drawer");
+  const tab = tabOf(owner);
+  if (tab) {
+    measure(tab);
+    sync(tab);
+    if (tab.focus === g.leaf) focusLeaf(owner);
   }
-  desenharBarra(dono);
+  drawBar(owner);
 }
 
 /// The app ended when the shell becomes the terminal's owner again. Two reads
 /// in a row: between one command and the next in a line with `&&` the shell is in
 /// front for an instant, and a single read would declare the app finished there.
-function vigiar(ex: Execucao) {
-  const inicio = Date.now();
+function watch(ex: Run) {
+  const beginning = Date.now();
   let livre = 0;
-  const tique = setInterval(async () => {
-    if (ex.folha.morta || ex.dono.execucao !== ex || !ex.rodando) return clearInterval(tique);
+  const tick = setInterval(async () => {
+    if (ex.leaf.dead || ex.owner.execution !== ex || !ex.running) return clearInterval(tick);
     // The shell needs an instant to read the line and put the command in front.
-    if (Date.now() - inicio < 1500) return;
-    const ocupado = await invoke<boolean>("pty_ocupado", { id: ex.folha.id }).catch(() => false);
-    livre = ocupado ? 0 : livre + 1;
+    if (Date.now() - beginning < 1500) return;
+    const busy = await invoke<boolean>("pty_busy", { id: ex.leaf.id }).catch(() => false);
+    livre = busy ? 0 : livre + 1;
     if (livre < 2) return;
-    clearInterval(tique);
-    ex.rodando = false;
-    desenharBarra(ex.dono);
+    clearInterval(tick);
+    ex.running = false;
+    drawBar(ex.owner);
   }, 700);
 }
 
-const pausa = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /// Gently first, forcefully after. flutter run's `q` shuts the app down on the
 /// device; without its own key it sends Ctrl+C, which reaches the whole group — a
 /// server and its children exit together. Whatever doesn't exit within a few seconds gets
 /// SIGKILL: a stop that sometimes doesn't stop is worse than a brute-force stop.
-async function parar(ex: Execucao) {
-  if (ex.parando) return;
-  ex.parando = true;
-  const botao = ex.dono.barra?.parar;
-  if (botao) botao.disabled = true;
-  const id = ex.folha.id;
-  const escrever = (data: string) => invoke("pty_write", { id, data }).catch(() => {});
-  const saiu = async (ms: number) => {
-    const fim = Date.now() + ms;
-    while (Date.now() < fim) {
-      if (!(await invoke<boolean>("pty_ocupado", { id }).catch(() => false))) return true;
-      await pausa(200);
+async function stop(ex: Run) {
+  if (ex.stopping) return;
+  ex.stopping = true;
+  const button = ex.owner.bar?.stop;
+  if (button) button.disabled = true;
+  const id = ex.leaf.id;
+  const write = (data: string) => invoke("pty_write", { id, data }).catch(() => {});
+  const exited = async (ms: number) => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      if (!(await invoke<boolean>("pty_busy", { id }).catch(() => false))) return true;
+      await pause(200);
     }
     return false;
   };
   try {
-    await escrever(ex.plano.sair ?? "\x03");
-    if (await saiu(4000)) return;
-    await escrever("\x03");
-    if (await saiu(2000)) return;
-    await invoke("pty_sinal", { id, sinal: 9 }).catch((e) => jlog(`pty_sinal: ${e}`));
-    await saiu(1000);
+    await write(ex.plan.quit ?? "\x03");
+    if (await exited(4000)) return;
+    await write("\x03");
+    if (await exited(2000)) return;
+    await invoke("pty_signal", { id, signal: 9 }).catch((e) => jlog(`pty_signal: ${e}`));
+    await exited(1000);
   } finally {
-    ex.parando = false;
-    ex.rodando = false;
-    if (botao) botao.disabled = false;
-    desenharBarra(ex.dono);
+    ex.stopping = false;
+    ex.running = false;
+    if (button) button.disabled = false;
+    drawBar(ex.owner);
   }
 }
 
@@ -5389,147 +5154,147 @@ async function parar(ex: Execucao) {
 /// remains. Everything counts down. The color is the pace's — it lights up when you spend
 /// faster than time passes. With the mouse over it, two columns open to the
 /// right, session and week, each with the time and the usage.
-const usoEl = document.getElementById("uso") as HTMLDivElement;
+const usageEl = document.getElementById("usage") as HTMLDivElement;
 
 /// The same radius as the volume (5.5 in the 16 viewBox): the perimeter is the whole stroke.
-const USO_CIRCULO = 2 * Math.PI * 5.5;
+const USAGE_CIRCLE = 2 * Math.PI * 5.5;
 /// The shine running along the circle and the bars, in the direction they empty.
-const USO_BRILHO = 2.2;
+const USAGE_GLOW = 2.2;
 /// One pass of the shine on the circle and the little bars, from tip to start.
-const USO_ESCOAR_MS = 2400;
+const USAGE_DRAIN_MS = 2400;
 
-type BarraDeUso = { linha: HTMLSpanElement; cheio: HTMLSpanElement; ponteiro: HTMLSpanElement; num: HTMLSpanElement };
+type UsageBar = { line: HTMLSpanElement; full: HTMLSpanElement; pointer: HTMLSpanElement; num: HTMLSpanElement };
 
-function barraDeUso(rotulo: string, classe: string): BarraDeUso {
-  const linha = elemento("span", `uso-linha ${classe}`);
-  const nome = elemento("span", "uso-rotulo");
-  nome.textContent = rotulo;
-  const trilho = elemento("span", "uso-trilho");
-  const cheio = elemento("span", "uso-cheio");
-  const ponteiro = elemento("span", "uso-ponteiro");
-  cheio.append(ponteiro);
-  trilho.append(cheio);
-  const num = elemento("span", "uso-num");
-  linha.append(nome, trilho, num);
-  return { linha, cheio, ponteiro, num };
+function usageBar(label: string, cls: string): UsageBar {
+  const line = element("span", `usage-line ${cls}`);
+  const name = element("span", "usage-label");
+  name.textContent = label;
+  const track = element("span", "usage-track");
+  const full = element("span", "usage-full");
+  const pointer = element("span", "usage-pointer");
+  full.append(pointer);
+  track.append(full);
+  const num = element("span", "usage-num");
+  line.append(name, track, num);
+  return { line, full, pointer, num };
 }
 
 /// A column: the name and, to its right, the two lines — the time left and
 /// the usage remaining.
-function colunaDeUso(nome: string) {
-  const coluna = elemento("span", "uso-coluna");
-  const titulo = elemento("span", "uso-titulo");
-  titulo.textContent = nome;
-  const linhas = elemento("span", "uso-linhas");
-  const tempo = barraDeUso(T.tempoRestante, "uso-tempo");
-  const uso = barraDeUso(T.tokensDisponiveis, "uso-uso");
-  linhas.append(tempo.linha, uso.linha);
-  coluna.append(titulo, linhas);
-  return { coluna, tempo, uso };
+function usageColumn(name: string) {
+  const column = element("span", "usage-column");
+  const title = element("span", "usage-title");
+  title.textContent = name;
+  const lines = element("span", "usage-lines");
+  const time = usageBar(T.timeLeft, "usage-time");
+  const usage = usageBar(T.availableTokens, "uso-uso");
+  lines.append(time.line, usage.line);
+  column.append(title, lines);
+  return { column, time, usage };
 }
 
-const usoSessao = colunaDeUso(T.sessao);
-const usoSemana = colunaDeUso(T.semana);
+const usageSession = usageColumn(T.session);
+const usageWeek = usageColumn(T.week);
 /// `vertical`: the tokens bar beside the clock, which empties from top
 /// to bottom; the hover ones empty from right to left.
-const usoBarras: { cheio: HTMLSpanElement; ponteiro: HTMLSpanElement; vertical?: boolean }[] = [
-  usoSessao.tempo,
-  usoSessao.uso,
-  usoSemana.tempo,
-  usoSemana.uso,
+const usageBars: { full: HTMLSpanElement; pointer: HTMLSpanElement; vertical?: boolean }[] = [
+  usageSession.time,
+  usageSession.usage,
+  usageWeek.time,
+  usageWeek.usage,
 ];
-const usoDetalhe = elemento("span", "uso-detalhe");
-usoDetalhe.append(usoSessao.coluna, usoSemana.coluna);
-const usoIcone = elemento("span", "uso-icone");
-usoIcone.innerHTML = `<svg viewBox="0 0 16 16" width="26" height="26" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.6" opacity=".26"/><circle class="circulo" cx="8" cy="8" r="5.5" stroke-width="1.6" stroke-linecap="round" transform="rotate(-90 8 8)" stroke-dasharray="${USO_CIRCULO}" stroke-dashoffset="0"/><circle class="circulo-brilho" cx="8" cy="8" r="5.5" stroke-width="1.6" stroke-linecap="round" transform="rotate(-90 8 8)" stroke-dasharray="${USO_BRILHO} ${USO_CIRCULO}" stroke-dashoffset="0"/><g class="ponteiros" stroke="currentColor" stroke-linecap="round"><line class="ponteiro-hora" x1="8" y1="8" x2="8" y2="5.6" stroke-width="1.2"/><line class="ponteiro-minuto" x1="8" y1="8" x2="8" y2="4.4" stroke-width="0.9"/><circle cx="8" cy="8" r="0.7" fill="currentColor" stroke="none"/></g></svg>`;
-const usoCirculo = usoIcone.querySelector(".circulo") as SVGCircleElement;
-const usoBrilho = usoIcone.querySelector(".circulo-brilho") as SVGCircleElement;
+const usageDetail = element("span", "usage-detail");
+usageDetail.append(usageSession.column, usageWeek.column);
+const usageIcon = element("span", "usage-icon");
+usageIcon.innerHTML = `<svg viewBox="0 0 16 16" width="26" height="26" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.6" opacity=".26"/><circle class="circle" cx="8" cy="8" r="5.5" stroke-width="1.6" stroke-linecap="round" transform="rotate(-90 8 8)" stroke-dasharray="${USAGE_CIRCLE}" stroke-dashoffset="0"/><circle class="circle-glow" cx="8" cy="8" r="5.5" stroke-width="1.6" stroke-linecap="round" transform="rotate(-90 8 8)" stroke-dasharray="${USAGE_GLOW} ${USAGE_CIRCLE}" stroke-dashoffset="0"/><g class="pointers" stroke="currentColor" stroke-linecap="round"><line class="pointer-hour" x1="8" y1="8" x2="8" y2="5.6" stroke-width="1.2"/><line class="pointer-minute" x1="8" y1="8" x2="8" y2="4.4" stroke-width="0.9"/><circle cx="8" cy="8" r="0.7" fill="currentColor" stroke="none"/></g></svg>`;
+const usageCircle = usageIcon.querySelector(".circle") as SVGCircleElement;
+const usageGlow = usageIcon.querySelector(".circle-glow") as SVGCircleElement;
 /// The hands inside the circle: the small one points to the tip of the lit
 /// segment (how much of the session is left), and the big one makes a turn on hover.
-const usoHora = usoIcone.querySelector(".ponteiro-hora") as SVGLineElement;
-const usoMinuto = usoIcone.querySelector(".ponteiro-minuto") as SVGLineElement;
+const usageHour = usageIcon.querySelector(".pointer-hour") as SVGLineElement;
+const usageMinute = usageIcon.querySelector(".pointer-minute") as SVGLineElement;
 /// Beside the clock: the session's available tokens, an upright bar that
 /// empties from top to bottom, like a battery, and the number beside it.
-const usoResumo = elemento("span", "uso-resumo");
-const usoPct = elemento("span", "uso-pct");
-const usoMiniTrilho = elemento("span", "uso-trilho uso-mini");
-const usoMini = { cheio: elemento("span", "uso-cheio"), ponteiro: elemento("span", "uso-ponteiro"), vertical: true };
-usoMini.cheio.append(usoMini.ponteiro);
-usoMiniTrilho.append(usoMini.cheio);
-usoResumo.append(usoMiniTrilho, usoPct);
-usoBarras.push(usoMini);
-usoEl.append(usoIcone, usoResumo, usoDetalhe);
+const usageSummary = element("span", "usage-summary");
+const usagePct = element("span", "usage-pct");
+const usageMiniTrack = element("span", "usage-track usage-mini");
+const usageMini = { full: element("span", "usage-full"), pointer: element("span", "usage-pointer"), vertical: true };
+usageMini.full.append(usageMini.pointer);
+usageMiniTrack.append(usageMini.full);
+usageSummary.append(usageMiniTrack, usagePct);
+usageBars.push(usageMini);
+usageEl.append(usageIcon, usageSummary, usageDetail);
 
 /// The last good reading: a 429 or the network dropping don't erase what was already known.
-let usoAtual: Uso | undefined;
+let currentUsage: Usage | undefined;
 /// The piece of the circle lit now, in stroke length.
-let usoArco = USO_CIRCULO;
+let usageArc = USAGE_CIRCLE;
 /// The shine animations of the circle and the little bars, created together.
-let usoEscoar: Animation[] = [];
+let usageDrain: Animation[] = [];
 
-const limitar = (n: number) => Math.round(Math.min(100, Math.max(0, n)));
+const clamp = (n: number) => Math.round(Math.min(100, Math.max(0, n)));
 
-function pintarBarra(b: BarraDeUso, resta: number | null, texto: string, nivel: Nivel) {
-  b.cheio.style.width = `${resta ?? 0}%`;
-  b.num.textContent = resta === null ? "—" : texto;
-  b.linha.dataset.nivel = nivel;
+function paintBar(b: UsageBar, remains: number | null, text: string, level: Level) {
+  b.full.style.width = `${remains ?? 0}%`;
+  b.num.textContent = remains === null ? "—" : text;
+  b.line.dataset.level = level;
 }
 
 /// A window's tooltip: the name and, one per line, what remains of it.
-function dicaDeUso(nome: string, j: Janela | null): string {
-  if (!j) return T.semJanela(nome);
-  return T.dicaDeUso(nome, limitar(100 - j.uso), faltaPara(j.renova));
+function usageHint(name: string, j: UsageWindow | null): string {
+  if (!j) return T.noWindow(name);
+  return T.usageHint(name, clamp(100 - j.usage), missingFor(j.renews));
 }
 
 /// A column: the two bars count what remains, time and usage.
-function pintarColuna(c: ReturnType<typeof colunaDeUso>, j: Janela | null, janelaMin: number, nivel: Nivel) {
+function paintColumn(c: ReturnType<typeof usageColumn>, j: UsageWindow | null, windowMin: number, level: Level) {
   if (!j) {
-    pintarBarra(c.tempo, null, "", "");
-    pintarBarra(c.uso, null, "", "");
+    paintBar(c.time, null, "", "");
+    paintBar(c.usage, null, "", "");
     return;
   }
-  const tempo = limitar(fracaoRestante(j.renova, janelaMin) * 100);
-  const resta = limitar(100 - j.uso);
-  const falta = faltaPara(j.renova);
-  pintarBarra(c.tempo, tempo, falta, "");
-  pintarBarra(c.uso, resta, `${resta}%`, nivel);
+  const time = clamp(remainingFraction(j.renews, windowMin) * 100);
+  const remains = clamp(100 - j.usage);
+  const missing = missingFor(j.renews);
+  paintBar(c.time, time, missing, "");
+  paintBar(c.usage, remains, `${remains}%`, level);
 }
 
 /// The circle's shine and the bars' little segments run from the tip back to the
 /// start, in the direction everything decreases, and the minute hand makes a turn.
 /// They are all created in the same call, and so they move together: same period,
 /// same step, and they fade at the end. Only once, on hover — still the rest of the time.
-function escoarUso() {
-  for (const a of usoEscoar) a.cancel();
-  usoEscoar = [];
-  if (movimentoReduzido.matches) {
-    usoBrilho.style.display = "none";
+function drainUsage() {
+  for (const a of usageDrain) a.cancel();
+  usageDrain = [];
+  if (reducedMotion.matches) {
+    usageGlow.style.display = "none";
     return;
   }
-  const tempo: KeyframeAnimationOptions = { duration: USO_ESCOAR_MS, easing: "linear" };
-  usoEscoar.push(
-    usoMinuto.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], {
-      duration: USO_ESCOAR_MS,
+  const time: KeyframeAnimationOptions = { duration: USAGE_DRAIN_MS, easing: "linear" };
+  usageDrain.push(
+    usageMinute.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], {
+      duration: USAGE_DRAIN_MS,
       easing: "cubic-bezier(0.22, 0.61, 0.36, 1)",
     }),
   );
-  const ponta = usoArco - USO_BRILHO;
-  usoBrilho.style.display = ponta <= 0 ? "none" : "";
-  if (ponta > 0) {
-    usoEscoar.push(
-      usoBrilho.animate(
+  const tip = usageArc - USAGE_GLOW;
+  usageGlow.style.display = tip <= 0 ? "none" : "";
+  if (tip > 0) {
+    usageDrain.push(
+      usageGlow.animate(
         [
-          { strokeDashoffset: -ponta, opacity: 0.9 },
-          { strokeDashoffset: -ponta * 0.3, opacity: 0.9, offset: 0.7 },
+          { strokeDashoffset: -tip, opacity: 0.9 },
+          { strokeDashoffset: -tip * 0.3, opacity: 0.9, offset: 0.7 },
           { strokeDashoffset: 0, opacity: 0 },
         ],
-        tempo,
+        time,
       ),
     );
   }
-  for (const b of usoBarras) {
-    usoEscoar.push(
-      b.ponteiro.animate(
+  for (const b of usageBars) {
+    usageDrain.push(
+      b.pointer.animate(
         b.vertical
           ? [
               { bottom: "calc(100% - 6px)", height: "6px", opacity: 0.9 },
@@ -5541,1238 +5306,502 @@ function escoarUso() {
               { left: "calc(30% - 5px)", width: "5px", opacity: 0.9, offset: 0.7 },
               { left: "0px", width: "3px", opacity: 0 },
             ],
-        tempo,
+        time,
       ),
     );
   }
 }
 
-function desenharUso() {
-  const u = usoAtual;
-  usoEl.hidden = !u;
+function drawUsage() {
+  const u = currentUsage;
+  usageEl.hidden = !u;
   if (!u) return;
-  const s = u.sessao;
-  const restante = s ? fracaoRestante(s.renova, SESSAO_MIN) : 1;
-  const nivelSessao = s ? nivelDoRitmo(s.uso, restante) : "";
-  pintarColuna(usoSessao, s, SESSAO_MIN, nivelSessao);
-  pintarColuna(usoSemana, u.semana, SEMANA_MIN, u.semana ? nivelDoUso(u.semana.uso) : "");
-  usoEl.dataset.nivel = nivelSessao;
-  usoPct.textContent = s ? `${limitar(100 - s.uso)}%` : "—";
-  usoMini.cheio.style.height = `${s ? limitar(100 - s.uso) : 0}%`;
-  usoCirculo.style.strokeDashoffset = String(USO_CIRCULO * (1 - restante));
-  usoHora.style.transform = `rotate(${restante * 360}deg)`;
-  usoEl.title = `${dicaDeUso(T.sessao, s)}\n\n${dicaDeUso(T.semana, u.semana)}`;
-  usoArco = USO_CIRCULO * restante;
+  const s = u.session;
+  const remaining = s ? remainingFraction(s.renews, SESSION_MIN) : 1;
+  const sessionLevel = s ? paceLevel(s.usage, remaining) : "";
+  paintColumn(usageSession, s, SESSION_MIN, sessionLevel);
+  paintColumn(usageWeek, u.week, WEEK_MIN, u.week ? usageLevel(u.week.usage) : "");
+  usageEl.dataset.level = sessionLevel;
+  usagePct.textContent = s ? `${clamp(100 - s.usage)}%` : "—";
+  usageMini.full.style.height = `${s ? clamp(100 - s.usage) : 0}%`;
+  usageCircle.style.strokeDashoffset = String(USAGE_CIRCLE * (1 - remaining));
+  usageHour.style.transform = `rotate(${remaining * 360}deg)`;
+  usageEl.title = `${usageHint(T.session, s)}\n\n${usageHint(T.week, u.week)}`;
+  usageArc = USAGE_CIRCLE * remaining;
 }
 
 /// On mouse over, the circle and the bars start from full and go down to where
 /// they are: every time you look, you see they are decreasing.
-function replayUso() {
-  if (movimentoReduzido.matches || !usoAtual) return;
-  const cheios = usoBarras.map((b) => b.cheio);
-  const alvos: (HTMLElement | SVGElement)[] = [usoCirculo, usoHora, ...cheios];
-  const lado = (i: number) => (usoBarras[i].vertical ? "height" : "width");
-  for (const el of alvos) el.style.transition = "none";
-  const larguras = cheios.map((el, i) => el.style[lado(i)]);
-  const offset = usoCirculo.style.strokeDashoffset;
-  const hora = usoHora.style.transform;
-  cheios.forEach((el, i) => (el.style[lado(i)] = "100%"));
-  usoCirculo.style.strokeDashoffset = "0";
-  usoHora.style.transform = "rotate(360deg)";
-  void usoEl.offsetWidth;
-  for (const el of alvos) el.style.transition = "";
-  cheios.forEach((el, i) => (el.style[lado(i)] = larguras[i]));
-  escoarUso();
-  usoCirculo.style.strokeDashoffset = offset;
-  usoHora.style.transform = hora;
+function replayUsage() {
+  if (reducedMotion.matches || !currentUsage) return;
+  const filled = usageBars.map((b) => b.full);
+  const targets: (HTMLElement | SVGElement)[] = [usageCircle, usageHour, ...filled];
+  const side = (i: number) => (usageBars[i].vertical ? "height" : "width");
+  for (const el of targets) el.style.transition = "none";
+  const widths = filled.map((el, i) => el.style[side(i)]);
+  const offset = usageCircle.style.strokeDashoffset;
+  const hour = usageHour.style.transform;
+  filled.forEach((el, i) => (el.style[side(i)] = "100%"));
+  usageCircle.style.strokeDashoffset = "0";
+  usageHour.style.transform = "rotate(360deg)";
+  void usageEl.offsetWidth;
+  for (const el of targets) el.style.transition = "";
+  filled.forEach((el, i) => (el.style[side(i)] = widths[i]));
+  drainUsage();
+  usageCircle.style.strokeDashoffset = offset;
+  usageHour.style.transform = hour;
 }
-usoEl.addEventListener("mouseenter", replayUso);
+usageEl.addEventListener("mouseenter", replayUsage);
 
 /// The last usage news is kept: the status line only speaks with Claude
 /// running, and opening the app must not leave the footer empty until then.
-const CHAVE_USO = "termiau:uso";
+const USAGE_KEY = "termiau:uso";
 
 /// Usage arrived through some panel's status line: it applies to all, there is
 /// only one account.
-function receberUso(u: Uso) {
-  usoNoticia = u;
+function receiveUsage(u: Usage) {
+  usageNews = u;
   try {
-    localStorage.setItem(CHAVE_USO, JSON.stringify(u));
+    localStorage.setItem(USAGE_KEY, JSON.stringify(u));
   } catch {
     // Just a convenience.
   }
-  atualizarUso();
+  updateUsage();
 }
 
 /// The news, as it is now: a window that renewed since then comes back at zero.
-let usoNoticia: Uso | undefined;
-function atualizarUso() {
-  usoAtual = usoNoticia && {
-    sessao: janelaAgora(usoNoticia.sessao),
-    semana: janelaAgora(usoNoticia.semana),
+let usageNews: Usage | undefined;
+function updateUsage() {
+  currentUsage = usageNews && {
+    session: windowNow(usageNews.session),
+    week: windowNow(usageNews.week),
   };
-  desenharUso();
+  drawUsage();
 }
 
 try {
-  usoNoticia = JSON.parse(localStorage.getItem(CHAVE_USO) ?? "null") ?? undefined;
+  usageNews = (fromLegacy(JSON.parse(localStorage.getItem(USAGE_KEY) ?? "null"), LEGACY_USAGE) as Usage | null) ?? undefined;
 } catch {
-  usoNoticia = undefined;
+  usageNews = undefined;
 }
-usoEl.hidden = true;
-atualizarUso();
+usageEl.hidden = true;
+updateUsage();
 // Between one piece of news and the next, time keeps passing: the "time left" and the
 // circle move on their own.
-setInterval(atualizarUso, 30_000);
+setInterval(updateUsage, 30_000);
 
 // ---------- a long task's progress, in the footer ----------
 
-/// Beside the usage, one pill per panel whose Claude published a plan (`termiau progresso`):
+/// Beside the usage, one pill per panel whose Claude published a plan (`termiau progress`):
 /// a ring with how much is done, the number, and the folder and branch it is in —
 /// with several sessions working, that is what says which task is which. Clicking opens the
 /// blocks and items above the footer.
-const progressoEl = document.getElementById("progresso") as HTMLDivElement;
-let progressoAberto: Folha | undefined;
-let progressoPainel: HTMLDivElement | undefined;
-/// What is on screen. `pintar` runs on every status line; redrawing the same thing would
+const progressEl = document.getElementById("progress") as HTMLDivElement;
+let progressOpen: Leaf | undefined;
+let progressPanel: HTMLDivElement | undefined;
+/// What is on screen. `paint` runs on every status line; redrawing the same thing would
 /// throw away the open list's scroll every few seconds.
-let progressoChave = "";
+let progressKey = "";
 
-type PlanoDoSocket = { painel: number; progresso: PlanoDaTarefa | null };
+type SocketPlan = { panel: number; progress: TaskPlan | null };
 
-function receberProgresso(bruto: PlanoDoSocket) {
-  const folha = folhaPorPainel(bruto.painel);
-  if (!folha) return;
-  folha.progresso = bruto.progresso ?? undefined;
-  desenharProgresso();
+function receiveProgress(raw: SocketPlan) {
+  const leaf = leafByPanel(raw.panel);
+  if (!leaf) return;
+  leaf.progress = raw.progress ?? undefined;
+  drawProgress();
 }
 
 /// Where the task is: the session's folder, the panel's branch and its tab's number.
-function ondeEsta(folha: Folha) {
-  const dono = folha.dono ?? folha;
-  const pasta = folha.claude?.nome ?? dono.barra?.pasta?.split("/").filter(Boolean).pop() ?? T.painelN(folha.id);
-  const aba = abaDe(folha);
-  return { pasta, branch: dono.barra?.branch ?? null, aba: aba ? abas.indexOf(aba) + 1 : 0 };
+function whereIs(leaf: Leaf) {
+  const owner = leaf.owner ?? leaf;
+  const folder = leaf.claude?.name ?? owner.bar?.folder?.split("/").filter(Boolean).pop() ?? T.panelN(leaf.id);
+  const tab = tabOf(leaf);
+  return { folder, branch: owner.bar?.branch ?? null, tab: tab ? tabs.indexOf(tab) + 1 : 0 };
 }
 
-const rotuloDoLugar = (o: ReturnType<typeof ondeEsta>) => (o.branch ? `${o.pasta} ⎇ ${o.branch}` : o.pasta);
-const textoDoAndamento = (a: { pct: number; estimado: boolean }) => `${a.estimado ? "~" : ""}${Math.round(a.pct)}%`;
+const placeLabel = (o: ReturnType<typeof whereIs>) => (o.branch ? `${o.folder} ⎇ ${o.branch}` : o.folder);
+const progressText = (a: { pct: number; estimated: boolean }) => `${a.estimated ? "~" : ""}${Math.round(a.pct)}%`;
 
-function anelDeProgresso(pct: number): string {
+function progressRing(pct: number): string {
   const c = 2 * Math.PI * 5.5;
-  return `<svg viewBox="0 0 16 16" width="18" height="18" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.8" opacity=".26"/><circle class="progresso-arco" cx="8" cy="8" r="5.5" stroke-width="1.8" stroke-linecap="round" transform="rotate(-90 8 8)" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - pct / 100)}"/></svg>`;
+  return `<svg viewBox="0 0 16 16" width="18" height="18" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.8" opacity=".26"/><circle class="progress-arc" cx="8" cy="8" r="5.5" stroke-width="1.8" stroke-linecap="round" transform="rotate(-90 8 8)" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - pct / 100)}"/></svg>`;
 }
 
-function comProgresso(): Folha[] {
-  const lista: Folha[] = [];
-  for (const a of abas) for (const f of folhas(a.raiz)) if (f.progresso && !f.morta) lista.push(f);
-  return lista;
+function withProgress(): Leaf[] {
+  const list: Leaf[] = [];
+  for (const a of tabs) for (const f of leaves(a.root)) if (f.progress && !f.dead) list.push(f);
+  return list;
 }
 
-function desenharProgresso() {
-  const lista = comProgresso();
-  if (progressoAberto && !lista.includes(progressoAberto)) progressoAberto = undefined;
-  const chave = JSON.stringify([lista.map((f) => [f.id, f.progresso, ondeEsta(f)]), progressoAberto?.id]);
-  if (chave === progressoChave) return;
-  progressoChave = chave;
+function drawProgress() {
+  const list = withProgress();
+  if (progressOpen && !list.includes(progressOpen)) progressOpen = undefined;
+  const key = JSON.stringify([list.map((f) => [f.id, f.progress, whereIs(f)]), progressOpen?.id]);
+  if (key === progressKey) return;
+  progressKey = key;
 
-  progressoEl.hidden = !lista.length;
-  progressoEl.replaceChildren(
-    ...lista.map((f) => {
-      const plano = f.progresso as PlanoDaTarefa;
-      const a = andamentoDoPlano(plano);
-      const onde = ondeEsta(f);
-      const pilula = elemento("button", "progresso-pilula");
-      pilula.classList.toggle("aberta", f === progressoAberto);
-      pilula.classList.toggle("completo", a.feitos === a.total);
-      pilula.innerHTML = anelDeProgresso(a.pct);
-      const pct = elemento("span", "progresso-pct");
-      pct.textContent = textoDoAndamento(a);
-      const lugar = elemento("span", "progresso-onde");
-      lugar.textContent = rotuloDoLugar(onde);
-      pilula.append(pct, lugar);
-      pilula.title = T.progressoDica(plano.title ?? onde.pasta, a.feitos, a.total);
+  progressEl.hidden = !list.length;
+  progressEl.replaceChildren(
+    ...list.map((f) => {
+      const plan = f.progress as TaskPlan;
+      const a = planProgress(plan);
+      const where = whereIs(f);
+      const pilula = element("button", "progress-pill");
+      pilula.classList.toggle("open", f === progressOpen);
+      pilula.classList.toggle("complete", a.done === a.total);
+      pilula.innerHTML = progressRing(a.pct);
+      const pct = element("span", "progress-pct");
+      pct.textContent = progressText(a);
+      const place = element("span", "progress-where");
+      place.textContent = placeLabel(where);
+      pilula.append(pct, place);
+      pilula.title = T.progressHint(plan.title ?? where.folder, a.done, a.total);
       pilula.addEventListener("click", (e) => {
         e.stopPropagation();
-        progressoAberto = progressoAberto === f ? undefined : f;
-        desenharProgresso();
+        progressOpen = progressOpen === f ? undefined : f;
+        drawProgress();
       });
       return pilula;
     }),
   );
-  desenharPainelDeProgresso(lista);
+  drawPanelOfProgress(list);
 }
 
 const SINAL_DO_STATUS = { done: "✓", doing: "◐", todo: "○" } as const;
 
 /// The open list: the plan's title, where it is, the total and each block with its bar —
 /// and, under the blocks that have them, the items.
-function desenharPainelDeProgresso(lista: Folha[]) {
-  const folha = progressoAberto;
-  const plano = folha?.progresso;
-  if (!folha || !plano) {
-    progressoPainel?.remove();
-    progressoPainel = undefined;
+function drawPanelOfProgress(list: Leaf[]) {
+  const leaf = progressOpen;
+  const plan = leaf?.progress;
+  if (!leaf || !plan) {
+    progressPanel?.remove();
+    progressPanel = undefined;
     return;
   }
-  const painel = (progressoPainel ??= elemento("div", "progresso-painel"));
-  if (!painel.isConnected) document.body.append(painel);
-  const onde = ondeEsta(folha);
-  const a = andamentoDoPlano(plano);
+  const panel = (progressPanel ??= element("div", "progress-panel"));
+  if (!panel.isConnected) document.body.append(panel);
+  const where = whereIs(leaf);
+  const a = planProgress(plan);
 
-  const cabeca = elemento("div", "progresso-cabeca");
-  const textos = elemento("div", "progresso-textos");
-  const titulo = elemento("div", "progresso-titulo");
-  titulo.textContent = plano.title ?? onde.pasta;
-  const sub = elemento("div", "progresso-sub");
-  sub.textContent = `${rotuloDoLugar(onde)} · ${T.abaN(onde.aba)}`;
-  textos.append(titulo, sub);
-  const ir = elemento("button", "progresso-btn");
-  ir.textContent = T.irAoPainel;
-  ir.addEventListener("click", () => {
-    const aba = abaDe(folha);
-    progressoAberto = undefined;
-    desenharProgresso();
-    if (!aba) return;
-    ativar(aba);
-    focar(folha);
+  const head = element("div", "progress-head");
+  const texts = element("div", "progress-texts");
+  const title = element("div", "progress-title");
+  title.textContent = plan.title ?? where.folder;
+  const sub = element("div", "progress-sub");
+  sub.textContent = `${placeLabel(where)} · ${T.tabN(where.tab)}`;
+  texts.append(title, sub);
+  const go = element("button", "progress-btn");
+  go.textContent = T.goToPanel;
+  go.addEventListener("click", () => {
+    const tab = tabOf(leaf);
+    progressOpen = undefined;
+    drawProgress();
+    if (!tab) return;
+    activate(tab);
+    focusLeaf(leaf);
   });
-  const tirar = elemento("button", "progresso-btn progresso-tirar");
-  tirar.innerHTML = ICONE_FECHAR;
-  tirar.title = T.tirarDoRodape;
-  tirar.addEventListener("click", () => {
-    folha.progresso = undefined;
-    desenharProgresso();
+  const remove = element("button", "progress-btn progress-remove");
+  remove.innerHTML = ICON_CLOSE;
+  remove.title = T.removeFromFooter;
+  remove.addEventListener("click", () => {
+    leaf.progress = undefined;
+    drawProgress();
   });
-  cabeca.append(textos, ir, tirar);
+  head.append(texts, go, remove);
 
-  const barra = (pct: number) => {
-    const trilho = elemento("span", "progresso-trilho");
-    const cheio = elemento("span", "progresso-cheio");
-    cheio.style.width = `${Math.max(0, Math.min(100, pct))}%`;
-    trilho.append(cheio);
-    return trilho;
+  const bar = (pct: number) => {
+    const track = element("span", "progress-track");
+    const full = element("span", "progress-full");
+    full.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+    track.append(full);
+    return track;
   };
-  const total = elemento("div", "progresso-total");
-  const resumo = elemento("span", "progresso-resumo");
-  resumo.textContent = `${textoDoAndamento(a)} · ${T.blocosFeitos(a.feitos, a.total)}`;
-  total.append(barra(a.pct), resumo);
+  const total = element("div", "progress-total");
+  const summary = element("span", "progress-summary");
+  summary.textContent = `${progressText(a)} · ${T.blocksDone(a.done, a.total)}`;
+  total.append(bar(a.pct), summary);
 
-  const blocos = elemento("ol", "progresso-blocos");
-  for (const b of plano.blocks) {
-    const ab = andamentoDoBloco(b);
-    const li = elemento("li", "progresso-bloco");
+  const blocks = element("ol", "progress-blocks");
+  for (const b of plan.blocks) {
+    const ab = blockProgress(b);
+    const li = element("li", "progress-block");
     li.dataset.status = b.status;
-    const linha = elemento("div", "progresso-linha");
-    const sinal = elemento("span", "progresso-sinal");
+    const line = element("div", "progress-line");
+    const sinal = element("span", "progress-dot");
     sinal.textContent = SINAL_DO_STATUS[b.status];
-    const nome = elemento("span", "progresso-nome");
-    nome.textContent = b.name;
-    const pct = elemento("span", "progresso-num");
-    pct.textContent = textoDoAndamento(ab);
-    linha.append(sinal, nome, barra(ab.pct), pct);
-    li.append(linha);
+    const name = element("span", "progress-name");
+    name.textContent = b.name;
+    const pct = element("span", "progress-num");
+    pct.textContent = progressText(ab);
+    line.append(sinal, name, bar(ab.pct), pct);
+    li.append(line);
     if (b.items?.length) {
-      const itens = elemento("ul", "progresso-itens");
+      const items = element("ul", "progress-items");
       for (const i of b.items) {
-        const item = elemento("li", "progresso-item");
+        const item = element("li", "progress-item");
         item.dataset.status = i.status;
-        const s = elemento("span", "progresso-sinal");
+        const s = element("span", "progress-dot");
         s.textContent = SINAL_DO_STATUS[i.status];
-        const n = elemento("span", "progresso-nome");
+        const n = element("span", "progress-name");
         n.textContent = i.name;
         item.append(s, n);
-        itens.append(item);
+        items.append(item);
       }
-      li.append(itens);
+      li.append(items);
     }
-    blocos.append(li);
+    blocks.append(li);
   }
-  painel.replaceChildren(cabeca, total, blocos);
+  panel.replaceChildren(head, total, blocks);
 
   // Above its pill, without leaving the window on the right.
-  const pilula = progressoEl.children[lista.indexOf(folha)] as HTMLElement | undefined;
+  const pilula = progressEl.children[list.indexOf(leaf)] as HTMLElement | undefined;
   const x = pilula?.getBoundingClientRect().left ?? 10;
-  painel.style.left = `${Math.max(8, Math.min(x, window.innerWidth - painel.offsetWidth - 8))}px`;
+  panel.style.left = `${Math.max(8, Math.min(x, window.innerWidth - panel.offsetWidth - 8))}px`;
 }
 
-function fecharProgresso() {
-  if (!progressoAberto) return;
-  progressoAberto = undefined;
-  desenharProgresso();
+function closeProgress() {
+  if (!progressOpen) return;
+  progressOpen = undefined;
+  drawProgress();
 }
 
 window.addEventListener("mousedown", (e) => {
-  if (progressoPainel?.contains(e.target as Node) || progressoEl.contains(e.target as Node)) return;
-  fecharProgresso();
+  if (progressPanel?.contains(e.target as Node) || progressEl.contains(e.target as Node)) return;
+  closeProgress();
 });
 window.addEventListener(
   "keydown",
   (e) => {
-    if (e.key !== "Escape" || !progressoAberto) return;
+    if (e.key !== "Escape" || !progressOpen) return;
     e.stopPropagation();
-    fecharProgresso();
+    closeProgress();
   },
   true,
 );
-progressoEl.hidden = true;
+progressEl.hidden = true;
 
-// ---------- radio: the footer one ----------
-
-/// The list lives in `estacoes.ts`, with the explanation of where it comes from and what
-/// each one's `espectro` means.
-const estacoes = ESTACOES;
-
-/// The current station is stored by its address, not its index: the list is
-/// redone on every probe, and the index would start pointing at another. The volume is
-/// a number from 0 to 100.
-const CHAVE_ATUAL = "termiau:radio:atual";
-const CHAVE_VOLUME = "termiau:lofi:volume";
-/// Whether the radio was on air when the app closed: it starts playing again on launch.
-const CHAVE_TOCANDO = "termiau:radio:tocando";
-
-/// The five volume stages. A click goes up one; after full, mute. It is
-/// what fits in a 30px footer: a slider needs a long target for the
-/// pointer to travel, and long is exactly what there isn't room for here.
-///
-/// It lives HERE, not down below with the button that uses it: `volumeLofi` right below
-/// already reads it, and a `const` declared after that doesn't exist yet at
-/// read time. `tsc` doesn't catch it — the read happens inside a function, and from there it
-/// can't tell what runs before what. The app just doesn't start: `ReferenceError:
-/// Cannot access 'VOLUMES' before initialization`, and the window stays white.
-const VOLUMES = [0, 25, 50, 75, 100];
-
-/// The stored value may be from a version where volume was continuous — or
-/// any number between 0 and 100. It snaps to the nearest stage: a volume
-/// off the ladder would have no way to go up a step.
-const estagio = (v: number): number =>
-  VOLUMES.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
-
-/// A missing key and a key with junk end up the same: the default. `Number(null)` is 0, and
-/// without the null check the volume would be born muted on the first run.
-function lembrado(chave: string, padrao: number, teto: number): number {
-  const bruto = localStorage.getItem(chave);
-  const n = bruto === null ? NaN : Number(bruto);
-  return Number.isFinite(n) && n >= 0 && n <= teto ? Math.round(n) : padrao;
-}
-
-let estacao = Math.max(
-  0,
-  estacoes.findIndex((e) => e.url === localStorage.getItem(CHAVE_ATUAL)),
-);
-let volumeLofi = estagio(lembrado(CHAVE_VOLUME, 50, 100));
-
-const atual = (): Estacao | undefined => estacoes[estacao];
-
-function guardarAtual() {
-  const e = atual();
-  if (e) localStorage.setItem(CHAVE_ATUAL, e.url);
-}
-// ---------- radio: the footer controls ----------
-
-const ICONE_PAUSA = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="4" y="3.5" width="3" height="9" rx="1"/><rect x="9" y="3.5" width="3" height="9" rx="1"/></svg>`;
-const ICONE_ESTACOES = traco("M3.5 4.5h9M3.5 8h9M3.5 11.5h9");
-const ICONE_PROXIMA = `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><rect x="10.7" y="3.6" width="1.7" height="8.8" rx=".85"/><path d="M3.8 4.2v7.6a.6.6 0 0 0 .92.5l5.2-3.8a.6.6 0 0 0 0-1L4.72 3.7a.6.6 0 0 0-.92.5Z"/></svg>`;
-
-const lofiEl = document.getElementById("lofi") as HTMLDivElement;
-
-/// Like the panel bar's buttons: the click doesn't take the keyboard from the terminal.
-/// You press ▶ and keep typing where you left off.
-function botaoLofi(classe: string, icone: string, titulo: string): HTMLButtonElement {
-  const b = elemento("button", `lofi-btn ${classe}`);
-  b.innerHTML = icone;
-  b.title = titulo;
-  b.addEventListener("mousedown", (e) => e.preventDefault());
-  return b;
-}
-
-/// Where the back arrow used to be. With forty-six stations, stepping
-/// back one at a time gets you nowhere — the list does.
-const lofiEstacoes = botaoLofi("lofi-estacoes", ICONE_ESTACOES, T.estacoesLista);
-const lofiTocar = botaoLofi("lofi-tocar", ICONE_PLAY, T.tocar);
-const lofiProxima = botaoLofi("lofi-proxima", ICONE_PROXIMA, T.proximaEstacao);
-
-/// The ring has radius 5.5 in the 16 viewBox — the perimeter is the whole stroke's
-/// length, and the lit fraction comes from it.
-const VOLUME_ANEL = 2 * Math.PI * 5.5;
-
-const ICONE_VOLUME = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.6" opacity=".26"/><circle class="anel" cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" transform="rotate(-90 8 8)" stroke-dasharray="${VOLUME_ANEL}" stroke-dashoffset="${VOLUME_ANEL}"/><path class="corte" d="M5.1 5.1l5.8 5.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`;
-
-const lofiVolume = botaoLofi("lofi-volume", ICONE_VOLUME, T.volume);
-const volumeAnel = lofiVolume.querySelector(".anel") as SVGCircleElement;
-const volumeCorte = lofiVolume.querySelector(".corte") as SVGPathElement;
-
-/// The ring lights from the top clockwise (hence the `rotate(-90)`
-/// on the icon): full is a whole turn, mute is a slash and no stroke.
-function desenharVolume() {
-  volumeAnel.style.strokeDashoffset = String(VOLUME_ANEL * (1 - volumeLofi / 100));
-  // `style.display`, not the `hidden` attribute: in an SVG inside HTML
-  // `hidden` hides nothing without a CSS rule for it.
-  volumeCorte.style.display = volumeLofi > 0 ? "none" : "";
-  const proximo = VOLUMES[(VOLUMES.indexOf(volumeLofi) + 1) % VOLUMES.length];
-  lofiVolume.title = T.volumeDica(volumeLofi, proximo);
-}
-
-const lofiTitulo = elemento("span", "lofi-titulo");
-/// The box has a fixed width; this inner one is what moves.
-const lofiTituloTexto = elemento("span", "lofi-titulo-texto");
-lofiTitulo.appendChild(lofiTituloTexto);
-
-/// How long the text takes to move one pixel. ~33 px/s: readable without
-/// chasing it, and slow enough not to pull the eye of whoever is
-/// looking at the terminal.
-const TITULO_MS_POR_PX = 30;
-/// The pause, after the whole text has gone by. It is the strip's normal state —
-/// the scroll is the exception, and happens twice a minute.
-const TITULO_PARADA_MS = 30_000;
-/// A rest at the end, with the text's tail in view, before going back to the start. Without
-/// it the last word would appear and vanish in the same frame.
-const TITULO_FIM_MS = 1_500;
-/// And one at the start, so new text is read from the beginning before it starts moving.
-const TITULO_INICIO_MS = 1_200;
+// ---------- the branch name ----------
 
 /// A `[branch]`: the brackets outside, the name in a box with a width cap, and
-/// whatever doesn't fit scrolls inside like the radio station's name.
-type Ramo = { el: HTMLSpanElement; caixa: HTMLSpanElement; texto: HTMLSpanElement };
+/// whatever doesn't fit scrolls inside (see `marquee` in ui.ts).
+type BranchChip = { el: HTMLSpanElement; box: HTMLSpanElement; text: HTMLSpanElement };
 
-function criarRamo(classe: string): Ramo {
-  const texto = elemento("span", "ramo-texto");
-  const caixa = elemento("span", "ramo-caixa");
-  caixa.append(texto);
-  const el = elemento("span", `ramo ${classe}`);
-  el.append("[", caixa, "]");
+function createBranchChip(cls: string): BranchChip {
+  const text = element("span", "branch-text");
+  const box = element("span", "branch-box");
+  box.append(text);
+  const el = element("span", `branch ${cls}`);
+  el.append("[", box, "]");
   el.hidden = true;
-  return { el, caixa, texto };
+  return { el, box, text };
 }
 
 /// Only touches it when the name or visibility change: redoing the scroll on every
 /// prompt would leave it stuck on the first pixel.
-function exibirRamo(r: Ramo, nome: string | null) {
-  const novo = nome ?? "";
-  if (r.texto.textContent === novo && r.el.hidden === !nome) return;
-  r.texto.textContent = novo;
-  r.el.hidden = !nome;
-  r.el.title = nome ? T.branch(nome) : "";
-  passear(r.caixa, r.texto);
+function showBranchChip(r: BranchChip, name: string | null) {
+  const fresh = name ?? "";
+  if (r.text.textContent === fresh && r.el.hidden === !name) return;
+  r.text.textContent = fresh;
+  r.el.hidden = !name;
+  r.el.title = name ? T.branch(name) : "";
+  marquee(r.box, r.text);
 }
 
 /// Measures again the ones left without scrolling for having arrived hidden (measuring zero).
-function repassear(r: Ramo) {
-  if (!r.el.hidden && !passeios.has(r.caixa)) passear(r.caixa, r.texto);
+function repass(r: BranchChip) {
+  if (!r.el.hidden && !isMarqueeRunning(r.box)) marquee(r.box, r.text);
 }
 
 /// The tab chip shows the focused panel's branch. Panels show theirs
 /// only when not all of them are in the same folder: with all together, repeating on every
 /// bar what the chip already says is just noise.
-function mostrarRamos(aba: Aba) {
-  const barras = [...folhas(aba.raiz)].flatMap((f) => (f.barra ? [f.barra] : []));
-  const misturadas = new Set(barras.map((b) => b.pasta)).size > 1;
-  for (const b of barras) exibirRamo(b.ramo, misturadas ? b.branch : null);
-  exibirRamo(aba.ramo, aba.foco.barra?.branch ?? null);
+function showBranches(tab: Tab) {
+  const bars = [...leaves(tab.root)].flatMap((f) => (f.bar ? [f.bar] : []));
+  const mixed = new Set(bars.map((b) => b.folder)).size > 1;
+  for (const b of bars) showBranchChip(b.branchChip, mixed ? b.branch : null);
+  showBranchChip(tab.branchChip, tab.focus.bar?.branch ?? null);
 }
-
-/// Each box's scroll in progress. It is per box because there are several: the radio and
-/// each panel's branch.
-const passeios = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
-
-/// Makes the text scroll when it doesn't fit the box: moves to the end, waits
-/// a bit, goes back to the start and stops for thirty seconds — and again. If it fits, it
-/// does nothing: scrolling a text entirely in view would be moving for the sake of it.
-///
-/// Called only when the text CHANGES. On every audio event the footer redraws,
-/// and redoing the scroll on each one would leave it stuck on the first pixel.
-function passear(caixa: HTMLElement, texto: HTMLElement) {
-  clearTimeout(passeios.get(caixa));
-  passeios.delete(caixa);
-  texto.style.transition = "none";
-  texto.style.transform = "translateX(0)";
-
-  // Before the window appears everything measures zero. It isn't an error case: the next
-  // text — and one always comes — measures again with the box already on screen.
-  const sobra = texto.scrollWidth - caixa.clientWidth;
-  if (sobra <= 1) return;
-
-  const andar = () => {
-    const quanto = sobra * TITULO_MS_POR_PX;
-    texto.style.transition = `transform ${quanto}ms linear`;
-    texto.style.transform = `translateX(${-sobra}px)`;
-    passeios.set(caixa, setTimeout(voltar, quanto + TITULO_FIM_MS));
-  };
-
-  const voltar = () => {
-    // Back to the start without a transition: the way back has nothing to
-    // read, and unrolling the text in front of whoever read it is worse than a cut.
-    texto.style.transition = "none";
-    texto.style.transform = "translateX(0)";
-    passeios.set(caixa, setTimeout(andar, TITULO_PARADA_MS));
-  };
-
-  passeios.set(caixa, setTimeout(andar, TITULO_INICIO_MS));
-}
-
-const passearTitulo = () => passear(lofiTitulo, lofiTituloTexto);
-
-/// What is written on the strip now, to know when it really changed.
-let tituloNoAr: string | undefined;
-
-// ---------- radio: the sound ----------
-
-/// There are TWO elements, not one, because Web Audio doesn't work for every
-/// station.
-///
-/// A cross-origin source that doesn't allow CORS enters the graph zeroed — and since
-/// the graph is what talks to the speaker, it would play in silence. Measured: of the
-/// 312 probed, 249 sent `Access-Control-Allow-Origin` in the header and only
-/// 56 actually deliver samples. The header isn't enough.
-///
-/// So a station that delivers goes through `audioGrafo`, with spectrum and gain; one
-/// that doesn't goes through `audioDireto`, which never enters the graph and goes
-/// straight to the speaker. One element can't be both:
-/// `createMediaElementSource` is forever, and after it the element's sound
-/// never comes out on its own again.
-const audioGrafo = new Audio();
-audioGrafo.crossOrigin = "anonymous";
-audioGrafo.preload = "none";
-
-const audioDireto = new Audio();
-audioDireto.preload = "none";
-
-/// What is playing now — one of the two above.
-let audio = audioGrafo;
-
-let tocandoLofi = false;
-let carregandoLofi = false;
-/// Whether you asked for play. It is what tells a stream that dropped from a `src` we
-/// removed ourselves when pausing.
-let noAr = false;
-/// No network, or station off the air: the reason takes the name's place until the next
-/// click that works. The strip fits one line, and the name can wait.
-let avisoLofi: string | undefined;
-// ---------- radio: the spectrum analyzer ----------
-
-/// One column per frequency band, each cut into segments like an
-/// LED display, with the peak that hangs in the air and comes down on its own.
-///
-/// The heights are MEASURED: they come from an FFT of the audio playing, which is
-/// ours and came with CORS. Until v1 they were modeled — an invented lofi curve
-/// on top of a clock — because the sound came from inside a YouTube iframe
-/// and there were no samples to reach.
-const SPEC_BANDAS = 10;
-/// Five 2px segments with a 1px gap give exactly the strip's 14px.
-const SPEC_SEGMENTOS = 5;
-/// The same beat as the dictation wave: ~20 frames per second.
-const SPEC_MS = 50;
-/// How much the level and the peak fall per frame. The peak comes down much more slowly — that is
-/// what it is for, leaving in the air for an instant what has already passed. The
-/// rise has no brake: the attack is what makes a display look like a VU.
-const SPEC_QUEDA = 0.075;
-const SPEC_QUEDA_PICO = 0.014;
-/// 2048 points at 48 kHz give ~23 Hz bins. With 512 the bins came out at ~94 Hz and
-/// the first three bands all fell in the first two bins — three columns
-/// showing the same thing, and the first of them showing the DC bin, which is no
-/// sound at all.
-const SPEC_FFT = 2048;
-/// The range the display covers. Below 40 Hz is room rumble, and above
-/// 16 kHz a 128 kbps MP3 keeps nothing: both ends would only waste
-/// columns showing the floor.
-const SPEC_HZ_MIN = 40;
-const SPEC_HZ_MAX = 16_000;
-/// How many dB the display covers, from the floor to the top of the column. Measured: on an
-/// electronic track, each band lives about 7 dB below its own peak, and the upper ones
-/// about 14. With a 16 dB scale that becomes three lit segments in the body of the
-/// music and five on the peaks — a breathing display, not a wall.
-const SPEC_ALCANCE = 16;
-/// Each band's ceiling is MOVING: it rises on the peak and comes down on its own, ~1.2 dB/s. It is
-/// what makes the display work for any station. A fixed ceiling doesn't exist:
-/// measured on Groove Salad, the lowest band lives at -45 dB and the highest at
-/// -77, and that distance changes with the genre. That was what kept everything at the top.
-const SPEC_REF_QUEDA = 0.06;
-/// But the ceiling doesn't come down forever: without a floor, the silence between tracks
-/// would become infinite gain and the hiss would rise to the top.
-const SPEC_REF_MINIMA = -58;
-
-const lofiSpec = elemento("span", "spec");
-lofiSpec.setAttribute("aria-hidden", "true");
-
-const specNiveis = new Array<number>(SPEC_BANDAS).fill(0);
-const specPicos = new Array<number>(SPEC_BANDAS).fill(0);
-/// Each band's ceiling, in dB. It starts at the floor: the first music that comes in
-/// raises it, and raising is immediate.
-const specRefs = new Array<number>(SPEC_BANDAS).fill(SPEC_REF_MINIMA);
-const specColunas = Array.from({ length: SPEC_BANDAS }, () => {
-  const coluna = elemento("span", "spec-col");
-  const nivel = elemento("span", "spec-nivel");
-  const pico = elemento("span", "spec-pico");
-  coluna.append(nivel, pico);
-  lofiSpec.appendChild(coluna);
-  return { nivel, pico };
-});
-
-lofiEl.append(lofiEstacoes, lofiTocar, lofiProxima, lofiVolume, lofiTitulo, lofiSpec);
-
-let analisador: AudioAnalisador | undefined;
-
-type AudioAnalisador = {
-  no: AnalyserNode;
-  raias: Float32Array<ArrayBuffer>;
-  bandas: Array<{ de: number; ate: number }>;
-  ganho: GainNode;
-  contexto: AudioContext;
-};
-
-/// Web Audio is built only once, on the first ▶ — not at boot. An
-/// `AudioContext` created for nothing is born suspended and still ties the system's
-/// sound output to the page: the audio indicator would light up on a silent window.
-///
-/// `createMediaElementSource` diverts the `<audio>` into the graph: from
-/// then on you only hear what reaches `destination`, and forgetting to connect that end
-/// is the classic way to end up with no sound at all.
-function ligarAnalisador(): AudioAnalisador {
-  if (analisador) return analisador;
-  const contexto = new AudioContext();
-  const no = contexto.createAnalyser();
-  no.fftSize = SPEC_FFT;
-  // The analyzer's own smoothing does half of the VU's work; the rest
-  // is `SPEC_QUEDA`'s slow fall.
-  no.smoothingTimeConstant = 0.6;
-
-  // The volume lives here, in a gain, not in the `<audio>`'s `volume`: once the
-  // element is diverted into the graph, WebKit stops applying that attribute —
-  // it accepts the value, `a.volume` reports what you set and the sound comes out
-  // the same. You can see it in an analyzer: with `volume = 0` the samples stay
-  // full. The slider was turning for nothing.
-  const ganho = contexto.createGain();
-  ganho.gain.value = volumeLofi / 100;
-
-  // The analyzer comes BEFORE the gain: the display measures the music, not how much
-  // of it you chose to hear. It is any mixing desk's pre-fader metering — at
-  // low volume the columns keep counting what is playing, instead of
-  // dying on the floor along with the sound.
-  contexto.createMediaElementSource(audio).connect(no);
-  no.connect(ganho);
-  ganho.connect(contexto.destination);
-
-  // Bands spaced in octaves, not equal parts: that is how the ear hears, and
-  // in equal parts the first nine columns would all fall in the bass while
-  // the last one alone would cover half the spectrum.
-  const porRaia = contexto.sampleRate / SPEC_FFT;
-  const razao = (SPEC_HZ_MAX / SPEC_HZ_MIN) ** (1 / SPEC_BANDAS);
-  // Each band starts where the previous one ended and has at least one bin. Without
-  // both rules the first bands pile up on the same bin, because down
-  // there the step in Hz is smaller than the FFT's resolution. And the start is bin
-  // 1: bin 0 is the DC component, which isn't sound and doesn't move.
-  let anterior = 1;
-  const bandas = Array.from({ length: SPEC_BANDAS }, (_, b) => {
-    const de = Math.max(anterior, Math.floor((SPEC_HZ_MIN * razao ** b) / porRaia));
-    const ate = Math.max(de + 1, Math.ceil((SPEC_HZ_MIN * razao ** (b + 1)) / porRaia));
-    anterior = ate;
-    return { de, ate };
-  });
-
-  analisador = { no, raias: new Float32Array(no.frequencyBinCount), bandas, ganho, contexto };
-  return analisador;
-}
-
-/// From 0..1 to the height in pixels, snapped to the segment grid: it is the
-/// step that makes the display look like LEDs and not a smooth stretching bar.
-function alturaSpec(v: number): number {
-  const acesos = Math.round(Math.max(0, Math.min(1, v)) * SPEC_SEGMENTOS);
-  return acesos === 0 ? 0 : acesos * 3 - 1;
-}
-
-function moverSpec() {
-  const a = analisador;
-  if (!a) return;
-  // In raw dB, not `getByteFrequencyData`'s byte: that one already comes squeezed
-  // into a fixed window of -100 to -30 dB, and the window is exactly what can't be
-  // fixed. With the loose number, the moving ceiling down here decides the scale.
-  a.no.getFloatFrequencyData(a.raias);
-
-  for (let b = 0; b < SPEC_BANDAS; b++) {
-    const { de, ate } = a.bandas[b];
-    // The band's maximum, not the average: the average of a wide treble band
-    // drowns the cymbal in the silence next to it.
-    let maior = -Infinity;
-    for (let r = de; r < ate && r < a.raias.length; r++) maior = Math.max(maior, a.raias[r]);
-    // Digital silence comes as -Infinity, which can't be compared or added.
-    if (!Number.isFinite(maior)) maior = SPEC_REF_MINIMA - SPEC_ALCANCE;
-
-    // The ceiling rises at once and comes down slowly. It is what gives the display the same
-    // useful scale on a drone and on metal, with no genre table at all.
-    specRefs[b] = Math.max(
-      SPEC_REF_MINIMA,
-      maior > specRefs[b] ? maior : specRefs[b] - SPEC_REF_QUEDA,
-    );
-    const alvo = Math.max(0, Math.min(1, 1 - (specRefs[b] - maior) / SPEC_ALCANCE));
-
-    // Rises within the frame, comes down little by little.
-    specNiveis[b] = alvo > specNiveis[b] ? alvo : Math.max(0, specNiveis[b] - SPEC_QUEDA);
-    specPicos[b] = Math.max(specNiveis[b], specPicos[b] - SPEC_QUEDA_PICO);
-
-    const { nivel, pico } = specColunas[b];
-    const alto = alturaSpec(specNiveis[b]);
-    const altoPico = alturaSpec(specPicos[b]);
-    nivel.style.height = `${alto}px`;
-    // The peak only shows above the bar: on top of it, it would say nothing.
-    pico.hidden = altoPico <= alto;
-    pico.style.bottom = `${Math.max(0, altoPico - 2)}px`;
-  }
-}
-
-/// Each band's invented targets, when there is nothing to measure, and in
-/// how many frames each one draws the next.
-const specSorteio = new Array<number>(SPEC_BANDAS).fill(0);
-const specEspera = new Array<number>(SPEC_BANDAS).fill(0);
-/// How many frames until the next beat, also random.
-let specBatida = 0;
-
-const sortear = (de: number, ate: number) => de + Math.random() * (ate - de);
-
-/// Through the direct path (the station doesn't let the audio be read) the display has
-/// no samples, but standing still it looked like the radio was off. So it moves
-/// fake, with no beat at all: each band draws a height and how long it
-/// stays there, and every now and then (also random) comes a beat of random
-/// strength in the bass. The rest — rising within the frame, coming down slowly, the peak in the
-/// air — is the same as the measured one.
-function moverSpecSorteado() {
-  if (--specBatida <= 0) {
-    specBatida = Math.round(sortear(4, 16));
-    const forca = sortear(0.5, 1);
-    const largura = Math.round(sortear(1, 4));
-    for (let b = 0; b < largura; b++) specSorteio[b] = Math.max(specSorteio[b], forca * sortear(0.8, 1));
-  }
-  for (let b = 0; b < SPEC_BANDAS; b++) {
-    if (--specEspera[b] <= 0) {
-      specEspera[b] = Math.round(sortear(1, 7));
-      // The bass tends to go higher, but any band can go to the top or
-      // to the floor.
-      const teto = 1 - (b / SPEC_BANDAS) * 0.35;
-      specSorteio[b] = teto * Math.random() ** sortear(0.6, 1.6);
-    }
-    const alvo = specSorteio[b];
-    specNiveis[b] = alvo > specNiveis[b] ? alvo : Math.max(0, specNiveis[b] - SPEC_QUEDA * sortear(0.6, 1.4));
-    specPicos[b] = Math.max(specNiveis[b], specPicos[b] - SPEC_QUEDA_PICO);
-    // A target reached is dropped: without this the column stayed pinned to it.
-    specSorteio[b] *= sortear(0.7, 0.9);
-
-    const { nivel, pico } = specColunas[b];
-    const alto = alturaSpec(specNiveis[b]);
-    const altoPico = alturaSpec(specPicos[b]);
-    nivel.style.height = `${alto}px`;
-    pico.hidden = altoPico <= alto;
-    pico.style.bottom = `${Math.max(0, altoPico - 2)}px`;
-  }
-}
-
-let pulsoSpec: ReturnType<typeof setInterval> | undefined;
-let modoSpec: "medido" | "sorteado" | undefined;
-
-/// Turns the animation on and off: measured (through the graph), random (through the direct
-/// path) or none. The quick exit matters: `desenharLofi` runs on every
-/// audio event, and restarting the interval on each one would make the display move
-/// in jerks.
-function animarSpec(modo: "medido" | "sorteado" | undefined) {
-  if (modo === modoSpec) return;
-  modoSpec = modo;
-  clearInterval(pulsoSpec);
-  pulsoSpec = undefined;
-  if (modo) {
-    pulsoSpec = setInterval(modo === "medido" ? moverSpec : moverSpecSorteado, SPEC_MS);
-    return;
-  }
-  specSorteio.fill(0);
-  specEspera.fill(0);
-  // Stopped, everything on the floor: a display frozen midway would look stuck.
-  specNiveis.fill(0);
-  specPicos.fill(0);
-  specRefs.fill(SPEC_REF_MINIMA);
-  for (const { nivel, pico } of specColunas) {
-    nivel.style.height = "0px";
-    pico.hidden = true;
-  }
-}
-
-// ---------- radio: the footer ----------
-
-/// The ones that promised a spectrum and came mute — this session only. The mark in
-/// `estacoes.ts` was measured one day; servers change configuration, and what
-/// is happening now is what rules.
-const semEspectro = new Set<string>();
-
-const usaGrafo = (e: Estacao): boolean => e.espectro && !semEspectro.has(e.url);
-
-function desenharLofi() {
-  const e = atual();
-  lofiTocar.innerHTML = tocandoLofi ? ICONE_PAUSA : ICONE_PLAY;
-  lofiTocar.title = tocandoLofi ? T.pausar : T.tocar;
-  lofiTocar.disabled = !e;
-  lofiProxima.disabled = estacoes.length < 2;
-  lofiEl.classList.toggle("tocando", tocandoLofi);
-  lofiEl.classList.toggle("carregando", carregandoLofi && !tocandoLofi);
-
-  const texto = avisoLofi ?? e?.nome ?? T.semEstacoes;
-  if (texto !== tituloNoAr) {
-    tituloNoAr = texto;
-    lofiTituloTexto.textContent = texto;
-    lofiTitulo.title = texto;
-    passearTitulo();
-  }
-
-  // Through the graph the display measures the sound; through the direct path there are no samples, and
-  // it moves randomly — standing still, it looked like the radio wasn't playing.
-  animarSpec(!tocandoLofi ? undefined : audio === audioGrafo ? "medido" : "sorteado");
-}
-
-/// Both elements respond the same, and only the one on air has a voice: the other
-/// may be finishing letting go of its `src` and a late event from it must not
-/// touch the footer.
-function ouvir(el: HTMLAudioElement) {
-  el.addEventListener("playing", () => {
-    if (el !== audio) return;
-    tocandoLofi = true;
-    carregandoLofi = false;
-    avisoLofi = undefined;
-    desenharLofi();
-    if (el === audioGrafo) conferirEspectro();
-  });
-
-  // Empty buffer midway: ▶ blinks again until the sound comes back. It isn't
-  // an error — on a live radio it is just the network breathing.
-  el.addEventListener("waiting", () => {
-    if (el !== audio || !noAr) return;
-    carregandoLofi = true;
-    desenharLofi();
-  });
-
-  // A pause that didn't come from us: the keyboard's media key, macOS's
-  // "Now Playing" controls. The footer must know. On the loop's next turn,
-  // because swapping `src` in the middle of a `tocarLofi` also comes through here, and then
-  // the `play()` right behind it has already undone the pause.
-  el.addEventListener("pause", () => {
-    setTimeout(() => {
-      if (el !== audio || !noAr || !el.paused) return;
-      pausarLofi();
-    });
-  });
-  // And an outside play, after it: back to live, not to the point where it stopped.
-  el.addEventListener("play", () => {
-    if (el !== audio || noAr) return;
-    tocarLofi();
-  });
-
-  el.addEventListener("error", () => caiu(el));
-  // An Icecast that closes the connection on its side arrives as end of media, not
-  // as an error. On a radio, which never ends, it is the same thing.
-  el.addEventListener("ended", () => caiu(el));
-}
-
-ouvir(audioGrafo);
-ouvir(audioDireto);
-
-/// The station went off the air, or never opened. No mirror to fall back on: the list is
-/// of unique addresses, and what can be offered is the next one.
-function caiu(el: HTMLAudioElement) {
-  // Without `noAr` this would fire on the pause's `load()`, which is an error on
-  // purpose; without the element check, the one just silenced would bring down
-  // the one that just came in.
-  if (el !== audio || !noAr) return;
-  noAr = false;
-  tocandoLofi = false;
-  carregandoLofi = false;
-  avisoLofi = T.estacaoForaDoAr;
-  localStorage.removeItem(CHAVE_TOCANDO);
-  desenharLofi();
-}
-
-/// How long to wait before checking whether the graph is receiving anything.
-/// Less than this catches the station still filling the buffer and condemns it for nothing.
-const CONFERIR_MS = 3_000;
-
-let conferencia: ReturnType<typeof setTimeout> | undefined;
-
-/// Playing mute is worse than playing without a display: if the station came in through the graph and the
-/// graph receives nothing, it is demoted and restarts through the direct path. The
-/// price is about three seconds of silence, once per station per session.
-function conferirEspectro() {
-  clearTimeout(conferencia);
-  conferencia = setTimeout(() => {
-    const a = analisador;
-    const e = atual();
-    if (!a || !e || audio !== audioGrafo || !tocandoLofi) return;
-
-    a.no.getFloatFrequencyData(a.raias);
-    const chao = SPEC_REF_MINIMA - SPEC_ALCANCE;
-    if (a.raias.some((v) => Number.isFinite(v) && v > chao)) return;
-
-    jlog(`radio: ${e.nome} came in mute on the graph — switching to the direct path`);
-    semEspectro.add(e.url);
-    tocarLofi();
-  }, CONFERIR_MS);
-}
-
-/// Releases an element's socket. A paused radio would keep downloading to
-/// throw away, and a live radio has nowhere to resume from afterwards.
-function calar(el: HTMLAudioElement) {
-  el.pause();
-  el.removeAttribute("src");
-  el.load();
-}
-
-/// Everything that needs the click gesture happens IN HERE, at once and with no
-/// `await` in between. WebKit only allows audio under a gesture of yours, and the gesture doesn't
-/// survive a wait: with an `await ctx.resume()` before `play()`, play
-/// lands on the other side of the click and is refused — `NotSupportedError`, which on
-/// top of that doesn't look like what it is. So `play()` goes first, synchronous, and the
-/// context is released right behind it; the result is handled when it arrives.
-function tocarLofi(automatico = false) {
-  const e = atual();
-  if (!e) return;
-
-  noAr = true;
-  carregandoLofi = true;
-  avisoLofi = undefined;
-  localStorage.setItem(CHAVE_TOCANDO, "1");
-
-  // The right element for this station. If it is the other one, the one on air goes quiet
-  // first — two streams playing together is what happens without this line.
-  const anterior = audio;
-  audio = usaGrafo(e) ? audioGrafo : audioDireto;
-  if (anterior !== audio) calar(anterior);
-  desenharLofi();
-
-  audio.src = e.url;
-  const pedido = audio.play();
-
-  if (audio === audioGrafo) {
-    // A context born suspended comes back here; one already running doesn't
-    // mind being woken up again.
-    void ligarAnalisador().contexto.resume().catch(() => {});
-  } else {
-    // Outside the graph there is no gain, and then the element's `volume` applies again.
-    audio.volume = volumeLofi / 100;
-  }
-
-  pedido.catch((erro: unknown) => {
-    // The element's `error` handles a stream that didn't open; all that is left here is
-    // the browser's own refusal.
-    noAr = false;
-    carregandoLofi = false;
-    // At launch there was no gesture, and WebKit may refuse: the radio waits for the
-    // first key or click, silently, instead of erroring over something you
-    // didn't ask for just now.
-    if (automatico && erro instanceof DOMException && erro.name === "NotAllowedError") {
-      localStorage.setItem(CHAVE_TOCANDO, "1");
-      calar(audio);
-      desenharLofi();
-      tocarNoPrimeiroGesto();
-      return;
-    }
-    localStorage.removeItem(CHAVE_TOCANDO);
-    avisoLofi = T.radioNaoAbriu(String(erro));
-    desenharLofi();
-    jlog(`radio: ${erro}`);
-  });
-  atualizarTocandoAgora();
-}
-
-/// The gesture that unlocks audio. In the capture phase, to count even with the key going
-/// to xterm; and `tocarLofi` is synchronous, so `play()` goes out inside it.
-function tocarNoPrimeiroGesto() {
-  const tocar = () => {
-    window.removeEventListener("keydown", tocar, true);
-    window.removeEventListener("pointerdown", tocar, true);
-    if (!noAr && localStorage.getItem(CHAVE_TOCANDO)) tocarLofi();
-  };
-  window.addEventListener("keydown", tocar, true);
-  window.addEventListener("pointerdown", tocar, true);
-}
-
-/// What macOS's "Now Playing" shows, and who answers the media keys:
-/// without the handlers, the system would pause the element on its own and the footer
-/// wouldn't know (the `pause` event above still covers that).
-function atualizarTocandoAgora() {
-  const ms = navigator.mediaSession;
-  if (!ms) return;
-  const e = atual();
-  ms.metadata = e ? new MediaMetadata({ title: e.nome, artist: "TermIAu" }) : null;
-  ms.playbackState = noAr ? "playing" : "paused";
-}
-
-function alternarLofi() {
-  if (tocandoLofi) pausarLofi();
-  else tocarLofi();
-}
-
-function pausarLofi() {
-  noAr = false;
-  clearTimeout(conferencia);
-  calar(audio);
-  tocandoLofi = false;
-  carregandoLofi = false;
-  localStorage.removeItem(CHAVE_TOCANDO);
-  desenharLofi();
-  atualizarTocandoAgora();
-}
-
-if (navigator.mediaSession) {
-  navigator.mediaSession.setActionHandler("play", () => tocarLofi());
-  navigator.mediaSession.setActionHandler("pause", () => pausarLofi());
-  navigator.mediaSession.setActionHandler("stop", () => pausarLofi());
-  navigator.mediaSession.setActionHandler("nexttrack", () => irPara(estacao + 1));
-}
-
-/// Puts a station on air. With the radio stopped it is only cued: switching
-/// stations isn't a request to start playing, and the address is only chosen on ▶.
-function irPara(i: number) {
-  if (!estacoes.length) return;
-  const n = estacoes.length;
-  estacao = ((i % n) + n) % n;
-  avisoLofi = undefined;
-  guardarAtual();
-
-  // While playing, the switch is immediate — and goes through `tocarLofi` because the new
-  // station may want the other audio path.
-  if (noAr) tocarLofi();
-  desenharLofi();
-  desenharLista();
-  atualizarTocandoAgora();
-}
-
-lofiEstacoes.addEventListener("click", () => abrirEditor());
-lofiProxima.addEventListener("click", () => irPara(estacao + 1));
-lofiTocar.addEventListener("click", alternarLofi);
-
-lofiVolume.addEventListener("click", () => {
-  volumeLofi = VOLUMES[(VOLUMES.indexOf(volumeLofi) + 1) % VOLUMES.length];
-  aplicarVolume();
-  desenharVolume();
-  localStorage.setItem(CHAVE_VOLUME, String(volumeLofi));
-});
-
-/// Applies to both paths: the graph's gain and the direct element's
-/// `volume`. A short ramp on the gain instead of a jump, because `gain.value`
-/// changed at once clicks. Before the first ▶ there is no graph, and nothing to
-/// apply to it — the number is stored and goes in when the gain is built.
-function aplicarVolume() {
-  audioDireto.volume = volumeLofi / 100;
-  const a = analisador;
-  if (a) a.ganho.gain.setTargetAtTime(volumeLofi / 100, a.contexto.currentTime, 0.01);
-}
-
-// ---------- radio: the station picker ----------
-
-/// Opened by the footer's ☰ or by Radio ▸ Stations…, in the menu bar. It is a
-/// picker and nothing more: clicking a name puts the station on air, and there is nothing to
-/// add or remove. A box in the middle of the window and not a list
-/// attached to the footer because two hundred and fifty rows don't fit in a
-/// 30px strip.
-const lofiEditor = elemento("div", "lofi-editor");
-lofiEditor.hidden = true;
-const lofiCaixa = elemento("div", "lofi-caixa");
-// The box takes the keyboard when it opens (esc, the arrows in the list), not ✕: focused,
-// it would show as pressed.
-lofiCaixa.tabIndex = -1;
-const lofiCabeca = elemento("div", "lofi-cabeca");
-const lofiCabecaTitulo = elemento("span", "lofi-cabeca-titulo");
-lofiCabecaTitulo.textContent = T.estacoes;
-const lofiFechar = botaoLofi("lofi-fechar", ICONE_FECHAR_DIALOGO, T.fecharEsc);
-lofiCabeca.append(lofiCabecaTitulo, lofiFechar);
-const lofiLista = elemento("div", "lofi-lista");
-lofiCaixa.append(lofiCabeca, lofiLista);
-lofiEditor.appendChild(lofiCaixa);
-document.body.appendChild(lofiEditor);
-
-function desenharLista() {
-  lofiLista.textContent = "";
-  estacoes.forEach((e, i) => {
-    const linha = elemento("div", "lofi-linha");
-    linha.classList.toggle("atual", i === estacao);
-    const nome = elemento("button", "lofi-nome");
-    nome.textContent = e.nome;
-    nome.title = T.tocarEstacao(e.nome);
-    if (e.genero) {
-      const genero = elemento("span", "lofi-genero");
-      genero.textContent = T.genero(e.genero);
-      nome.appendChild(genero);
-    }
-    // The ones that play without a display get a mark, not a warning: it is a
-    // small difference, and whoever is choosing a radio is choosing sound.
-    if (!usaGrafo(e)) {
-      const marca = elemento("span", "lofi-sem-spec");
-      marca.textContent = T.semEspectro;
-      linha.appendChild(marca);
-    }
-    // Choosing a station while stopped is a request to play: you came here to
-    // listen, not to cue. The footer's arrows are what switch without playing.
-    nome.addEventListener("click", () => {
-      irPara(i);
-      if (!noAr) tocarLofi();
-    });
-    linha.insertBefore(nome, linha.firstChild);
-    lofiLista.appendChild(linha);
-  });
-  // The one on air scrolls into view: with two hundred and fifty rows it is almost
-  // always out of it, and opening the picker at the top hides the answer to the
-  // question that made you open it.
-  lofiLista.querySelector(".lofi-linha.atual")?.scrollIntoView({ block: "nearest" });
-}
-
-function abrirEditor() {
-  lofiEditor.hidden = false;
-  desenharLista();
-  lofiCaixa.focus({ preventScroll: true });
-}
-
-function fecharEditor() {
-  lofiEditor.hidden = true;
-  // The keyboard goes back where it was: the picker is a visit, not a destination.
-  if (ativa?.foco) focar(ativa.foco);
-}
-
-// A click on the backdrop closes; a click on the box doesn't — `e.target` is the backdrop only when
-// the pointer landed outside the box.
-lofiEditor.addEventListener("mousedown", (e) => {
-  if (e.target === lofiEditor) fecharEditor();
-});
-
-lofiFechar.addEventListener("click", () => fecharEditor());
-
-lofiEditor.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
-    e.preventDefault();
-    fecharEditor();
-  }
-});
-
-desenharVolume();
-desenharLofi();
 
 // ---------- help: the shortcut list (Help ▸ Keyboard Shortcuts) ----------
 
 /// All the app's shortcuts, by topic. Written by hand, not taken from the menu:
-/// half of them aren't menu items (`nossoAtalho`'s, the differ's), and the
+/// half of them aren't menu items (`ourShortcut`'s, the differ's), and the
 /// list also has to say what each one does. Changed a shortcut, change it here.
 /// More than one key for the same thing becomes more than one key on the row.
-const ATALHOS: { grupo: string; itens: [string | string[], string][] }[] = [
+const SHORTCUTS: { group: string; items: [string | string[], string][] }[] = [
   {
-    grupo: T.atAbas,
-    itens: [
-      ["⌘T", T.atNovaAba],
-      ["⌘⇧T", T.atReabrirAAbaFechada],
-      ["⌘⇧]", T.atProximaAba],
-      ["⌘⇧[", T.atAbaAnterior],
-      ["⌘`", T.atDiffDaBranchAAbaPresa],
-      ["⌘1 … ⌘8", T.atIrParaAAbaDeNumero],
-      ["⌘9", T.atUltimaAba],
+    group: T.scTabs,
+    items: [
+      ["⌘T", T.scNewTab],
+      ["⌘⇧T", T.scReopenClosed],
+      ["⌘⇧]", T.scNextTab],
+      ["⌘⇧[", T.scPreviousTab],
+      ["⌘`", T.scBranchDiffPinned],
+      ["⌘1 … ⌘8", T.scTabByNumber],
+      ["⌘9", T.scLastTab],
     ],
   },
   {
-    grupo: T.atPaineis,
-    itens: [
-      ["⌘D", T.atDividirAoLado],
-      ["⌘⇧D", T.atDividirAbaixo],
-      ["⌘⌥ ← ↑ → ↓", T.atIrParaOPainelNaquelaDirecao],
-      ["⌘⇧A", T.atIrParaOPainelQueEsperaPorVoce],
-      ["⌘⇧↩", T.atMaximizarOPainelOuRecolherDeVolta],
-      ["⌘⇧C", T.atAlternarEntreOChatEOTerminalDoClaude],
-      ["⌘⇧K", T.atCompactarAConversaDoClaudeCompact],
-      [["⌘⇧↑", "⌘⇧↓"], T.atIrParaASuaMensagemAnteriorOuSeguinte],
+    group: T.scPanels,
+    items: [
+      ["⌘D", T.scSplitRight],
+      ["⌘⇧D", T.scSplitDown],
+      ["⌘⌥ ← ↑ → ↓", T.scPanelInDirection],
+      ["⌘⇧A", T.scPanelWaiting],
+      ["⌘⇧↩", T.scMaximizePanel],
+      ["⌘⇧C", T.scToggleChat],
+      ["⌘⇧K", T.scCompact],
+      [["⌘⇧↑", "⌘⇧↓"], T.scPreviousNextMessage],
       // ⌃D is end of input: the shell exits, and the panel goes along with it.
-      [["⌘W", "⌃D"], T.atFecharOPainelOUltimoFechaAAba],
+      [["⌘W", "⌃D"], T.scClosePanel],
     ],
   },
   {
-    grupo: T.atTerminal,
-    itens: [
-      ["⌘K", T.atLimparATela],
-      ["⌘C", T.atCopiar],
-      ["⌘V", T.atColar],
-      ["⌘⇧V", T.atColarCaminhoDoArquivoCopiado],
-      ["⌘A", T.atSelecionarTudo],
+    group: T.scTerminal,
+    items: [
+      ["⌘K", T.scClearScreen],
+      ["⌘C", T.scCopy],
+      ["⌘V", T.scPaste],
+      ["⌘⇧V", T.scPastePath],
+      ["⌘A", T.scSelectAll],
     ],
   },
   {
-    grupo: T.atDiffDaBranch,
-    itens: [
-      ["V", T.atMarcarOArquivoComoVisto],
-      ["S", T.atPorOuTirarOArquivoDoIndice],
-      ["⇧S", T.atPorOuTirarAPastaDoArquivoDoIndice],
-      ["A", T.atPorOuTirarTudoDoIndice],
-      ["⌘↩", T.atCommitar],
-      ["⌘R", T.atRecarregarODiff],
+    group: T.scBranchDiff,
+    items: [
+      ["V", T.scMarkViewed],
+      ["S", T.scStageFile],
+      ["⇧S", T.scStageFolder],
+      ["A", T.scStageAll],
+      ["⌘↩", T.scCommit],
+      ["⌘R", T.scReloadDiff],
     ],
   },
   {
-    grupo: T.atApp,
-    itens: [
-      ["⌘,", T.atPreferencias],
-      ["⌘E", T.atEscutarDitado],
-      ["⌘⇧P", T.atTocarOuPausarARadio],
-      ["⌘/", T.atEstaLista],
-      ["⌘M", T.atMinimizar],
-      ["⌃⌘F", T.atTelaCheia],
-      ["⌘H", T.atOcultarOTermiau],
-      ["⌘Q", T.atSairPerguntaAntes],
+    group: T.scApp,
+    items: [
+      ["⌘,", T.scPreferences],
+      ["⌘/", T.scThisList],
+      ["⌘M", T.scMinimize],
+      ["⌃⌘F", T.scFullScreen],
+      ["⌘H", T.scHideTermiau],
+      ["⌘Q", T.scQuit],
     ],
   },
 ];
 
-/// The same shell as the station picker — dark backdrop, box in the middle, esc
+/// The shared dialog shell (see ui.ts) — dark backdrop, box in the middle, esc
 /// closes —, with the shortcut list inside.
-const ajudaEl = elemento("div", "lofi-editor");
-ajudaEl.hidden = true;
-const ajudaCaixa = elemento("div", "lofi-caixa ajuda-caixa");
-ajudaCaixa.tabIndex = -1;
-const ajudaCabeca = elemento("div", "lofi-cabeca");
-const ajudaTitulo = elemento("span", "lofi-cabeca-titulo");
-ajudaTitulo.textContent = T.atalhosDoTeclado;
-const ajudaFechar = botaoLofi("lofi-fechar", ICONE_FECHAR_DIALOGO, T.fecharEsc);
-ajudaCabeca.append(ajudaTitulo, ajudaFechar);
-const ajudaLista = elemento("div", "ajuda-lista");
-for (const { grupo, itens } of ATALHOS) {
-  const secao = elemento("section", "ajuda-grupo");
-  const nome = elemento("h3", "ajuda-grupo-nome");
-  nome.textContent = grupo;
-  secao.append(nome);
-  for (const [tecla, oque] of itens) {
-    const linha = elemento("div", "ajuda-linha");
-    const teclas = elemento("span", "ajuda-teclas");
-    for (const t of Array.isArray(tecla) ? tecla : [tecla]) {
-      const k = elemento("kbd", "ajuda-tecla");
+const helpEl = element("div", "dialog");
+helpEl.hidden = true;
+const helpBox = element("div", "dialog-box help-box");
+helpBox.tabIndex = -1;
+const helpHead = element("div", "dialog-header");
+const helpTitle = element("span", "dialog-title");
+helpTitle.textContent = T.keyboardShortcuts;
+const helpClose = footerButton("dialog-close", CLOSE_DIALOG_ICON, T.closeEsc);
+helpHead.append(helpTitle, helpClose);
+const helpList = element("div", "help-list");
+
+function shortcutGroup(group: string, items: [string | string[], string][]): HTMLElement {
+  const section = element("section", "help-group");
+  const name = element("h3", "help-group-name");
+  name.textContent = group;
+  section.append(name);
+  for (const [keyOf, what] of items) {
+    const line = element("div", "help-line");
+    const keys = element("span", "help-keys");
+    for (const t of Array.isArray(keyOf) ? keyOf : [keyOf]) {
+      const k = element("kbd", "help-key");
       k.textContent = t;
-      teclas.append(k);
+      keys.append(k);
     }
-    const d = elemento("span", "ajuda-oque");
-    d.textContent = oque;
-    linha.append(d, teclas);
-    secao.append(linha);
+    const d = element("span", "help-what");
+    d.textContent = what;
+    line.append(d, keys);
+    section.append(line);
   }
-  ajudaLista.append(secao);
+  return section;
 }
-ajudaCaixa.append(ajudaCabeca, ajudaLista);
-ajudaEl.appendChild(ajudaCaixa);
-document.body.appendChild(ajudaEl);
+
+for (const { group, items } of SHORTCUTS) helpList.append(shortcutGroup(group, items));
+helpBox.append(helpHead, helpList);
+helpEl.appendChild(helpBox);
+document.body.appendChild(helpEl);
+
+/// The active plugins' shortcuts, in a group of their own at the end. Redrawn on every
+/// plugin reload; with none, the group goes away.
+let pluginShortcuts: HTMLElement | undefined;
+
+function setPluginShortcuts(rows: [string, string][]) {
+  pluginShortcuts?.remove();
+  pluginShortcuts = rows.length ? shortcutGroup(T.shortcutsPlugins, rows) : undefined;
+  if (pluginShortcuts) helpList.append(pluginShortcuts);
+}
+
+// ---------- plugins (see src/plugins/host.ts) ----------
+
+/// Who wants to know the user typed in a panel: plugins, through
+/// `ctx.terminal.onUserInput` (dictation cancels its auto-Enter on it).
+const userInputListeners = new Set<() => void>();
+
+const plugins = createPluginHost({
+  language: language(),
+  focusedPanel: () => {
+    const leaf = active?.focus;
+    if (!leaf) return undefined;
+    return {
+      write: (text) => void invoke("pty_write", { id: leaf.id, data: text }).catch((e) => jlog(`plugin pty_write: ${e}`)),
+      isAlive: () => !leaf.dead,
+    };
+  },
+  onUserInput: (listener) => {
+    userInputListeners.add(listener);
+    return { dispose: () => void userInputListeners.delete(listener) };
+  },
+  log: (m) => void jlog(m),
+  restoreFocus: () => {
+    if (active?.focus && !inDiff) focusLeaf(active.focus);
+  },
+  closeLabel: T.closeEsc,
+  setShortcuts: setPluginShortcuts,
+  ask: ({ title, text, confirm, cancel }) =>
+    ask("plugin", { title: title, text: text, confirm: confirm, cancel: cancel }),
+  texts: {
+    cancel: T.cancel,
+    ok: T.ok,
+    installTitle: T.installPluginTitle,
+    installText: T.installPluginText,
+    installConfirm: T.installPluginConfirm,
+    installedTitle: T.pluginInstalledTitle,
+    installed: T.pluginInstalled,
+    notInstalledTitle: T.pluginNotInstalledTitle,
+    notInstalled: T.pluginNotInstalled,
+  },
+});
 
 /// ⌘/ again with the list open closes it: it is the same key that brought it.
-function alternarAjuda() {
-  if (!ajudaEl.hidden) return fecharAjuda();
-  ajudaEl.hidden = false;
-  ajudaCaixa.focus({ preventScroll: true });
+function toggleHelp() {
+  if (!helpEl.hidden) return closeHelp();
+  helpEl.hidden = false;
+  helpBox.focus({ preventScroll: true });
 }
 
-function fecharAjuda() {
-  ajudaEl.hidden = true;
-  if (ativa?.foco && !noDiff) focar(ativa.foco);
+function closeHelp() {
+  helpEl.hidden = true;
+  if (active?.focus && !inDiff) focusLeaf(active.focus);
 }
 
-ajudaEl.addEventListener("mousedown", (e) => {
-  if (e.target === ajudaEl) fecharAjuda();
+helpEl.addEventListener("mousedown", (e) => {
+  if (e.target === helpEl) closeHelp();
 });
-ajudaFechar.addEventListener("click", () => fecharAjuda());
-ajudaEl.addEventListener("keydown", (e) => {
+helpClose.addEventListener("click", () => closeHelp());
+helpEl.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     e.preventDefault();
-    fecharAjuda();
+    closeHelp();
   }
 });
 
@@ -6780,410 +5809,410 @@ ajudaEl.addEventListener("keydown", (e) => {
 
 /// A panel's snapshot: where it was and, if a Claude was running in it,
 /// which session. It is what goes to disk and what ⌘⇧T keeps of a closed tab.
-type NoSalvo =
-  | { tipo: "folha"; cwd: string | null; claude?: string }
-  | { tipo: "divisao"; eixo: Eixo; fracao: number; filhos: [NoSalvo, NoSalvo] };
+type SavedNode =
+  | { kind: "leaf"; cwd: string | null; claude?: string }
+  | { kind: "split"; axis: Axis; fraction: number; children: [SavedNode, SavedNode] };
 
-type AbaSalva = {
-  raiz: NoSalvo;
+type SavedTab = {
+  root: SavedNode;
   /// The focused panel, by its position among the tree's leaves.
-  foco: number;
+  focus: number;
 };
 
 /// Something ⌘⇧T brings back: a whole tab, or a single panel — with the split it was in
 /// (axis and share), to reopen beside the panel with the keyboard.
-type Fechada =
-  | { aba: AbaSalva }
-  | { painel: Extract<NoSalvo, { tipo: "folha" }>; eixo: Eixo; fracao: number };
+type Closed =
+  | { tab: SavedTab }
+  | { panel: Extract<SavedNode, { kind: "leaf" }>; axis: Axis; fraction: number };
 
 /// The last closed tabs and panels, the most recent at the end. They go to disk with the
 /// session: after a crash or a `kill`, ⌘⇧T still brings them back.
-const fechadas: Fechada[] = [];
-const MAX_FECHADAS = 10;
+const closed: Closed[] = [];
+const MAX_CLOSED = 10;
 
-function guardarFechada(f: Fechada) {
-  fechadas.push(f);
-  if (fechadas.length > MAX_FECHADAS) fechadas.shift();
-  agendarSalvar();
+function storeClosed(f: Closed) {
+  closed.push(f);
+  if (closed.length > MAX_CLOSED) closed.shift();
+  scheduleSave();
 }
 
-function fechadaSalva(x: unknown): Fechada | undefined {
-  const f = x as { aba?: { raiz?: unknown; foco?: unknown }; painel?: unknown; eixo?: unknown; fracao?: unknown } | null;
+function savedClosed(x: unknown): Closed | undefined {
+  const f = x as { tab?: { root?: unknown; focus?: unknown }; panel?: unknown; axis?: unknown; fraction?: unknown } | null;
   if (!f || typeof f !== "object") return;
-  if (f.aba) {
-    const raiz = noSalvo(f.aba.raiz);
-    return raiz && { aba: { raiz, foco: typeof f.aba.foco === "number" ? f.aba.foco : 0 } };
+  if (f.tab) {
+    const root = savedNode(f.tab.root);
+    return root && { tab: { root, focus: typeof f.tab.focus === "number" ? f.tab.focus : 0 } };
   }
-  const painel = noSalvo(f.painel);
-  if (painel?.tipo !== "folha") return;
-  const fracao = typeof f.fracao === "number" && Number.isFinite(f.fracao) ? Math.min(0.9, Math.max(0.1, f.fracao)) : 0.5;
-  return { painel, eixo: f.eixo === "abaixo" ? "abaixo" : "lado", fracao };
+  const panel = savedNode(f.panel);
+  if (panel?.kind !== "leaf") return;
+  const fraction = typeof f.fraction === "number" && Number.isFinite(f.fraction) ? Math.min(0.9, Math.max(0.1, f.fraction)) : 0.5;
+  return { panel, axis: f.axis === "below" ? "below" : "side", fraction };
 }
 
 /// The id ends up on a command line typed into the shell, and came from a socket
 /// any of the user's processes can write to: only what looks like an id gets through.
-const ID_SESSAO = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+const ID_SESSION = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
-function fotografar(no: No): NoSalvo {
-  if (no.tipo === "divisao") {
+function snapshot(no: TreeNode): SavedNode {
+  if (no.kind === "split") {
     return {
-      tipo: "divisao",
-      eixo: no.eixo,
-      fracao: no.fracao,
-      filhos: [fotografar(no.filhos[0]), fotografar(no.filhos[1])],
+      kind: "split",
+      axis: no.axis,
+      fraction: no.fraction,
+      children: [snapshot(no.children[0]), snapshot(no.children[1])],
     };
   }
   // The session's folder before the shell's: with Claude in front, the two
   // are usually the same, but the session's is what `--resume` requires.
-  return { tipo: "folha", cwd: no.claude?.pasta ?? no.barra?.pasta ?? null, claude: no.claude?.sessao };
+  return { kind: "leaf", cwd: no.claude?.folder ?? no.bar?.folder ?? null, claude: no.claude?.session };
 }
 
-function fotografarAba(aba: Aba): AbaSalva {
+function snapshotTab(tab: Tab): SavedTab {
   // With the keyboard in the drawer, the owner comes back focused: the drawer doesn't come back.
-  const foco = [...folhas(aba.raiz)].indexOf(aba.foco.dono ?? aba.foco);
-  return { raiz: fotografar(aba.raiz), foco: Math.max(0, foco) };
+  const focus = [...leaves(tab.root)].indexOf(tab.focus.owner ?? tab.focus);
+  return { root: snapshot(tab.root), focus: Math.max(0, focus) };
 }
 
 /// Checks the shape of what came from disk. A file from another version, or edited
 /// by hand, must not break the app's launch: whatever doesn't fit is ignored.
-function noSalvo(x: unknown): NoSalvo | undefined {
+function savedNode(x: unknown): SavedNode | undefined {
   const n = x as Partial<Record<string, unknown>> | null;
   if (!n || typeof n !== "object") return;
-  if (n.tipo === "folha") {
+  if (n.kind === "leaf") {
     return {
-      tipo: "folha",
+      kind: "leaf",
       cwd: typeof n.cwd === "string" ? n.cwd : null,
-      claude: typeof n.claude === "string" && ID_SESSAO.test(n.claude) ? n.claude : undefined,
+      claude: typeof n.claude === "string" && ID_SESSION.test(n.claude) ? n.claude : undefined,
     };
   }
-  if (n.tipo !== "divisao" || !Array.isArray(n.filhos)) return;
-  const a = noSalvo(n.filhos[0]);
-  const b = noSalvo(n.filhos[1]);
+  if (n.kind !== "split" || !Array.isArray(n.children)) return;
+  const a = savedNode(n.children[0]);
+  const b = savedNode(n.children[1]);
   if (!a || !b) return a ?? b;
-  const fracao = typeof n.fracao === "number" && Number.isFinite(n.fracao) ? n.fracao : 0.5;
+  const fraction = typeof n.fraction === "number" && Number.isFinite(n.fraction) ? n.fraction : 0.5;
   return {
-    tipo: "divisao",
-    eixo: n.eixo === "abaixo" ? "abaixo" : "lado",
-    fracao: Math.min(0.9, Math.max(0.1, fracao)),
-    filhos: [a, b],
+    kind: "split",
+    axis: n.axis === "below" ? "below" : "side",
+    fraction: Math.min(0.9, Math.max(0.1, fraction)),
+    children: [a, b],
   };
 }
 
-function lerSessao(texto: string | null): { abas: AbaSalva[]; ativa: number; fechadas: Fechada[] } {
-  const vazia = { abas: [], ativa: 0, fechadas: [] };
-  if (!texto) return vazia;
+function readSession(text: string | null): { tabs: SavedTab[]; active: number; closed: Closed[] } {
+  const emptyOne = { tabs: [], active: 0, closed: [] };
+  if (!text) return emptyOne;
   try {
-    const dado = JSON.parse(texto) as { abas?: unknown; ativa?: unknown; fechadas?: unknown } | null;
-    if (!dado || !Array.isArray(dado.abas)) return vazia;
-    const fechadas = Array.isArray(dado.fechadas) ? dado.fechadas.flatMap((f) => fechadaSalva(f) ?? []) : [];
-    const salvas = dado.abas.flatMap((a: { raiz?: unknown; foco?: unknown } | null): AbaSalva[] => {
-      const raiz = noSalvo(a?.raiz);
-      return raiz ? [{ raiz, foco: typeof a?.foco === "number" ? a.foco : 0 }] : [];
+    const given = fromLegacy(JSON.parse(text), LEGACY_SESSION) as { tabs?: unknown; active?: unknown; closed?: unknown } | null;
+    if (!given || !Array.isArray(given.tabs)) return emptyOne;
+    const closed = Array.isArray(given.closed) ? given.closed.flatMap((f) => savedClosed(f) ?? []) : [];
+    const savedOnes = given.tabs.flatMap((a: { root?: unknown; focus?: unknown } | null): SavedTab[] => {
+      const root = savedNode(a?.root);
+      return root ? [{ root, focus: typeof a?.focus === "number" ? a.focus : 0 }] : [];
     });
-    return { abas: salvas, ativa: typeof dado.ativa === "number" ? dado.ativa : 0, fechadas: fechadas.slice(-MAX_FECHADAS) };
+    return { tabs: savedOnes, active: typeof given.active === "number" ? given.active : 0, closed: closed.slice(-MAX_CLOSED) };
   } catch (e) {
     jlog(`unreadable saved session: ${e}`);
-    return vazia;
+    return emptyOne;
   }
 }
 
 /// True until the saved tabs finish coming back. Meanwhile nothing is
 /// saved: the first tab to come back would save "one tab" over the others.
-let restaurando = true;
-let esperaSalvar: ReturnType<typeof setTimeout> | undefined;
+let restoring = true;
+let waitSave: ReturnType<typeof setTimeout> | undefined;
 
 /// Saves the current tabs. On every change, not only on quit: a crash, a
 /// `kill` or the battery dying must also find the tabs on the way back.
-function salvarSessao(): Promise<void> {
-  clearTimeout(esperaSalvar);
-  if (restaurando) return Promise.resolve();
-  const dados = JSON.stringify({
-    versao: 1,
-    abas: abas.map(fotografarAba),
-    ativa: ativa ? abas.indexOf(ativa) : 0,
-    fechadas,
+function saveSession(): Promise<void> {
+  clearTimeout(waitSave);
+  if (restoring) return Promise.resolve();
+  const data = JSON.stringify({
+    version: 1,
+    tabs: tabs.map(snapshotTab),
+    active: active ? tabs.indexOf(active) : 0,
+    closed,
   });
-  return invoke<void>("sessao_salvar", { dados }).catch((e) => {
-    void jlog(`sessao_salvar: ${e}`);
+  return invoke<void>("session_save", { data: data }).catch((e) => {
+    void jlog(`session_save: ${e}`);
   });
 }
 
-function agendarSalvar() {
-  clearTimeout(esperaSalvar);
-  esperaSalvar = setTimeout(() => void salvarSessao(), 500);
+function scheduleSave() {
+  clearTimeout(waitSave);
+  waitSave = setTimeout(() => void saveSession(), 500);
 }
 
-function primeiraFolha(no: NoSalvo): Extract<NoSalvo, { tipo: "folha" }> {
-  return no.tipo === "folha" ? no : primeiraFolha(no.filhos[0]);
+function firstLeaf(no: SavedNode): Extract<SavedNode, { kind: "leaf" }> {
+  return no.kind === "leaf" ? no : firstLeaf(no.children[0]);
 }
 
 /// Puts the panel back where it was. If there is a Claude session, the
 /// `--resume` line is typed into the shell, as play types its own: that is how
 /// `claude` comes from your .zshrc's PATH. The shell is still starting — the line
 /// waits in the terminal and it reads it when it reaches the prompt.
-function retomar(folha: Folha, salvo: Extract<NoSalvo, { tipo: "folha" }>) {
-  // Until `carregarProjeto` responds: quitting before that must not save the
+function resume(leaf: Leaf, savedItem: Extract<SavedNode, { kind: "leaf" }>) {
+  // Until `loadProject` responds: quitting before that must not save the
   // panel without a folder.
-  if (folha.barra && salvo.cwd) folha.barra.pasta ??= salvo.cwd;
-  if (!salvo.claude) return;
+  if (leaf.bar && savedItem.cwd) leaf.bar.folder ??= savedItem.cwd;
+  if (!savedItem.claude) return;
   // Marked right away, not only when the hook reports: quitting before the resumed
   // session's first event must not forget it.
-  folha.claude = {
-    nome: salvo.cwd?.split("/").filter(Boolean).pop() || "claude",
-    estado: "ocioso",
-    sessao: salvo.claude,
-    pasta: salvo.cwd ?? undefined,
+  leaf.claude = {
+    name: savedItem.cwd?.split("/").filter(Boolean).pop() || "claude",
+    state: "idle",
+    session: savedItem.claude,
+    folder: savedItem.cwd ?? undefined,
   };
-  invoke("pty_write", { id: folha.id, data: `claude --resume ${salvo.claude}\r` }).catch((e) =>
+  invoke("pty_write", { id: leaf.id, data: `claude --resume ${savedItem.claude}\r` }).catch((e) =>
     jlog(`retomar: ${e}`),
   );
 }
 
 /// Rebuilds the saved tree from a panel: each split divides the panel, the
-/// first child stays in it and the second goes to the new one. `feitas`
+/// first child stays in it and the second goes to the new one. `doneOnes`
 /// comes out in leaf order, which is the order the focus was saved in.
-async function montar(aba: Aba, folha: Folha, salvo: NoSalvo, feitas: Folha[]) {
-  if (salvo.tipo === "folha") {
-    retomar(folha, salvo);
-    feitas.push(folha);
+async function build(tab: Tab, leaf: Leaf, savedItem: SavedNode, doneOnes: Leaf[]) {
+  if (savedItem.kind === "leaf") {
+    resume(leaf, savedItem);
+    doneOnes.push(leaf);
     return;
   }
-  const [a, b] = salvo.filhos;
-  const nova = await dividirFolha(aba, folha, salvo.eixo, primeiraFolha(b).cwd, salvo.fracao);
-  await montar(aba, folha, a, feitas);
+  const [a, b] = savedItem.children;
+  const newOne = await splitLeaf(tab, leaf, savedItem.axis, firstLeaf(b).cwd, savedItem.fraction);
+  await build(tab, leaf, a, doneOnes);
   // No shell for the second side, the first keeps the whole space.
-  if (nova) await montar(aba, nova, b, feitas);
+  if (newOne) await build(tab, newOne, b, doneOnes);
 }
 
 /// Brings a tab back: the panels in the folders they were in, the layout as it
 /// was, and the Claude sessions resumed.
-async function reabrir(salva: AbaSalva): Promise<Aba | undefined> {
-  const aba = await novaAba(primeiraFolha(salva.raiz).cwd);
-  if (!aba) return;
-  ocupado = true;
+async function reopen(saved: SavedTab): Promise<Tab | undefined> {
+  const tab = await newTab(firstLeaf(saved.root).cwd);
+  if (!tab) return;
+  busy = true;
   try {
-    const feitas: Folha[] = [];
-    await montar(aba, aba.foco, salva.raiz, feitas);
-    focar(feitas[salva.foco] ?? feitas[0]);
+    const doneOnes: Leaf[] = [];
+    await build(tab, tab.focus, saved.root, doneOnes);
+    focusLeaf(doneOnes[saved.focus] ?? doneOnes[0]);
   } finally {
-    ocupado = false;
+    busy = false;
   }
-  return aba;
+  return tab;
 }
 
 /// ⌘⇧T: the last closed tab or panel comes back, like in the browser. A panel
 /// reopens beside the one with the keyboard, split the way it was, its Claude resumed.
-async function reabrirFechada() {
-  const salva = fechadas.pop();
-  if (!salva) return;
-  const voltou = "aba" in salva ? !!(await reabrir(salva.aba)) : await reabrirPainel(salva);
+async function reopenClosed() {
+  const saved = closed.pop();
+  if (!saved) return;
+  const cameBack = "tab" in saved ? !!(await reopen(saved.tab)) : await reopenPanel(saved);
   // It didn't open (another shortcut in the meantime): the snapshot goes back on the stack.
-  if (!voltou) fechadas.push(salva);
-  agendarSalvar();
+  if (!cameBack) closed.push(saved);
+  scheduleSave();
 }
 
-async function reabrirPainel(salvo: Extract<Fechada, { painel: unknown }>): Promise<boolean> {
+async function reopenPanel(savedItem: Extract<Closed, { panel: unknown }>): Promise<boolean> {
   // With the diff in front, or no tab at all, it comes back as a tab of its own.
-  if (!ativa || noDiff || ocupado) return !ativa && !!(await reabrir({ raiz: salvo.painel, foco: 0 }));
-  const aba = ativa;
-  const alvo = aba.foco.dono ?? aba.foco;
-  ocupado = true;
+  if (!active || inDiff || busy) return !active && !!(await reopen({ root: savedItem.panel, focus: 0 }));
+  const tab = active;
+  const target = tab.focus.owner ?? tab.focus;
+  busy = true;
   try {
-    const nova = await dividirFolha(aba, alvo, salvo.eixo, salvo.painel.cwd, salvo.fracao);
-    if (!nova) return false;
-    retomar(nova, salvo.painel);
-    focar(nova);
+    const newOne = await splitLeaf(tab, target, savedItem.axis, savedItem.panel.cwd, savedItem.fraction);
+    if (!newOne) return false;
+    resume(newOne, savedItem.panel);
+    focusLeaf(newOne);
     return true;
   } finally {
-    ocupado = false;
+    busy = false;
   }
 }
 
 /// The last run's tabs, at app launch. With none to bring back — the
 /// first time, or the last tab was closed by hand —, opens a new one.
-async function restaurarSessao() {
-  const salva = lerSessao(await invoke<string | null>("sessao_ler").catch(() => null));
-  fechadas.push(...salva.fechadas);
+async function restoreSession() {
+  const saved = readSession(await invoke<string | null>("session_read").catch(() => null));
+  closed.push(...saved.closed);
   try {
-    for (const a of salva.abas) await reabrir(a);
-    if (!abas.length) await novaAba();
-    else ativar(abas[salva.ativa] ?? abas[0]);
+    for (const a of saved.tabs) await reopen(a);
+    if (!tabs.length) await newTab();
+    else activate(tabs[saved.active] ?? tabs[0]);
   } finally {
-    restaurando = false;
-    agendarSalvar();
+    restoring = false;
+    scheduleSave();
   }
 }
 
 // ---------- the dialog ----------
 
-/// A question in the middle of the window, in the same shell as the station picker. The
+/// A question in the middle of the window, in the shared dialog shell (see ui.ts). The
 /// confirm button is born with the keyboard: space or ↩ confirm, esc
-/// cancels. Without `cancelar` it is just a notice, with one button.
-/// `alternativa`: a third answer, on the left (the "Discard" beside "Cancel" and "Save").
-type Pergunta = { titulo: string; texto: string; confirmar: string; cancelar?: string; alternativa?: string };
-type Resposta = "sim" | "nao" | "alternativa";
+/// cancels. Without `cancel` it is just a notice, with one button.
+/// `alternative`: a third answer, on the left (the "Discard" beside "Cancel" and "Save").
+type Question = { title: string; text: string; confirm: string; cancel?: string; alternative?: string };
+type Answer = "yes" | "no" | "alternative";
 
-const perguntaEl = elemento("div", "lofi-editor");
-perguntaEl.hidden = true;
-const perguntaCaixa = elemento("div", "lofi-caixa pergunta-caixa");
-perguntaCaixa.setAttribute("role", "alertdialog");
-const perguntaTitulo = elemento("span", "lofi-cabeca-titulo");
-const perguntaTexto = elemento("p", "pergunta-texto");
-const perguntaBotoes = elemento("div", "pergunta-botoes");
-const perguntaAlternativa = elemento("button", "pergunta-btn pergunta-alternativa");
-const perguntaNao = elemento("button", "pergunta-btn");
-const perguntaSim = elemento("button", "pergunta-btn pergunta-sim");
-perguntaBotoes.append(perguntaAlternativa, perguntaNao, perguntaSim);
-perguntaCaixa.append(perguntaTitulo, perguntaTexto, perguntaBotoes);
-perguntaEl.appendChild(perguntaCaixa);
-document.body.appendChild(perguntaEl);
+const questionEl = element("div", "dialog");
+questionEl.hidden = true;
+const questionBox = element("div", "dialog-box question-box");
+questionBox.setAttribute("role", "alertdialog");
+const questionTitle = element("span", "dialog-title");
+const questionText = element("p", "question-text");
+const questionButtons = element("div", "question-buttons");
+const questionAlternative = element("button", "question-btn question-alternative");
+const questionNot = element("button", "question-btn");
+const questionYes = element("button", "question-btn question-yes");
+questionButtons.append(questionAlternative, questionNot, questionYes);
+questionBox.append(questionTitle, questionText, questionButtons);
+questionEl.appendChild(questionBox);
+document.body.appendChild(questionEl);
 
 /// The one on screen: which it is and how to answer it.
-let perguntaAberta: { chave: string; promessa: Promise<Resposta>; responder: (r: Resposta) => void } | undefined;
+let questionOpen: { key: string; promise: Promise<Answer>; reply: (r: Answer) => void } | undefined;
 
-/// `chave` says which question it is. The same one, asked again with the box open (a
+/// `key` says which question it is. The same one, asked again with the box open (a
 /// second ⌘Q), only refocuses the keyboard; another takes its place, and the previous one is
 /// answered with "no".
-function perguntar(chave: string, p: Pergunta): Promise<boolean> {
-  return escolher(chave, p).then((r) => r === "sim");
+function ask(key: string, p: Question): Promise<boolean> {
+  return choose(key, p).then((r) => r === "yes");
 }
 
-/// `perguntar` with the third answer: which of the three buttons it was.
-function escolher(chave: string, p: Pergunta): Promise<Resposta> {
-  if (perguntaAberta?.chave === chave) {
-    perguntaSim.focus();
-    return perguntaAberta.promessa;
+/// `ask` with the third answer: which of the three buttons it was.
+function choose(key: string, p: Question): Promise<Answer> {
+  if (questionOpen?.key === key) {
+    questionYes.focus();
+    return questionOpen.promise;
   }
-  perguntaAberta?.responder("nao");
+  questionOpen?.reply("no");
 
-  const rotulo = (b: HTMLButtonElement, texto: string, tecla: string) => {
+  const label = (b: HTMLButtonElement, text: string, keyOf: string) => {
     const k = document.createElement("kbd");
-    k.textContent = tecla;
-    b.replaceChildren(texto, k);
+    k.textContent = keyOf;
+    b.replaceChildren(text, k);
   };
-  perguntaTitulo.textContent = p.titulo;
-  perguntaTexto.textContent = p.texto;
-  rotulo(perguntaSim, p.confirmar, "↩");
-  perguntaNao.hidden = !p.cancelar;
-  if (p.cancelar) rotulo(perguntaNao, p.cancelar, "esc");
-  perguntaAlternativa.hidden = !p.alternativa;
-  perguntaAlternativa.textContent = p.alternativa ?? "";
+  questionTitle.textContent = p.title;
+  questionText.textContent = p.text;
+  label(questionYes, p.confirm, "↩");
+  questionNot.hidden = !p.cancel;
+  if (p.cancel) label(questionNot, p.cancel, "esc");
+  questionAlternative.hidden = !p.alternative;
+  questionAlternative.textContent = p.alternative ?? "";
 
-  let responder!: (r: Resposta) => void;
-  const promessa = new Promise<Resposta>((resolve) => {
-    responder = (sim) => {
-      if (perguntaAberta?.promessa !== promessa) return;
-      perguntaAberta = undefined;
-      perguntaEl.hidden = true;
+  let reply!: (r: Answer) => void;
+  const promise = new Promise<Answer>((resolve) => {
+    reply = (yes) => {
+      if (questionOpen?.promise !== promise) return;
+      questionOpen = undefined;
+      questionEl.hidden = true;
       // The keyboard goes back where it was — a panel, or the diff tab.
-      if (noDiff) presa?.quadro.contentWindow?.focus();
-      else if (ativa?.foco) focar(ativa.foco);
-      resolve(sim);
+      if (inDiff) pinned?.frame.contentWindow?.focus();
+      else if (active?.focus) focusLeaf(active.focus);
+      resolve(yes);
     };
   });
-  perguntaAberta = { chave, promessa, responder };
-  perguntaEl.hidden = false;
-  perguntaSim.focus();
-  return promessa;
+  questionOpen = { key, promise, reply };
+  questionEl.hidden = false;
+  questionYes.focus();
+  return promise;
 }
 
-perguntaEl.addEventListener("mousedown", (e) => {
-  if (e.target === perguntaEl) perguntaAberta?.responder("nao");
+questionEl.addEventListener("mousedown", (e) => {
+  if (e.target === questionEl) questionOpen?.reply("no");
 });
-perguntaAlternativa.addEventListener("click", () => perguntaAberta?.responder("alternativa"));
-perguntaNao.addEventListener("click", () => perguntaAberta?.responder("nao"));
-perguntaSim.addEventListener("click", () => perguntaAberta?.responder("sim"));
-perguntaEl.addEventListener("keydown", (e) => {
+questionAlternative.addEventListener("click", () => questionOpen?.reply("alternative"));
+questionNot.addEventListener("click", () => questionOpen?.reply("no"));
+questionYes.addEventListener("click", () => questionOpen?.reply("yes"));
+questionEl.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     e.preventDefault();
-    perguntaAberta?.responder("nao");
+    questionOpen?.reply("no");
     return;
   }
   // The keyboard doesn't leave the box: tab and the arrows only move between the
   // buttons on screen. Space and ↩ belong to the focused button itself.
   if (e.key === "Tab" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
     e.preventDefault();
-    const botoes = [perguntaAlternativa, perguntaNao, perguntaSim].filter((b) => !b.hidden);
-    const passo = e.key === "ArrowLeft" || (e.key === "Tab" && e.shiftKey) ? -1 : 1;
-    const i = botoes.indexOf(document.activeElement as HTMLButtonElement);
-    botoes[(i + passo + botoes.length) % botoes.length]?.focus();
+    const buttons = [questionAlternative, questionNot, questionYes].filter((b) => !b.hidden);
+    const step = e.key === "ArrowLeft" || (e.key === "Tab" && e.shiftKey) ? -1 : 1;
+    const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    buttons[(i + step + buttons.length) % buttons.length]?.focus();
   }
 });
 
 // ---------- quitting: ⌘Q asks first ----------
 
-let saindo = false;
+let leaving = false;
 
 /// Saves the tabs and quits. The save's `await` is what guarantees the
 /// last change (a `cd`, a new session) reached the disk before the
 /// process goes away.
-async function sair() {
-  if (saindo) return;
-  saindo = true;
-  await salvarSessao();
-  await invoke("sair").catch((e) => jlog(`sair: ${e}`));
+async function quit() {
+  if (leaving) return;
+  leaving = true;
+  await saveSession();
+  await invoke("quit").catch((e) => jlog(`quit: ${e}`));
 }
 
 /// Quitting takes away all the shells and whatever is running in them, and ⌘Q lives
 /// next to ⌘W and ⌘A.
-async function pedirSair() {
-  if (saindo) return;
-  const paineis = abas.flatMap((a) => [...folhas(a.raiz)]);
-  const claudes = paineis.filter((f) => f.claude?.sessao).length;
-  const quantas = T.abaFecha(abas.length);
-  const restaura = await invoke<boolean>("restaurar_ligado").catch(() => false);
-  const volta = !restaura
-    ? T.naoVoltam
+async function askQuit() {
+  if (leaving) return;
+  const panels = tabs.flatMap((a) => [...leaves(a.root)]);
+  const claudes = panels.filter((f) => f.claude?.session).length;
+  const howMany = T.tabCloses(tabs.length);
+  const restores = await invoke<boolean>("restore_enabled").catch(() => false);
+  const back = !restores
+    ? T.dontComeBack
     : claudes === 0
-      ? T.voltamNasPastas
-      : T.voltamComSessoes(claudes);
-  const sim = await perguntar("sair", {
-    titulo: T.sairDoTermiau,
-    texto: T.sairTexto(quantas, volta),
-    confirmar: T.sair,
-    cancelar: T.cancelar,
+      ? T.comeBackInFolders
+      : T.comeBackWithSessions(claudes);
+  const yes = await ask("quit", {
+    title: T.quitTermiau,
+    text: T.quitText(howMany, back),
+    confirm: T.quit,
+    cancel: T.cancel,
   });
-  if (sim) await sair();
+  if (yes) await quit();
 }
 
 // ---------- hooks: the link to Claude Code ----------
 
-async function instalarHooks(): Promise<boolean> {
+async function installHooks(): Promise<boolean> {
   try {
-    await invoke("hooks_instalar");
+    await invoke("hooks_install");
     return true;
   } catch (e) {
-    await perguntar("hooks", {
-      titulo: T.naoConseguiLigar,
-      texto: String(e),
-      confirmar: T.ok,
+    await ask("hooks", {
+      title: T.couldNotConnect,
+      text: String(e),
+      confirm: T.ok,
     });
     return false;
   }
 }
 
 /// The hooks are how TermIAu knows what each Claude is doing and which
-/// session it is. `pedido`: it came from the menu, and then every answer shows; at app
+/// session it is. `request`: it came from the menu, and then every answer shows; at app
 /// launch only what needs a decision shows.
-async function conferirHooks(pedido: boolean) {
-  const estado = await invoke<string>("hooks_estado").catch(() => "sem-claude");
+async function checkHooks(request: boolean) {
+  const state = await invoke<string>("hooks_state").catch(() => "no-claude");
 
-  if (estado === "sem-claude") {
-    if (pedido) {
-      await perguntar("hooks", {
-        titulo: T.naoAcheiClaude,
-        texto: T.naoAcheiClaudeTexto,
-        confirmar: T.ok,
+  if (state === "no-claude") {
+    if (request) {
+      await ask("hooks", {
+        title: T.claudeNotFound,
+        text: T.claudeNotFoundText,
+        confirm: T.ok,
       });
     }
     return;
   }
-  if (estado === "instalado") {
-    if (pedido) {
-      await perguntar("hooks", {
-        titulo: T.jaLigado,
-        texto: T.jaLigadoTexto,
-        confirmar: T.ok,
+  if (state === "installed") {
+    if (request) {
+      await ask("hooks", {
+        title: T.alreadyOn,
+        text: T.alreadyOnText,
+        confirm: T.ok,
       });
     }
     return;
@@ -7191,16 +6220,16 @@ async function conferirHooks(pedido: boolean) {
   // At launch only what was already installed is updated: whoever installed it already
   // consented, and what changes is the hook that came with the new app. Installing
   // for the first time is always a gesture of yours, in the menu.
-  if (!pedido) {
-    if (estado === "desatualizado") await invoke("hooks_instalar").catch((e) => jlog(`hooks_instalar: ${e}`));
+  if (!request) {
+    if (state === "outdated") await invoke("hooks_install").catch((e) => jlog(`hooks_install: ${e}`));
     return;
   }
 
-  if (await instalarHooks()) {
-    await perguntar("hooks", {
-      titulo: T.ligado,
-      texto: T.ligadoTexto,
-      confirmar: T.ok,
+  if (await installHooks()) {
+    await ask("hooks", {
+      title: T.on,
+      text: T.onText,
+      confirm: T.ok,
     });
   }
 }
@@ -7208,56 +6237,56 @@ async function conferirHooks(pedido: boolean) {
 /// TermIAu ▸ Restore Tabs on Open was just turned on or off. Turning it on
 /// brings the hooks along: without them the tabs come back, but without knowing which Claude
 /// session was in each panel.
-async function restaurarMudou(ligado: boolean) {
-  if (!ligado) return;
+async function restoreChanged(on: boolean) {
+  if (!on) return;
   // What is already open counts from now on.
-  await salvarSessao();
-  const estado = await invoke<string>("hooks_estado").catch(() => "sem-claude");
-  const instalou = estado === "ausente" || estado === "desatualizado" ? await instalarHooks() : false;
-  await perguntar("restaurar", {
-    titulo: T.abasVoltam,
-    texto: instalou
-      ? T.abasVoltamInstalou
-      : estado === "sem-claude"
-        ? T.abasVoltamSemClaude
-        : T.abasVoltamComSessoes,
-    confirmar: T.ok,
+  await saveSession();
+  const state = await invoke<string>("hooks_state").catch(() => "no-claude");
+  const installed = state === "missing" || state === "outdated" ? await installHooks() : false;
+  await ask("restore", {
+    title: T.tabsComeBack,
+    text: installed
+      ? T.tabsComeBackInstalled
+      : state === "no-claude"
+        ? T.tabsComeBackNoClaude
+        : T.tabsComeBackWithSessions,
+    confirm: T.ok,
   });
 }
 
-// ---------- teclado ----------
+// ---------- keyboard ----------
 
-function atalho(e: Atalho) {
+function shortcut(e: Shortcut) {
   // Navigating between panels and clearing the screen are terminal things: with the diff in
   // front there is no panel to refer to.
-  if (e.altKey && ativa && !noDiff) {
-    const alvo = vizinho(ativa.foco, e.code.slice(5) as "Left" | "Right" | "Up" | "Down");
-    if (alvo) focar(alvo);
+  if (e.altKey && active && !inDiff) {
+    const target = neighbor(active.focus, e.code.slice(5) as "Left" | "Right" | "Up" | "Down");
+    if (target) focusLeaf(target);
     return;
   }
   if (e.shiftKey) {
-    if (e.code === "KeyA") return irParaEsperando();
-    return irParaAba(e.code === "BracketRight" ? 1 : -1);
+    if (e.code === "KeyA") return goToWaiting();
+    return goToTab(e.code === "BracketRight" ? 1 : -1);
   }
 
   if (e.key === "k") {
-    if (!noDiff) ativa?.foco.term.clear();
+    if (!inDiff) active?.focus.term.clear();
     return;
   }
 
   // ⌘` is the pinned tab, and all the numbers go to the terminals. By `code`,
   // not by `key`: on ABNT2 the backtick is a dead key and `key` doesn't arrive as "`".
-  if (e.code === "Backquote") return void (presa && abrirPresa());
+  if (e.code === "Backquote") return void (pinned && openPinned());
   // ⌘9 goes to the last one, not the ninth — it is the macOS standard.
   const n = Number(e.key);
-  const alvo = n === 9 ? abas[abas.length - 1] : abas[n - 1];
-  if (alvo) ativar(alvo);
+  const target = n === 9 ? tabs[tabs.length - 1] : tabs[n - 1];
+  if (target) activate(target);
 }
 
 window.addEventListener("keydown", (e) => {
-  if (!nossoAtalho(e)) return;
+  if (!ourShortcut(e)) return;
   e.preventDefault();
-  atalho(e);
+  shortcut(e);
 });
 
 // A key pressed inside the pinned tab belongs to another document and doesn't bubble up
@@ -7265,76 +6294,76 @@ window.addEventListener("keydown", (e) => {
 // checked in `source` — no other window talks to this one.
 window.addEventListener("message", (e) => {
   // The floating preferences only say they closed; TermIAu's keys wait until then.
-  if (prefsQuadro && e.source === prefsQuadro.contentWindow) {
-    const dado = e.data as { termiauPrefsPronta?: boolean; termiauPrefsFechou?: boolean } | null;
+  if (prefsFrame && e.source === prefsFrame.contentWindow) {
+    const given = e.data as { termiauPrefsReady?: boolean; termiauPrefsClosed?: boolean } | null;
     // Shown only once drawn: loading, the page flashes white.
-    if (dado?.termiauPrefsPronta) {
-      prefsQuadro.classList.add("pronta");
-      prefsQuadro.contentWindow?.focus();
+    if (given?.termiauPrefsReady) {
+      prefsFrame.classList.add("ready");
+      prefsFrame.contentWindow?.focus();
     }
-    if (dado?.termiauPrefsFechou) fecharPreferencias();
+    if (given?.termiauPrefsClosed) closePreferences();
     return;
   }
-  if (!presa || e.source !== presa.quadro.contentWindow) return;
-  const dado = e.data as {
-    termiau?: Atalho;
+  if (!pinned || e.source !== pinned.frame.contentWindow) return;
+  const given = e.data as {
+    termiau?: Shortcut;
     termiauPronto?: boolean;
-    termiauRepoAberto?: string | null;
-    termiauQuerSessoes?: boolean;
-    termiauPedirNaSessao?: { id: string; painel: number; texto: string };
-    termiauIrAoPainel?: number;
+    termiauRepoOpen?: string | null;
+    termiauWantsSessions?: boolean;
+    termiauAskInSession?: { id: string; panel: number; text: string };
+    termiauGoToPanel?: number;
   } | null;
 
-  if (dado?.termiauQuerSessoes) return avisarSessoes(true);
-  if (dado?.termiauPedirNaSessao) {
-    const { id, painel, texto } = dado.termiauPedirNaSessao;
-    recado({ termiauPedidoFeito: { id, erro: pedirNaSessao(painel, texto) } });
+  if (given?.termiauWantsSessions) return notifySessions(true);
+  if (given?.termiauAskInSession) {
+    const { id, panel, text } = given.termiauAskInSession;
+    flash({ termiauRequestDone: { id, error: askInSession(panel, text) } });
     return;
   }
-  if (typeof dado?.termiauIrAoPainel === "number") {
-    const folha = folhaPorPainel(dado.termiauIrAoPainel);
-    const aba = folha && abaDe(folha);
-    if (folha && aba) {
-      ativar(aba);
-      focar(folha);
+  if (typeof given?.termiauGoToPanel === "number") {
+    const leaf = leafByPanel(given.termiauGoToPanel);
+    const tab = leaf && tabOf(leaf);
+    if (leaf && tab) {
+      activate(tab);
+      focusLeaf(leaf);
     }
     return;
   }
 
   // A repository was opened or closed in there: it is what lights up and dims the chip.
-  if (dado && "termiauRepoAberto" in dado) {
-    habilitarPresa(dado.termiauRepoAberto ?? null);
+  if (given && "termiauRepoOpen" in given) {
+    enablePinned(given.termiauRepoOpen ?? null);
     return;
   }
 
   // The differ reports when it starts listening. A request that arrived before
   // that was stored waiting for exactly this notice.
-  if (dado?.termiauPronto) {
-    presa.pronta = true;
-    const fila = presa.fila.splice(0);
-    for (const msg of fila) presa.quadro.contentWindow?.postMessage(msg, "*");
+  if (given?.termiauPronto) {
+    pinned.ready = true;
+    const queue = pinned.queue.splice(0);
+    for (const msg of queue) pinned.frame.contentWindow?.postMessage(msg, "*");
     // The page may have reloaded with the tab already open (a dev reload, a
-    // webview crash): it didn't see the `abrirPresa` that put it on screen.
-    recado({ termiauVisivel: noDiff });
+    // webview crash): it didn't see the `openPinned` that put it on screen.
+    flash({ termiauVisible: inDiff });
     return;
   }
 
-  if (dado?.termiau && nossoAtalho(dado.termiau)) atalho(dado.termiau);
+  if (given?.termiau && ourShortcut(given.termiau)) shortcut(given.termiau);
 });
 
 // ---------- lifecycle ----------
 
-async function ligarEventos() {
+async function wireEvents() {
   // xterm switches the cursor to the inactive style when the terminal loses focus,
   // but only rereads that when redrawing a line — and the app may go to the background
   // without the textarea getting `blur`. With nothing triggering a redraw, the little paw
   // kept blinking in a window that was no longer the top one. The window's event
   // is what knows about the background, so that is where we take the blur from.
-  await janela.onFocusChanged(({ payload: focada }) => {
-    if (!ativa || noDiff) return;
-    if (!focada) ativa.foco.term.blur();
+  await appWindow.onFocusChanged(({ payload: focused }) => {
+    if (!active || inDiff) return;
+    if (!focused) active.focus.term.blur();
     // If a click already gave the keyboard back to a panel, we don't steal it back.
-    else if (!["TEXTAREA", "INPUT"].includes(document.activeElement?.tagName ?? "")) teclado(ativa.foco);
+    else if (!["TEXTAREA", "INPUT"].includes(document.activeElement?.tagName ?? "")) keyboard(active.focus);
   });
 
   // Focus entering the pinned tab's iframe without it being on screen is theft: something in
@@ -7342,117 +6371,112 @@ async function ligarEventos() {
   // keyboard. The top window gets `blur` when focus goes down into the iframe.
   window.addEventListener("blur", () => {
     setTimeout(() => {
-      if (ativa && !noDiff && presa && document.activeElement === presa.quadro) teclado(ativa.foco);
+      if (active && !inDiff && pinned && document.activeElement === pinned.frame) keyboard(active.focus);
     });
   });
 
-  // Claude Code's hooks come in here, via a unix socket (see ouvir_hooks
-  // in Rust and hooks/termiau-evento.sh).
-  await listen<string>("claude://evento", (e) => {
+  // Claude Code's hooks come in here, via a unix socket (see listen_hooks
+  // in Rust and hooks/termiau-event.sh).
+  await listen<string>("claude://event", (e) => {
     try {
-      const bruto = JSON.parse(e.payload);
-      // `termiau ver` uses the same socket as the hooks (see hooks/termiau).
-      if (bruto && typeof bruto === "object" && "ver" in bruto) receberVer(bruto as PedidoDoSocket);
-      else if (bruto && typeof bruto === "object" && "status" in bruto) receberStatus(bruto as StatusDoSocket);
-      // `termiau progresso`, already checked by Rust (see progresso.rs).
-      else if (bruto && typeof bruto === "object" && "progresso" in bruto) receberProgresso(bruto as PlanoDoSocket);
-      else receber(bruto as EventoClaude);
+      const raw = JSON.parse(e.payload);
+      // `termiau view` uses the same socket as the hooks (see hooks/termiau).
+      if (raw && typeof raw === "object" && "view" in raw) receiveView(raw as SocketViewRequest);
+      else if (raw && typeof raw === "object" && "status" in raw) receiveStatus(raw as SocketStatus);
+      // `termiau progress`, already checked by Rust (see progress.rs).
+      else if (raw && typeof raw === "object" && "progress" in raw) receiveProgress(raw as SocketPlan);
+      else receive(raw as ClaudeEvent);
     } catch (err) {
       jlog(`unreadable claude event: ${err}`);
     }
   });
 
-  await ligarEscuta();
 
   // The bar's "+" does what ⌘T does — it is the same path, just within reach of the
   // mouse. `void` because the click doesn't wait for the tab to open.
-  const mais = document.getElementById("nova-aba");
-  mais?.addEventListener("click", () => void novaAba());
-  mais?.setAttribute("title", T.novaAbaDica);
-  mais?.setAttribute("aria-label", T.novaAba);
+  const more = document.getElementById("new-tab");
+  more?.addEventListener("click", () => void newTab());
+  more?.setAttribute("title", T.newTabHint);
+  more?.setAttribute("aria-label", T.newTab);
 
   // ⌘T, ⌘D, ⌘⇧D, ⌘⇧↩ and ⌘W arrive here: the native menu is what gets the key.
-  await listen("menu://nova-aba", () => novaAba());
-  await listen("menu://reabrir-aba", () => reabrirFechada());
-  await listen("menu://sair", () => pedirSair());
-  await listen("menu://hooks", () => conferirHooks(true));
-  await listen<boolean>("menu://restaurar", (e) => restaurarMudou(e.payload));
+  await listen("menu://new-tab", () => newTab());
+  await listen("menu://reopen-tab", () => reopenClosed());
+  await listen("menu://quit", () => askQuit());
+  await listen("menu://hooks", () => checkHooks(true));
+  await listen<boolean>("menu://restore", (e) => restoreChanged(e.payload));
   // The red button and "Close Window" also quit the app: they go through the
-  // same question. What really quits is `sair`, which doesn't ask to close the
+  // same question. What really quits is `quit`, which doesn't ask to close the
   // window — it ends the process.
-  await janela.onCloseRequested((e) => {
+  await appWindow.onCloseRequested((e) => {
     e.preventDefault();
-    void pedirSair();
+    void askQuit();
   });
-  await listen("menu://dividir-lado", () => dividir("lado"));
-  await listen("menu://dividir-abaixo", () => dividir("abaixo"));
-  await listen("menu://maximizar", () => {
-    if (ativa && !noDiff) alternarMaximizar(ativa.foco.dono ?? ativa.foco);
+  await listen("menu://split-right", () => split("side"));
+  await listen("menu://split-down", () => split("below"));
+  await listen("menu://maximize", () => {
+    if (active && !inDiff) toggleMaximize(active.focus.owner ?? active.focus);
   });
-  await listen("menu://fechar", () => {
-    if (ativa && !noDiff) fecharFolha(ativa.foco);
+  await listen("menu://close", () => {
+    if (active && !inDiff) closeLeaf(active.focus);
   });
   await listen("menu://chat", () => {
-    if (ativa && !noDiff) alternarChat(ativa.foco.dono ?? ativa.foco);
+    if (active && !inDiff) toggleChat(active.focus.owner ?? active.focus);
   });
-  await listen("menu://visor", () => {
-    if (ativa && !noDiff) alternarVisor(ativa.foco.dono ?? ativa.foco);
+  await listen("menu://viewer", () => {
+    if (active && !inDiff) toggleViewer(active.focus.owner ?? active.focus);
   });
-  await listen("menu://compactar", () => {
-    if (ativa && !noDiff) compactar(ativa.foco);
+  await listen("menu://compact", () => {
+    if (active && !inDiff) compact(active.focus);
   });
-  await listen<number>("menu://mensagem", (e) => {
-    if (ativa && !noDiff) irParaMensagem(ativa.foco.dono ?? ativa.foco, e.payload);
+  await listen<number>("menu://message", (e) => {
+    if (active && !inDiff) goToMessage(active.focus.owner ?? active.focus, e.payload);
   });
-  await listen("menu://colar-caminho", () => colarCaminho());
-  await listen("menu://preferencias", () => abrirPreferencias());
-  await listen("menu://estacoes", () => abrirEditor());
-  await listen("menu://radio", () => alternarLofi());
-  await listen("menu://atalhos", () => alternarAjuda());
+  await listen("menu://paste-path", () => pastePath());
+  await listen("menu://preferences", () => openPreferences());
+  await listen("menu://shortcuts", () => toggleHelp());
 
   // The .git of the repository open in the diff tab changed. It only passes it on: the tab
   // decides what to do with it, and it only exists after someone opens it.
-  await listen<string>("differ://mudou", (e) => {
-    if (presa?.pronta) recado({ termiauMudou: e.payload });
+  await listen<string>("differ://changed", (e) => {
+    if (pinned?.ready) flash({ termiauChanged: e.payload });
   });
 
-  await ligarArrastar();
+  await wireDrag();
 }
 
-async function abrirAbas() {
+async function openTabs() {
   // A webview reload clears the tabs but not the shells: without this they would stay
   // alive, with nobody reading, on every dev server reload.
   await invoke("pty_close_all");
   // Before the first tab: it is what puts its chip at the start of the bar, and from there
-  // it doesn't leave — `ligarArrasto` only reorders what is in the `abas` array.
-  montarMenu();
-  criarPresa();
-  await restaurarSessao();
+  // it doesn't leave — `wireDragging` only reorders what is in the `tabs` array.
+  buildMenu();
+  createPinned();
+  await restoreSession();
 }
 
-function depoisDasAbas() {
-  void conferirHooks(false);
+function afterTabs() {
+  void checkHooks(false);
 
   // Window resize: only the visible tab has a size to measure; the
-  // others adjust when they show up again (see `ativar`).
+  // others adjust when they show up again (see `activate`).
   // Watch the body, NOT the panels: fit() changes the panel and would feed the observer back.
   new ResizeObserver(() => {
-    if (!ativa || noDiff) return;
-    medir(ativa); // render local acompanha o arrasto, quadro a quadro
-    agendarSync(ativa);
+    if (!active || inDiff) return;
+    measure(active); // render local acompanha o arrasto, frame a frame
+    scheduleSync(active);
   }).observe(document.body);
 }
 
 // In a function, not loose in the module: top-level `await` doesn't pass Vite's build
 // target, and `npm run build` would break even with dev working.
-iniciar({
-  fontes: () => document.fonts.ready,
-  ligar: ligarEventos,
-  abrirAbas,
-  depois: depoisDasAbas,
-  retomarRadio: () => {
-    if (localStorage.getItem(CHAVE_TOCANDO)) tocarLofi(true);
-  },
+start({
+  fonts: () => document.fonts.ready,
+  connect: wireEvents,
+  openTabs,
+  after: afterTabs,
+  activatePlugins: () => void plugins.start(),
 });
-void ligarModoDiff();
-void ligarLimitesDoContexto();
+void wireDiffMode();
+void wireContextLimits();

@@ -1,0 +1,28 @@
+{
+  "id": "termiau.radio",
+  "name": "Radio",
+  "version": "1.0.0",
+  "author": "TermIAu",
+  "description": "Independent, community and niche internet radios in the footer, with a spectrum analyzer.",
+  "engines": { "termiau": ">=0.1.0" },
+  "main": "main.js",
+  "style": "style.css",
+  "icon": "icon.svg",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "regions": [{ "region": "statusBar", "id": "radio", "alignment": "right", "priority": 100 }],
+    "commands": [
+      {
+        "id": "toggle",
+        "title": { "en": "Play / Pause", "pt": "Tocar / Pausar" },
+        "keybinding": "CmdOrCtrl+Shift+P",
+        "menu": { "en": "Radio", "pt": "Rádio" }
+      },
+      {
+        "id": "stations",
+        "title": { "en": "Stations…", "pt": "Estações…" },
+        "menu": { "en": "Radio", "pt": "Rádio" }
+      }
+    ]
+  }
+}

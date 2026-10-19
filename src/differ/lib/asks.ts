@@ -37,7 +37,7 @@ export interface Turn {
   /** Files that couldn't be undone (someone changed them again afterwards). */
   undoKept?: string[];
   /** Sent to a session open in a panel: the answer and the edits happen there, not here. */
-  sentTo?: { painel: number; nome: string };
+  sentTo?: { panel: number; name: string };
 }
 
 export interface AskState extends Ask {
@@ -164,8 +164,8 @@ function diffText(file: FileDiff): string | null {
 /** What goes through stdin: where the snippet is, what it says, the surrounding diff and the conversation so far. */
 async function buildContext(root: string, file: FileDiff, ask: AskState, turns: Turn[]): Promise<string> {
   const parts: string[] = [];
-  const version = ask.side === "old" ? T.versaoAnteriorAntes : T.versaoNova;
-  parts.push(T.arquivoVersao(ask.side === "old" && file.oldPath ? file.oldPath : file.path, version));
+  const version = ask.side === "old" ? T.versionPreviousBefore : T.versionNew;
+  parts.push(T.fileVersion(ask.side === "old" && file.oldPath ? file.oldPath : file.path, version));
   parts.push(`${rangeLabel({ side: ask.side, startLine: ask.start, endLine: ask.end })}:`);
 
   const oid = ask.side === "new" ? file.newOid : file.oldOid;
@@ -177,23 +177,23 @@ async function buildContext(root: string, file: FileDiff, ask: AskState, turns: 
   } catch {
     // Without the content, Claude still has the path and the lines to read on its own.
   }
-  if (ask.quote) parts.push(`${T.trechoSelecionado}\n${ask.quote}`);
-  if (ask.note) parts.push(`${T.comentarioJaFeito}\n${ask.note}`);
+  if (ask.quote) parts.push(`${T.snippetSelected}\n${ask.quote}`);
+  if (ask.note) parts.push(`${T.commentAlreadyDone}\n${ask.note}`);
 
   const diff = diffText(file);
-  parts.push(diff ? `${T.diffDoArquivo}\n${diff}` : T.diffGrandeDemais);
+  parts.push(diff ? `${T.diffOfFile}\n${diff}` : T.diffTooLarge);
 
   const done = turns.filter((t) => t.answer);
   if (done.length) {
     const turnText = (t: Turn) => {
-      const lines = [`${T.pergunta} ${t.question}`, `${T.resposta} ${t.answer}`];
+      const lines = [`${T.question} ${t.question}`, `${T.answer} ${t.answer}`];
       if (t.changes?.length) {
         const files = t.changes.map((c) => c.path).join(", ");
-        lines.push(t.undone ? T.alteracoesDesfeitas(files) : T.alterou(files));
+        lines.push(t.undone ? T.changesUndone(files) : T.changedIt(files));
       }
       return lines.join("\n");
     };
-    parts.push(`${T.conversaAteAqui}\n` + done.map(turnText).join("\n\n"));
+    parts.push(`${T.conversationSoFar}\n` + done.map(turnText).join("\n\n"));
   }
   return parts.join("\n\n");
 }
@@ -203,7 +203,7 @@ async function buildContext(root: string, file: FileDiff, ask: AskState, turns: 
  * the text precise — it is what keeps the final agent from getting back an already settled discussion.
  */
 function decisionPrompt(decision: string): string {
-  return T.pedidoDoMarcador(decision);
+  return T.requestOfBookmark(decision);
 }
 
 /**
@@ -241,8 +241,8 @@ const SNIPPET_MAX_LINES = 80;
  */
 async function sessionRequest(root: string, file: FileDiff, ask: AskState, request: string): Promise<string> {
   const path = ask.side === "old" && file.oldPath ? file.oldPath : file.path;
-  const version = ask.side === "old" ? T.versaoAnteriorAntes : T.versaoNova;
-  const parts = [T.revisandoEm(path, rangeLabel({ side: ask.side, startLine: ask.start, endLine: ask.end }), version)];
+  const version = ask.side === "old" ? T.versionPreviousBefore : T.versionNew;
+  const parts = [T.reviewingIn(path, rangeLabel({ side: ask.side, startLine: ask.start, endLine: ask.end }), version)];
   let snippet = ask.quote;
   const oid = ask.side === "new" ? file.newOid : file.oldOid;
   if (!snippet && oid && ask.end - ask.start < SNIPPET_MAX_LINES) {
@@ -253,24 +253,24 @@ async function sessionRequest(root: string, file: FileDiff, ask: AskState, reque
     }
   }
   if (snippet) parts.push("```\n" + snippet + "\n```");
-  if (ask.note) parts.push(`${T.comentarioJaFeito}\n${ask.note}`);
-  parts.push(T.pedidoDoRevisor(request));
+  if (ask.note) parts.push(`${T.commentAlreadyDone}\n${ask.note}`);
+  parts.push(T.reviewerRequest(request));
   return parts.join("\n\n");
 }
 
 /** Sends the typed request to the session of the chosen panel, which edits the files there. */
-export async function sendToPanel(id: string, root: string, file: FileDiff, nome: string) {
+export async function sendToPanel(id: string, root: string, file: FileDiff, name: string) {
   const a = get(id);
   const request = a?.input.trim();
   if (!a || !request || a.running || a.panel === null) return;
-  const painel = a.panel;
+  const panel = a.panel;
   const run = `${id}:${a.turns.length}`;
   const history = a.turns;
   update(id, { turns: [...history, { question: request, edits: true }], input: "", running: run });
-  const erro = await sendToSession(painel, await sessionRequest(root, file, a, request));
+  const error = await sendToSession(panel, await sessionRequest(root, file, a, request));
   if (get(id)?.running !== run) return;
-  const turn: Turn = erro ? { question: request, error: erro } : { question: request, edits: true, sentTo: { painel, nome } };
-  update(id, { running: null, turns: [...history, turn], input: erro ? request : "" });
+  const turn: Turn = error ? { question: request, error: error } : { question: request, edits: true, sentTo: { panel, name } };
+  update(id, { running: null, turns: [...history, turn], input: error ? request : "" });
 }
 
 export function cancel(id: string) {
@@ -298,7 +298,7 @@ export async function draftNote(id: string, root: string, file: FileDiff) {
     error = String(err);
   }
   if (get(id)?.running !== run) return;
-  update(id, text ? { running: null, draft: text } : { running: null, noteError: error ?? T.modeloSemTexto });
+  update(id, text ? { running: null, draft: text } : { running: null, noteError: error ?? T.modelWithoutText });
 }
 
 export async function undo(id: string, root: string, turnIndex: number) {

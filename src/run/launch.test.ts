@@ -1,29 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { definirIdioma, idioma } from "../i18n";
-import { configsDe, lerJsonc, listaDoPlay, resolver, tarefaAntes, type Tarefa } from "./launch";
+import { setLanguage, language } from "../i18n";
+import { configsOf, readJsonc, playList, resolver, taskBefore, type Task } from "./launch";
 
 // The texts expected here are the Portuguese ones.
-const inicial = idioma();
-beforeEach(() => definirIdioma("pt"));
-afterEach(() => definirIdioma(inicial));
+const initial = language();
+beforeEach(() => setLanguage("pt"));
+afterEach(() => setLanguage(initial));
 
-const ctx = { pasta: "/w/app", home: "/Users/eu" };
+const ctx = { folder: "/w/app", home: "/Users/eu" };
 
-describe("lerJsonc", () => {
+describe("readJsonc", () => {
   it("accepts comments and trailing commas, leaving strings alone", () => {
-    const json = lerJsonc(`{
+    const json = readJsonc(`{
       // comment
-      "url": "http://x//y", /* bloco */
-      "texto": "a, ]",
-      "lista": [1, 2,],
+      "url": "http://x//y", /* block */
+      "text": "a, ]",
+      "list": [1, 2,],
     }`);
-    expect(json).toEqual({ url: "http://x//y", texto: "a, ]", lista: [1, 2] });
+    expect(json).toEqual({ url: "http://x//y", text: "a, ]", list: [1, 2] });
   });
 });
 
-describe("configsDe", () => {
+describe("configsOf", () => {
   it("keeps only configurations with a name and a type", () => {
-    const configs = configsDe(`{ "configurations": [
+    const configs = configsOf(`{ "configurations": [
       { "name": "app", "type": "dart", "request": "launch" },
       { "type": "node" },
       "lixo"
@@ -32,9 +32,9 @@ describe("configsDe", () => {
   });
 });
 
-describe("listaDoPlay", () => {
+describe("playList", () => {
   it("turns separators into group titles and drops CodeLens-only configurations", () => {
-    const configs = configsDe(`{ "configurations": [
+    const configs = configsOf(`{ "configurations": [
       { "name": "──── DEV ────", "type": "node", "program": "\${workspaceFolder}/.vscode/does-not-exist.js" },
       { "name": "Assessor (Chrome Dev)", "type": "dart" },
       { "name": "──── TESTS ────", "type": "node" },
@@ -43,8 +43,8 @@ describe("listaDoPlay", () => {
       { "name": "──── PROD ────", "type": "node" },
       { "name": "Assessor (Chrome Production)", "type": "dart" },
     ] }`);
-    const { configs: rodaveis, menu } = listaDoPlay(configs);
-    expect(rodaveis.map((c) => c.name)).toEqual(["Assessor (Chrome Dev)", "Assessor (Chrome Production)"]);
+    const { configs: runnable, menu } = playList(configs);
+    expect(runnable.map((c) => c.name)).toEqual(["Assessor (Chrome Dev)", "Assessor (Chrome Production)"]);
     expect(menu.map((m) => (typeof m === "string" ? `# ${m}` : m.name))).toEqual([
       "# DEV",
       "Assessor (Chrome Dev)",
@@ -66,26 +66,26 @@ describe("resolver", () => {
   });
 });
 
-describe("tarefaAntes", () => {
-  const tarefas: Tarefa[] = [
+describe("taskBefore", () => {
+  const tasks: Task[] = [
     { label: "gerar", type: "shell", command: "dart run build_runner build", args: ["--delete-conflicting-outputs"] },
     { type: "npm", script: "build" },
     { label: "longe", type: "process", command: "make", options: { cwd: "${workspaceFolder}/native" } },
     { label: "vigia", type: "shell", command: "tsc -w", isBackground: true },
     { label: "flutter", type: "flutter", command: "flutter" },
   ];
-  const com = (preLaunchTask?: string) => tarefaAntes({ name: "x", type: "dart", preLaunchTask }, tarefas, ctx);
+  const withTask = (preLaunchTask?: string) => taskBefore({ name: "x", type: "dart", preLaunchTask }, tasks, ctx);
 
   it("turns supported tasks into a shell line", () => {
-    expect(com()).toBeNull();
-    expect(com("gerar")).toBe("dart run build_runner build --delete-conflicting-outputs");
-    expect(com("npm: build")).toBe("npm run build");
-    expect(com("longe")).toBe("(cd /w/app/native && make)");
+    expect(withTask()).toBeNull();
+    expect(withTask("gerar")).toBe("dart run build_runner build --delete-conflicting-outputs");
+    expect(withTask("npm: build")).toBe("npm run build");
+    expect(withTask("longe")).toBe("(cd /w/app/native && make)");
   });
 
   it("refuses what it can't run", () => {
-    expect(() => com("nenhuma")).toThrow(/não está/);
-    expect(() => com("vigia")).toThrow(/segundo plano/);
-    expect(() => com("flutter")).toThrow(/tipo "flutter"/);
+    expect(() => withTask("nenhuma")).toThrow(/não está/);
+    expect(() => withTask("vigia")).toThrow(/segundo plano/);
+    expect(() => withTask("flutter")).toThrow(/tipo "flutter"/);
   });
 });

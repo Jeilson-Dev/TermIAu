@@ -1,0 +1,23 @@
+[package]
+name = "termiau-dictation"
+version = "1.0.0"
+edition = "2021"
+description = "The Dictation plugin's engine: microphone capture and local transcription with whisper.cpp"
+
+# A binary the plugin ships (see termiau.json `binaries`). The app runs it and
+# speaks newline-delimited JSON with it over stdin/stdout (see src/main.rs).
+[[bin]]
+name = "termiau-dictation"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+cpal = "0.18"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = "3.2"
+# whisper.cpp with Metal: the first build is slow.
+whisper-rs = { version = "0.16.0", features = ["metal"] }
+
+[profile.release]
+strip = true

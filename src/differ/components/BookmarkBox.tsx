@@ -6,10 +6,10 @@ import type { Bookmark } from "../types";
 import { Icon } from "./Icons";
 
 const FIX_BADGES: Record<FixStatus, { tone: string; label: string; title: string } | null> = {
-  changed: { tone: "ok", label: T.trechoAlterado, title: T.trechoAlteradoDica },
-  unchanged: { tone: "warn", label: T.trechoIntocado, title: T.trechoIntocadoDica },
-  fileUnchanged: { tone: "warn", label: T.arquivoIntocado, title: T.arquivoIntocadoDica },
-  lost: { tone: "warn", label: T.naoLocalizado, title: T.naoLocalizadoDica },
+  changed: { tone: "ok", label: T.snippetChanged, title: T.snippetChangedHint },
+  unchanged: { tone: "warn", label: T.snippetUntouched, title: T.snippetUntouchedHint },
+  fileUnchanged: { tone: "warn", label: T.fileUntouched, title: T.fileUntouchedHint },
+  lost: { tone: "warn", label: T.notLocated, title: T.notLocatedHint },
   new: null,
 };
 
@@ -28,7 +28,7 @@ export function ResolveButton({ resolved, size, onToggle }: { resolved: boolean;
   return (
     <button
       className={resolved ? "icon-btn resolve on" : "icon-btn resolve"}
-      title={resolved ? T.resolvidoDica : T.marcarResolvido}
+      title={resolved ? T.resolvedHint : T.markResolved}
       aria-pressed={resolved}
       onClick={(e) => {
         e.stopPropagation();
@@ -42,7 +42,7 @@ export function ResolveButton({ resolved, size, onToggle }: { resolved: boolean;
 
 /** Copies the bookmark as a prompt-ready reference, confirming with a check for a moment. */
 /** The "copied" that flashes for a moment and goes back to normal, for both copy buttons. */
-function useCopiar(texto: string): [boolean, (e: { stopPropagation(): void }) => void] {
+function useCopy(text: string): [boolean, (e: { stopPropagation(): void }) => void] {
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -51,21 +51,21 @@ function useCopiar(texto: string): [boolean, (e: { stopPropagation(): void }) =>
     return () => clearTimeout(timer);
   }, [copied]);
 
-  const copiar = (e: { stopPropagation(): void }) => {
+  const copy = (e: { stopPropagation(): void }) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(texto).then(() => setCopied(true));
+    navigator.clipboard.writeText(text).then(() => setCopied(true));
   };
-  return [copied, copiar];
+  return [copied, copy];
 }
 
 export function CopyReferenceButton({ reference, size }: { reference: string; size?: number }) {
-  const [copied, copiar] = useCopiar(reference);
+  const [copied, copy] = useCopy(reference);
 
   return (
     <button
       className={copied ? "icon-btn copied" : "icon-btn"}
-      title={T.copiarReferencia}
-      onClick={copiar}
+      title={T.copyReference}
+      onClick={copy}
     >
       <Icon name={copied ? "check" : "copy"} size={size} />
     </button>
@@ -74,19 +74,19 @@ export function CopyReferenceButton({ reference, size }: { reference: string; si
 
 /** The file's path, in the diff header. The ✓ and the "Copied!" are the notice. */
 export function CopyPathButton({ path }: { path: string }) {
-  const [copied, copiar] = useCopiar(path);
+  const [copied, copy] = useCopy(path);
 
   return (
     <button
       className={copied ? "icon-btn subtle copied" : "icon-btn subtle"}
-      title={copied ? T.copiado : T.copiarCaminho}
-      aria-label={copied ? T.copiado : T.copiarCaminho}
-      onClick={copiar}
+      title={copied ? T.copied : T.copyPath}
+      aria-label={copied ? T.copied : T.copyPath}
+      onClick={copy}
     >
       <Icon key={copied ? "check" : "copy"} name={copied ? "check" : "copy"} size={14} />
       {copied && (
-        <span className="copiado-balao" role="status">
-          {T.copiado}
+        <span className="copied-bubble" role="status">
+          {T.copied}
         </span>
       )}
     </button>
@@ -95,16 +95,16 @@ export function CopyPathButton({ path }: { path: string }) {
 
 /** The same, for the whole review: every comment in a single paste. */
 export function CopyAllButton({ reference, count }: { reference: string; count: number }) {
-  const [copied, copiar] = useCopiar(reference);
+  const [copied, copy] = useCopy(reference);
 
   return (
     <button
-      className={copied ? "copiar-tudo copied" : "copiar-tudo"}
-      title={T.copiarTodosDica}
-      onClick={copiar}
+      className={copied ? "copy-all copied" : "copy-all"}
+      title={T.copyAllHint}
+      onClick={copy}
     >
       <Icon name={copied ? "check" : "copy"} size={14} />
-      {copied ? T.copiados : T.copiarTodos(count)}
+      {copied ? T.copiedOnes : T.copyAll(count)}
     </button>
   );
 }
@@ -137,14 +137,14 @@ export function BookmarkBox({
         <ResolveButton resolved={!!bookmark.resolved} onToggle={onToggleResolved} />
         <CopyReferenceButton reference={reference} />
         {onAsk && (
-          <button className="icon-btn" title={T.perguntarSobreTrecho} onClick={onAsk}>
+          <button className="icon-btn" title={T.askAboutSnippet} onClick={onAsk}>
             <Icon name="sparkle" />
           </button>
         )}
-        <button className="icon-btn" title={T.editarMarcador} onClick={onEdit}>
+        <button className="icon-btn" title={T.editBookmark} onClick={onEdit}>
           <Icon name="edit" />
         </button>
-        <button className="icon-btn danger" title={T.removerMarcador} onClick={onRemove}>
+        <button className="icon-btn danger" title={T.removeBookmark} onClick={onRemove}>
           <Icon name="trash" />
         </button>
       </div>
@@ -196,7 +196,7 @@ export function BookmarkEditor({
         autoFocus
         rows={3}
         value={note}
-        placeholder={quote ? T.melhoriaNoTrecho : T.melhoriaAqui}
+        placeholder={quote ? T.improvementInSnippet : T.improvementHere}
         onChange={(e) => setNote(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && e.shiftKey && (e.metaKey || e.ctrlKey) && onAsk) {
@@ -212,18 +212,18 @@ export function BookmarkEditor({
         }}
       />
       <div className="bookmark-actions">
-        <span className="hint">{T.salvaCancela}</span>
+        <span className="hint">{T.saveCancels}</span>
         <button className="btn" onClick={onCancel}>
-          {T.cancelar}
+          {T.cancel}
         </button>
         {onAsk && (
-          <button className="btn" title={T.perguntarAntesDica} onClick={() => onAsk(note.trim())}>
+          <button className="btn" title={T.askBeforeHint} onClick={() => onAsk(note.trim())}>
             <Icon name="sparkle" size={13} />
-            {T.perguntarAoClaude}
+            {T.askToClaude}
           </button>
         )}
         <button className="btn primary" disabled={!note.trim() || saving} onClick={submit}>
-          {initial ? T.salvar : T.adicionarMarcador}
+          {initial ? T.save : T.addBookmark}
         </button>
       </div>
     </div>

@@ -77,7 +77,7 @@ impl Repo {
     }
 }
 
-fn run(dir: &Path, args: &[&str], saidas_ok: &[i32], escreve: bool) -> Result<Vec<u8>> {
+fn run(dir: &Path, args: &[&str], ok_codes: &[i32], writes: bool) -> Result<Vec<u8>> {
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(dir);
     for cfg in STABLE_CONFIG {
@@ -86,14 +86,14 @@ fn run(dir: &Path, args: &[&str], saidas_ok: &[i32], escreve: bool) -> Result<Ve
     cmd.args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         // Never take the index lock when only reading. Writers ask for it.
-        .env("GIT_OPTIONAL_LOCKS", if escreve { "1" } else { "0" })
+        .env("GIT_OPTIONAL_LOCKS", if writes { "1" } else { "0" })
         // Safety belt for commit: the message is already in `-m`, and an
         // editor window waiting for text would hang the tab with no explanation.
         .env("GIT_EDITOR", "true")
         .env("LC_ALL", "C");
 
     let output = cmd.output()?;
-    if !saidas_ok.contains(&output.status.code().unwrap_or(-1)) {
+    if !ok_codes.contains(&output.status.code().unwrap_or(-1)) {
         // `git commit` says "nothing added to commit" on stdout, not stderr:
         // without this the most common refusal would arrive as an empty line.
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();

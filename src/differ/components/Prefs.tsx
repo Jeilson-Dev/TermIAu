@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { T } from "../../i18n/differ";
 import * as persist from "../lib/persist";
 import type { Settings } from "../lib/persist";
-import { Trechos } from "./Trechos";
+import { PluginsTab } from "./PluginsTab";
+import { Snippets } from "./Snippets";
 import { Icon } from "./Icons";
 
-type Limites = { atencao: number; perigo: number; autoCompact: boolean; autoCompactEm: number };
+type Limits = { attention: number; danger: number; autoCompact: boolean; autoCompactAt: number };
 
 /// TermIAu's preferences, opened by the menu's ⌘,.
 ///
@@ -19,19 +20,20 @@ export function Prefs({
   onDefaultTarget,
   editor,
   onEditor,
-  contexto,
-  onContexto,
+  context,
+  onContext,
   onClose,
 }: {
   defaultTarget: string;
   onDefaultTarget(branch: string): void;
   editor: string;
-  onEditor(comando: string): void;
-  contexto: Limites;
-  onContexto(limites: Limites): void;
+  onEditor(command: string): void;
+  context: Limits;
+  onContext(limits: Limits): void;
   onClose(): void;
 }) {
   const campo = useRef<HTMLInputElement>(null);
+  const [tab, setTab] = useState<"termiau" | "plugins">("termiau");
 
   // Opened by shortcut: the keyboard is already here, and the cursor must be too.
   // On mount only, and in an effect separate from the one below on purpose: `onClose`
@@ -44,114 +46,134 @@ export function Prefs({
   }, []);
 
   useEffect(() => {
-    const tecla = (e: KeyboardEvent) => {
+    const keyOf = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    window.addEventListener("keydown", tecla);
-    return () => window.removeEventListener("keydown", tecla);
+    window.addEventListener("keydown", keyOf);
+    return () => window.removeEventListener("keydown", keyOf);
   }, [onClose]);
 
   return (
-    <div className="prefs-fundo" onMouseDown={onClose}>
+    <div className="prefs-background" onMouseDown={onClose}>
       {/* A click outside closes; a click inside must not leak to it. */}
       <div className="prefs" onMouseDown={(e) => e.stopPropagation()}>
-        <header className="prefs-topo">
-          <h2>{T.preferencias}</h2>
-          <button className="icon-btn" title={T.fecharEsc} onClick={onClose}>
+        <header className="prefs-top">
+          <h2>{T.preferences}</h2>
+          <button className="icon-btn" title={T.closeEsc} onClick={onClose}>
             <Icon name="x" />
           </button>
         </header>
 
-        <div className="prefs-corpo">
-          <label className="prefs-campo">
-            <span className="prefs-nome">{T.branchPadrao}</span>
-            <input
-              ref={campo}
-              type="text"
-              value={defaultTarget}
-              placeholder="main"
-              spellCheck={false}
-              autoComplete="off"
-              onChange={(e) => onDefaultTarget(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && onClose()}
-            />
-            <span className="prefs-ajuda">{T.branchPadraoAjuda}</span>
-          </label>
-
-          <label className="prefs-campo">
-            <span className="prefs-nome">{T.editor}</span>
-            <input
-              type="text"
-              value={editor}
-              placeholder="VS Code"
-              spellCheck={false}
-              autoComplete="off"
-              onChange={(e) => onEditor(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && onClose()}
-            />
-            <span className="prefs-ajuda"><Trechos de={T.editorAjuda} /></span>
-          </label>
-
-          <div className="prefs-campo">
-            <span className="prefs-nome">{T.contextoDaSessao}</span>
-            <div className="prefs-limites">
-              <label className="prefs-limite">
-                <span className="prefs-bolinha atencao" />
-                {T.amareloAPartirDe}
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={contexto.atencao}
-                  onChange={(e) => {
-                    const n = e.target.valueAsNumber;
-                    if (Number.isFinite(n)) onContexto({ ...contexto, atencao: n });
-                  }}
-                  onKeyDown={(e) => e.key === "Enter" && onClose()}
-                />
-                %
-              </label>
-              <label className="prefs-limite">
-                <span className="prefs-bolinha perigo" />
-                {T.vermelhoAPartirDe}
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={contexto.perigo}
-                  onChange={(e) => {
-                    const n = e.target.valueAsNumber;
-                    if (Number.isFinite(n)) onContexto({ ...contexto, perigo: n });
-                  }}
-                  onKeyDown={(e) => e.key === "Enter" && onClose()}
-                />
-                %
-              </label>
-              <label className="prefs-limite">
-                <input
-                  type="checkbox"
-                  checked={contexto.autoCompact}
-                  onChange={(e) => onContexto({ ...contexto, autoCompact: e.target.checked })}
-                />
-                {T.autoCompactAPartirDe}
-                <input
-                  type="number"
-                  min={contexto.perigo + 1}
-                  max={100}
-                  value={contexto.autoCompactEm}
-                  disabled={!contexto.autoCompact}
-                  onChange={(e) => {
-                    const n = e.target.valueAsNumber;
-                    if (Number.isFinite(n)) onContexto({ ...contexto, autoCompactEm: n });
-                  }}
-                  onKeyDown={(e) => e.key === "Enter" && onClose()}
-                />
-                %
-              </label>
-            </div>
-            <span className="prefs-ajuda"><Trechos de={T.contextoAjuda} /></span>
-          </div>
+        <div className="segmented prefs-tabs" role="tablist">
+          {(["termiau", "plugins"] as const).map((id) => (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={tab === id}
+              className={tab === id ? "active" : ""}
+              onClick={() => setTab(id)}
+            >
+              {id === "termiau" ? T.prefsTabTermiau : T.prefsTabPlugins}
+            </button>
+          ))}
         </div>
+
+        {tab === "plugins" ? (
+          <div className="prefs-body">
+            <PluginsTab />
+          </div>
+        ) : (
+          <div className="prefs-body">
+            <label className="prefs-field">
+              <span className="prefs-name">{T.branchDefault}</span>
+              <input
+                ref={campo}
+                type="text"
+                value={defaultTarget}
+                placeholder="main"
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(e) => onDefaultTarget(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && onClose()}
+              />
+              <span className="prefs-help">{T.branchDefaultHelp}</span>
+            </label>
+
+            <label className="prefs-field">
+              <span className="prefs-name">{T.editor}</span>
+              <input
+                type="text"
+                value={editor}
+                placeholder="VS Code"
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(e) => onEditor(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && onClose()}
+              />
+              <span className="prefs-help"><Snippets from={T.editorHelp} /></span>
+            </label>
+
+            <div className="prefs-field">
+              <span className="prefs-name">{T.contextOfSession}</span>
+              <div className="prefs-limits">
+                <label className="prefs-limit">
+                  <span className="prefs-dot attention" />
+                  {T.yellowFrom}
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={context.attention}
+                    onChange={(e) => {
+                      const n = e.target.valueAsNumber;
+                      if (Number.isFinite(n)) onContext({ ...context, attention: n });
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && onClose()}
+                  />
+                  %
+                </label>
+                <label className="prefs-limit">
+                  <span className="prefs-dot danger" />
+                  {T.redFrom}
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={context.danger}
+                    onChange={(e) => {
+                      const n = e.target.valueAsNumber;
+                      if (Number.isFinite(n)) onContext({ ...context, danger: n });
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && onClose()}
+                  />
+                  %
+                </label>
+                <label className="prefs-limit">
+                  <input
+                    type="checkbox"
+                    checked={context.autoCompact}
+                    onChange={(e) => onContext({ ...context, autoCompact: e.target.checked })}
+                  />
+                  {T.autoCompactFrom}
+                  <input
+                    type="number"
+                    min={context.danger + 1}
+                    max={100}
+                    value={context.autoCompactAt}
+                    disabled={!context.autoCompact}
+                    onChange={(e) => {
+                      const n = e.target.valueAsNumber;
+                      if (Number.isFinite(n)) onContext({ ...context, autoCompactAt: n });
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && onClose()}
+                  />
+                  %
+                </label>
+              </div>
+              <span className="prefs-help"><Snippets from={T.contextHelp} /></span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -161,9 +183,9 @@ export function Prefs({
 /// in an iframe over the whole window (`differ.html?prefs`). Each change goes to the store
 /// over what is there at that moment, one after the other — the differ tab, behind,
 /// writes the same preferences. Closing tells TermIAu, which removes the iframe.
-export function PrefsFlutuantes() {
+export function PrefsFloating() {
   const [s, setS] = useState<Settings | null>(null);
-  const fila = useRef(Promise.resolve());
+  const queue = useRef(Promise.resolve());
 
   useEffect(() => {
     void persist.loadSettings().then(setS);
@@ -171,15 +193,15 @@ export function PrefsFlutuantes() {
 
   // Drawn, with the styles in: only now does TermIAu show the iframe. Before this the page
   // is blank, and WebKit paints a blank page white.
-  const pronta = s !== null;
+  const ready = s !== null;
   useEffect(() => {
-    if (pronta) window.parent.postMessage({ termiauPrefsPronta: true }, "*");
-  }, [pronta]);
+    if (ready) window.parent.postMessage({ termiauPrefsReady: true }, "*");
+  }, [ready]);
 
-  const mudar = (parte: Partial<Settings>) => {
-    setS((atual) => atual && { ...atual, ...parte });
-    fila.current = fila.current
-      .then(async () => persist.saveSettings({ ...(await persist.loadSettings()), ...parte }))
+  const mudar = (part: Partial<Settings>) => {
+    setS((current) => current && { ...current, ...part });
+    queue.current = queue.current
+      .then(async () => persist.saveSettings({ ...(await persist.loadSettings()), ...part }))
       .catch(() => {});
   };
 
@@ -190,16 +212,16 @@ export function PrefsFlutuantes() {
       onDefaultTarget={(defaultTarget) => mudar({ defaultTarget })}
       editor={s.editor}
       onEditor={(editor) => mudar({ editor })}
-      contexto={{
-        atencao: s.contextoAtencao,
-        perigo: s.contextoPerigo,
+      context={{
+        attention: s.contextAttention,
+        danger: s.contextDanger,
         autoCompact: s.autoCompact,
-        autoCompactEm: s.autoCompactEm,
+        autoCompactAt: s.autoCompactAt,
       }}
-      onContexto={({ atencao, perigo, autoCompact, autoCompactEm }) =>
-        mudar({ contextoAtencao: atencao, contextoPerigo: perigo, autoCompact, autoCompactEm })
+      onContext={({ attention, danger, autoCompact, autoCompactAt }) =>
+        mudar({ contextAttention: attention, contextDanger: danger, autoCompact, autoCompactAt })
       }
-      onClose={() => window.parent.postMessage({ termiauPrefsFechou: true }, "*")}
+      onClose={() => window.parent.postMessage({ termiauPrefsClosed: true }, "*")}
     />
   );
 }

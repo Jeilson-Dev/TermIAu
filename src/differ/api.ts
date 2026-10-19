@@ -34,7 +34,7 @@ export const readBlob = (path: string, oid: string) => invoke<string[]>("read_bl
 export const readWorktree = (path: string, file: string) =>
   invoke<string[]>("read_worktree", { path, file });
 
-/** Starts watching this repository's .git; the notice comes back on `differ://mudou`. */
+/** Starts watching this repository's .git; the notice comes back on `differ://changed`. */
 export const watchRepo = (path: string) => invoke<void>("watch_repo", { path });
 
 export const readBlobBytes = (path: string, oid: string) =>

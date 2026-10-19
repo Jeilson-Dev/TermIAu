@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- A TermIAu plugin: the app icon's cat window, with an orange puzzle piece
+       where the prompt goes. Used for .termiau files in Finder (plugin.icns,
+       built by scripts/plugin-icon.sh) and as the default icon of a plugin
+       that declares none. -->
+  <defs>
+    <linearGradient id="frame" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5a6677"/>
+      <stop offset="1" stop-color="#3e4855"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a1f2a"/>
+      <stop offset="1" stop-color="#10151b"/>
+    </linearGradient>
+    <linearGradient id="piece" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffa45c"/>
+      <stop offset="1" stop-color="#e2602c"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ears -->
+  <path d="M70 150 L92 34 Q98 18 112 28 L196 104 Z" fill="#4c5868"/>
+  <path d="M96 128 L108 60 L162 108 Z" fill="#fd883e"/>
+  <path d="M442 150 L420 34 Q414 18 400 28 L316 104 Z" fill="#4c5868"/>
+  <path d="M416 128 L404 60 L350 108 Z" fill="#fd883e"/>
+
+  <!-- window -->
+  <rect x="40" y="96" width="432" height="392" rx="44" fill="url(#frame)"/>
+  <rect x="62" y="150" width="388" height="316" rx="22" fill="url(#screen)"/>
+  <circle cx="86" cy="124" r="10" fill="#fc5c55"/>
+  <circle cx="118" cy="124" r="10" fill="#fdc44b"/>
+  <circle cx="150" cy="124" r="10" fill="#3fc84f"/>
+
+  <!-- puzzle piece: a square with a knob on top and on the right, a socket on the left -->
+  <path fill="url(#piece)" d="
+    M176 236
+    H226 a30 30 0 1 1 60 0 H336
+    V280 a30 30 0 1 1 0 60 V390
+    H176
+    V340 a30 30 0 1 0 0 -60
+    Z"/>
+</svg>

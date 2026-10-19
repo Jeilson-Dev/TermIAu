@@ -16,13 +16,7 @@ portable-pty = "0.9"
 base64 = "0.22"
 libc = "0.2"
 
-# Local transcription (the former Escuta). whisper-rs builds whisper.cpp with
-# Metal — that is what makes the first build slow.
-anyhow = "1"
-cpal = "0.18"
 serde = { version = "1", features = ["derive"] }
-whisper-rs = { version = "0.16.0", features = ["metal"] }
-ureq = "3.2"
 
 # The differ (the pinned tab with the branch's diff). It talks to the command-line
 # `git`, so no git library comes in; the store is the JSON that
@@ -33,6 +27,12 @@ serde_json = { version = "1", features = ["preserve_order"] }
 tauri-plugin-store = "2"
 # Watcher for .git, so the diff tab redoes itself on every commit.
 notify = "8"
+# Plugin packages (.termiau) are zips (see plugins.rs).
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# The marketplace checks each package against the catalog's sha256 (see marketplace.rs).
+sha2 = "0.10"
+# Verified plugins: Ed25519 signatures (see signing.rs). Already in the tree via rustls.
+ring = "0.17"
 
 # Clipboard (⌘⇧V) and the window's frame (janela.rs). Tauri doesn't expose the files on the clipboard,
 # only text — and Finder puts no text there at all when you copy a
@@ -44,6 +44,10 @@ objc2-foundation = { version = "0.3", features = ["NSURL", "NSLocale", "NSArray"
 # The differ's tests build real git repositories in a temporary folder.
 [dev-dependencies]
 tempfile = "3"
+
+# Plugin signatures hash every file of a plugin; unoptimized, that takes seconds in dev.
+[profile.dev.package.sha2]
+opt-level = 3
 
 [profile.release]
 opt-level = "s"

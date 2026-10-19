@@ -7,7 +7,7 @@ use serde::Serialize;
 
 use crate::differ::diff::{self, FileDiff, FileStatus, Staged};
 use crate::differ::error::{Error, Result};
-use crate::idioma::tr;
+use crate::language::tr;
 use crate::differ::git::Repo;
 
 /// Diff options shared by the raw and patch runs, so both list the same files in the same order.
@@ -147,19 +147,19 @@ pub fn load_diff_since(path: &Path, base: &str) -> Result<ReviewDiff> {
 }
 
 fn diff_between(repo: &Repo, from: &str, to: &str) -> Result<Vec<FileDiff>> {
-    diff_com(repo, &[from, to, "--"], false)
+    diff_with(repo, &[from, to, "--"], false)
 }
 
 /// The two diff passes — the list and the patch — with the same command-line
 /// tail, which is what guarantees the same files in the same order in both.
-/// `solto` is for `--no-index`, which exits with 1 when it finds a difference.
-fn diff_com(repo: &Repo, fim: &[&str], solto: bool) -> Result<Vec<FileDiff>> {
-    let raw_args = [&["diff", "--raw", "-z", "--no-abbrev"], DIFF_OPTS, fim].concat();
-    let patch_args = [&["diff", "--patch", "-U3"], DIFF_OPTS, fim].concat();
-    let rodar = |args: &[&str]| if solto { repo.run_diff(args) } else { repo.run(args) };
+/// `no_index` is for `--no-index`, which exits with 1 when it finds a difference.
+fn diff_with(repo: &Repo, tail_args: &[&str], no_index: bool) -> Result<Vec<FileDiff>> {
+    let raw_args = [&["diff", "--raw", "-z", "--no-abbrev"], DIFF_OPTS, tail_args].concat();
+    let patch_args = [&["diff", "--patch", "-U3"], DIFF_OPTS, tail_args].concat();
+    let run = |args: &[&str]| if no_index { repo.run_diff(args) } else { repo.run(args) };
 
-    let raw = diff::parse_raw(&rodar(&raw_args)?)?;
-    let patch = diff::parse_patch(&rodar(&patch_args)?)?;
+    let raw = diff::parse_raw(&run(&raw_args)?)?;
+    let patch = diff::parse_patch(&run(&patch_args)?)?;
     diff::build(raw, patch)
 }
 
@@ -172,13 +172,13 @@ pub fn load_diff_working(path: &Path) -> Result<ReviewDiff> {
 
     // `diff HEAD` already merges what was added with what wasn't: its new side
     // is the working tree, and the index comes along on the way.
-    let mut files = diff_com(&repo, &["HEAD", "--"], false)?;
-    files.extend(nao_rastreados(&repo)?);
+    let mut files = diff_with(&repo, &["HEAD", "--"], false)?;
+    files.extend(untracked(&repo)?);
     // Two git passes become a single list on screen, and it has to be in
     // order — untracked files don't all go at the end.
     files.sort_by(|a, b| a.path.cmp(&b.path));
-    chaves_do_disco(&repo, &mut files);
-    marcar_indice(&repo, &mut files)?;
+    worktree_keys(&repo, &mut files);
+    mark_staged(&repo, &mut files)?;
 
     let additions = files.iter().map(|f| f.additions).sum();
     let deletions = files.iter().map(|f| f.deletions).sum();
@@ -200,18 +200,18 @@ pub fn load_diff_working(path: &Path) -> Result<ReviewDiff> {
 /// The files git doesn't know yet, each one whole, as a new file. `--no-index`
 /// is what makes git diff a loose file against nothing; they can't go in a
 /// single pass because it only accepts two paths at a time.
-fn nao_rastreados(repo: &Repo) -> Result<Vec<FileDiff>> {
-    let lista = repo.run(&["ls-files", "--others", "--exclude-standard", "-z"])?;
+fn untracked(repo: &Repo) -> Result<Vec<FileDiff>> {
+    let listed = repo.run(&["ls-files", "--others", "--exclude-standard", "-z"])?;
     let mut files = Vec::new();
-    for nome in lista.split(|b| *b == 0) {
-        if nome.is_empty() {
+    for name in listed.split(|b| *b == 0) {
+        if name.is_empty() {
             continue;
         }
-        let nome = String::from_utf8_lossy(nome).into_owned();
+        let name = String::from_utf8_lossy(name).into_owned();
         // An unreadable file (a broken link, a denied permission) must not bring
         // down the whole tab: it drops from the list and the others carry on.
-        if let Ok(achados) = diff_com(repo, &["--no-index", "--", "/dev/null", &nome], true) {
-            files.extend(achados);
+        if let Ok(found) = diff_with(repo, &["--no-index", "--", "/dev/null", &name], true) {
+            files.extend(found);
         }
     }
     Ok(files)
@@ -219,13 +219,13 @@ fn nao_rastreados(repo: &Repo) -> Result<Vec<FileDiff>> {
 
 /// Prefix of content keys that aren't git blobs: the new side of the working tree
 /// diff is on disk, not in the object database.
-const CHAVE_DISCO: &str = "wt:";
+const WORKTREE_KEY: &str = "wt:";
 
 /// Gives the new side of working tree files a content key in place of the blob
 /// id, which doesn't exist there — the content hasn't gone through git yet. The
 /// key carries size and modification time because it is what says "this
 /// changed": it is how the content cache and the reviewed mark get redone.
-fn chaves_do_disco(repo: &Repo, files: &mut [FileDiff]) {
+fn worktree_keys(repo: &Repo, files: &mut [FileDiff]) {
     for file in files {
         if file.new_oid.is_some() || file.status == FileStatus::Deleted {
             continue;
@@ -233,15 +233,15 @@ fn chaves_do_disco(repo: &Repo, files: &mut [FileDiff]) {
         let Ok(meta) = std::fs::metadata(repo.root().join(&file.path)) else {
             continue;
         };
-        let carimbo = meta
+        let stamp = meta
             .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis())
             .unwrap_or(0);
-        let chave = format!("{CHAVE_DISCO}{}-{carimbo}:{}", meta.len(), file.path);
-        file.fingerprint = format!("{}:{chave}", file.fingerprint);
-        file.new_oid = Some(chave);
+        let key = format!("{WORKTREE_KEY}{}-{stamp}:{}", meta.len(), file.path);
+        file.fingerprint = format!("{}:{key}", file.fingerprint);
+        file.new_oid = Some(key);
     }
 }
 
@@ -260,16 +260,16 @@ pub fn working_stamp(path: &Path) -> Result<String> {
 
     let raw = repo.run(&["diff", "--raw", "-z", "--no-abbrev", "HEAD", "--"])?;
     raw.hash(&mut h);
-    let outros = repo.run(&["ls-files", "--others", "--exclude-standard", "-z"])?;
-    outros.hash(&mut h);
+    let others = repo.run(&["ls-files", "--others", "--exclude-standard", "-z"])?;
+    others.hash(&mut h);
 
-    let rastreados = diff::parse_raw(&raw)?.into_iter().map(|e| e.path);
-    let novos = outros
+    let tracked = diff::parse_raw(&raw)?.into_iter().map(|e| e.path);
+    let new_files = others
         .split(|b| *b == 0)
         .filter(|n| !n.is_empty())
         .map(|n| String::from_utf8_lossy(n).into_owned());
-    for nome in rastreados.chain(novos) {
-        let Ok(meta) = std::fs::metadata(repo.root().join(&nome)) else {
+    for name in tracked.chain(new_files) {
+        let Ok(meta) = std::fs::metadata(repo.root().join(&name)) else {
             continue;
         };
         meta.len().hash(&mut h);
@@ -283,8 +283,8 @@ pub fn working_stamp(path: &Path) -> Result<String> {
 /// Tells for each file whether `git add` has taken it. Two lists of names: what
 /// the index has beyond HEAD and what the disk has beyond the index — a file in
 /// both is half in the index, because it changed again after `git add`.
-fn marcar_indice(repo: &Repo, files: &mut [FileDiff]) -> Result<()> {
-    let nomes = |args: &[&str]| -> Result<Vec<String>> {
+fn mark_staged(repo: &Repo, files: &mut [FileDiff]) -> Result<()> {
+    let names = |args: &[&str]| -> Result<Vec<String>> {
         let out = repo.run(args)?;
         Ok(out
             .split(|b| *b == 0)
@@ -292,13 +292,13 @@ fn marcar_indice(repo: &Repo, files: &mut [FileDiff]) -> Result<()> {
             .map(|n| String::from_utf8_lossy(n).into_owned())
             .collect())
     };
-    let no_indice = nomes(&["diff", "--name-only", "-z", "--cached", "HEAD", "--"])?;
-    let no_disco = nomes(&["diff", "--name-only", "-z", "--"])?;
+    let in_index = names(&["diff", "--name-only", "-z", "--cached", "HEAD", "--"])?;
+    let on_disk = names(&["diff", "--name-only", "-z", "--"])?;
 
     for file in files {
-        let indice = no_indice.contains(&file.path);
-        let disco = no_disco.contains(&file.path);
-        file.staged = Some(match (indice, disco) {
+        let indexed = in_index.contains(&file.path);
+        let worktree = on_disk.contains(&file.path);
+        file.staged = Some(match (indexed, worktree) {
             (true, true) => Staged::Partial,
             (true, false) => Staged::Staged,
             // What git doesn't track is in neither list, and outside the index
@@ -314,17 +314,17 @@ fn marcar_indice(repo: &Repo, files: &mut [FileDiff]) -> Result<()> {
 /// was deleted and what git doesn't track yet; on a single file it changes
 /// nothing. The target goes as a literal pathspec: a file named `*.txt` or
 /// starting with `-` must not become a wildcard or a command-line option.
-pub fn stage(path: &Path, alvo: &str) -> Result<()> {
+pub fn stage(path: &Path, target: &str) -> Result<()> {
     let repo = Repo::open(path)?;
-    repo.run_write(&["add", "-A", "--", &pathspec(alvo)])?;
+    repo.run_write(&["add", "-A", "--", &pathspec(target)])?;
     Ok(())
 }
 
 /// Unstages, leaving the disk as it is. Same reach as `stage`:
 /// a file, a folder or `.` for everything.
-pub fn unstage(path: &Path, alvo: &str) -> Result<()> {
+pub fn unstage(path: &Path, target: &str) -> Result<()> {
     let repo = Repo::open(path)?;
-    repo.run_write(&["restore", "--staged", "--", &pathspec(alvo)])?;
+    repo.run_write(&["restore", "--staged", "--", &pathspec(target)])?;
     Ok(())
 }
 
@@ -347,30 +347,30 @@ fn pathspec(file: &str) -> String {
 /// The path of a working tree file, guaranteed to be inside the repository.
 /// The webview asks for the file by name, and a name coming from outside must
 /// not become `../../.ssh/id_rsa`.
-fn no_repositorio(raiz: &Path, arquivo: &str) -> Result<PathBuf> {
-    let alvo = raiz.join(arquivo);
-    let (alvo, raiz) = (
-        alvo.canonicalize().map_err(Error::Io)?,
-        raiz.canonicalize().map_err(Error::Io)?,
+fn in_repo(root: &Path, file: &str) -> Result<PathBuf> {
+    let target = root.join(file);
+    let (target, root) = (
+        target.canonicalize().map_err(Error::Io)?,
+        root.canonicalize().map_err(Error::Io)?,
     );
-    if !alvo.starts_with(&raiz) {
-        return Err(Error::Internal(format!("{}: {arquivo}", tr("caminho fora do repositório", "path outside the repository"))));
+    if !target.starts_with(&root) {
+        return Err(Error::Internal(format!("{}: {file}", tr("caminho fora do repositório", "path outside the repository"))));
     }
-    Ok(alvo)
+    Ok(target)
 }
 
 /// The file as it is on disk now: the new side of the working tree diff,
 /// where there is no blob to read.
-pub fn read_worktree(path: &Path, arquivo: &str) -> Result<Vec<String>> {
+pub fn read_worktree(path: &Path, file: &str) -> Result<Vec<String>> {
     let repo = Repo::open(path)?;
-    let bytes = std::fs::read(no_repositorio(repo.root(), arquivo)?)?;
-    Ok(em_linhas(&bytes))
+    let bytes = std::fs::read(in_repo(repo.root(), file)?)?;
+    Ok(to_lines(&bytes))
 }
 
 /// Raw bytes of the file on disk — images not committed yet.
-pub fn read_worktree_bytes(path: &Path, arquivo: &str) -> Result<Vec<u8>> {
+pub fn read_worktree_bytes(path: &Path, file: &str) -> Result<Vec<u8>> {
     let repo = Repo::open(path)?;
-    Ok(std::fs::read(no_repositorio(repo.root(), arquivo)?)?)
+    Ok(std::fs::read(in_repo(repo.root(), file)?)?)
 }
 
 fn validate_oid(oid: &str) -> Result<()> {
@@ -385,12 +385,12 @@ pub fn read_blob(path: &Path, oid: &str) -> Result<Vec<String>> {
     validate_oid(oid)?;
     let repo = Repo::open(path)?;
     let bytes = repo.run(&["cat-file", "blob", oid])?;
-    Ok(em_linhas(&bytes))
+    Ok(to_lines(&bytes))
 }
 
 /// The content as lines, the way the rest of the differ counts them: without the
 /// final newline and without Windows' trailing \r.
-fn em_linhas(bytes: &[u8]) -> Vec<String> {
+fn to_lines(bytes: &[u8]) -> Vec<String> {
     let text = String::from_utf8_lossy(bytes);
     let text = text.strip_suffix('\n').unwrap_or(&text);
     if text.is_empty() {
@@ -512,9 +512,9 @@ mod tests {
         repo.write("ignorado.txt", "não apareço\n");
 
         let diff = load_diff_working(repo.path()).unwrap();
-        let mostrados: Vec<&str> = diff.files.iter().map(|f| f.path.as_str()).collect();
+        let shown: Vec<&str> = diff.files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(
-            mostrados,
+            shown,
             [".gitignore", "adicionado.txt", "apagado.txt", "editado.txt", "solto.txt"]
         );
 
@@ -523,18 +523,18 @@ mod tests {
         assert_eq!(file(&diff, "editado.txt").status, FileStatus::Modified);
 
         // The file git doesn't track comes in whole, as a new file.
-        let solto = file(&diff, "solto.txt");
-        assert_eq!(solto.status, FileStatus::Added);
-        assert_eq!(solto.additions, 1);
-        assert_eq!(solto.hunks[0].lines[0].kind, LineKind::Add);
+        let no_index = file(&diff, "solto.txt");
+        assert_eq!(no_index.status, FileStatus::Added);
+        assert_eq!(no_index.additions, 1);
+        assert_eq!(no_index.hunks[0].lines[0].kind, LineKind::Add);
 
         // The new side of what is on disk gets a content key in place of the
         // blob id, which doesn't exist there.
-        assert!(solto.new_oid.as_deref().unwrap().starts_with(CHAVE_DISCO));
-        assert!(file(&diff, "editado.txt").new_oid.as_deref().unwrap().starts_with(CHAVE_DISCO));
+        assert!(no_index.new_oid.as_deref().unwrap().starts_with(WORKTREE_KEY));
+        assert!(file(&diff, "editado.txt").new_oid.as_deref().unwrap().starts_with(WORKTREE_KEY));
         // What is already in the index has a real blob.
-        let no_indice = file(&diff, "adicionado.txt").new_oid.clone().unwrap();
-        assert_eq!(no_indice.len(), 40);
+        let in_index = file(&diff, "adicionado.txt").new_oid.clone().unwrap();
+        assert_eq!(in_index.len(), 40);
         assert_eq!(read_worktree(repo.path(), "solto.txt").unwrap(), ["ninguém me rastreia"]);
         assert!(read_worktree(repo.path(), "../fora.txt").is_err());
     }
@@ -547,32 +547,32 @@ mod tests {
         repo.write("editado.txt", "dois\n");
         repo.write("solto.txt", "novo\n");
 
-        let pendente = || load_diff_working(repo.path()).unwrap();
-        assert_eq!(file(&pendente(), "editado.txt").staged, Some(Staged::Unstaged));
-        assert_eq!(file(&pendente(), "solto.txt").staged, Some(Staged::Unstaged));
+        let pending = || load_diff_working(repo.path()).unwrap();
+        assert_eq!(file(&pending(), "editado.txt").staged, Some(Staged::Unstaged));
+        assert_eq!(file(&pending(), "solto.txt").staged, Some(Staged::Unstaged));
 
         stage(repo.path(), "solto.txt").unwrap();
-        assert_eq!(file(&pendente(), "solto.txt").staged, Some(Staged::Staged));
+        assert_eq!(file(&pending(), "solto.txt").staged, Some(Staged::Staged));
 
         // Changed again after `git add`: half is in the index, half isn't.
         repo.write("solto.txt", "novo e mudado\n");
-        assert_eq!(file(&pendente(), "solto.txt").staged, Some(Staged::Partial));
+        assert_eq!(file(&pending(), "solto.txt").staged, Some(Staged::Partial));
 
         unstage(repo.path(), "solto.txt").unwrap();
-        assert_eq!(file(&pendente(), "solto.txt").staged, Some(Staged::Unstaged));
+        assert_eq!(file(&pending(), "solto.txt").staged, Some(Staged::Unstaged));
 
         // The commit takes what is in the index and leaves the rest where it was.
         stage(repo.path(), "editado.txt").unwrap();
-        let novo = commit(repo.path(), "só o editado").unwrap();
-        assert_eq!(novo.len(), 40);
-        let depois = pendente();
-        assert_eq!(depois.head_sha, novo);
-        let restantes: Vec<&str> = depois.files.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(restantes, ["solto.txt"]);
+        let new_commit = commit(repo.path(), "só o editado").unwrap();
+        assert_eq!(new_commit.len(), 40);
+        let after = pending();
+        assert_eq!(after.head_sha, new_commit);
+        let remaining: Vec<&str> = after.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(remaining, ["solto.txt"]);
 
         // With nothing in the index git refuses, and its refusal is what the tab shows.
-        let erro = commit(repo.path(), "vazio").unwrap_err().to_string();
-        assert!(erro.contains("nothing added") || erro.contains("no changes added"), "{erro}");
+        let error = commit(repo.path(), "vazio").unwrap_err().to_string();
+        assert!(error.contains("nothing added") || error.contains("no changes added"), "{error}");
         assert!(commit(repo.path(), "   ").is_err());
     }
 
@@ -589,22 +589,22 @@ mod tests {
         repo.write("sub/tres.txt", "novo\n");
         repo.write("fora.txt", "raiz mudada\n");
 
-        let pendente = || load_diff_working(repo.path()).unwrap();
-        let estado = |d: &ReviewDiff, p: &str| file(d, p).staged;
+        let pending = || load_diff_working(repo.path()).unwrap();
+        let state = |d: &ReviewDiff, p: &str| file(d, p).staged;
 
         // The folder takes all three states at once and doesn't touch what is outside it.
         stage(repo.path(), "sub").unwrap();
-        let d = pendente();
-        assert_eq!(estado(&d, "sub/um.txt"), Some(Staged::Staged));
-        assert_eq!(estado(&d, "sub/dois.txt"), Some(Staged::Staged));
-        assert_eq!(estado(&d, "sub/tres.txt"), Some(Staged::Staged));
-        assert_eq!(estado(&d, "fora.txt"), Some(Staged::Unstaged));
+        let d = pending();
+        assert_eq!(state(&d, "sub/um.txt"), Some(Staged::Staged));
+        assert_eq!(state(&d, "sub/dois.txt"), Some(Staged::Staged));
+        assert_eq!(state(&d, "sub/tres.txt"), Some(Staged::Staged));
+        assert_eq!(state(&d, "fora.txt"), Some(Staged::Unstaged));
 
         // `.` is the whole repository, both ways.
         stage(repo.path(), ".").unwrap();
-        assert!(pendente().files.iter().all(|f| f.staged == Some(Staged::Staged)));
+        assert!(pending().files.iter().all(|f| f.staged == Some(Staged::Staged)));
         unstage(repo.path(), ".").unwrap();
-        assert!(pendente().files.iter().all(|f| f.staged == Some(Staged::Unstaged)));
+        assert!(pending().files.iter().all(|f| f.staged == Some(Staged::Unstaged)));
     }
 
     #[test]
@@ -613,29 +613,29 @@ mod tests {
         repo.write("a.txt", "um\n");
         repo.commit("base");
 
-        let marca = || working_stamp(repo.path()).unwrap();
-        let parado = marca();
-        assert_eq!(parado, marca(), "touching nothing, the signature stays the same");
+        let stamp_now = || working_stamp(repo.path()).unwrap();
+        let idle = stamp_now();
+        assert_eq!(idle, stamp_now(), "touching nothing, the signature stays the same");
 
         repo.write("a.txt", "dois\n");
-        let editado = marca();
-        assert_ne!(parado, editado);
+        let edited = stamp_now();
+        assert_ne!(idle, edited);
 
         // The case git's lists miss: already modified, modified again.
         repo.write("a.txt", "três\n");
-        let de_novo = marca();
-        assert_ne!(editado, de_novo);
+        let again = stamp_now();
+        assert_ne!(edited, again);
 
         repo.write("novo.txt", "apareci\n");
-        let com_novo = marca();
-        assert_ne!(de_novo, com_novo);
+        let with_new = stamp_now();
+        assert_ne!(again, with_new);
 
         stage(repo.path(), ".").unwrap();
-        let no_indice = marca();
-        assert_ne!(com_novo, no_indice);
+        let in_index = stamp_now();
+        assert_ne!(with_new, in_index);
 
         repo.git(&["commit", "-q", "-m", "tudo"]);
-        assert_ne!(no_indice, marca());
+        assert_ne!(in_index, stamp_now());
     }
 
     #[test]

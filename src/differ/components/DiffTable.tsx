@@ -58,7 +58,7 @@ function CodeCell({
       {line !== null && (
         <button
           className="add-bookmark"
-          title={T.adicionarMarcadorDica}
+          title={T.addBookmarkHint}
           onMouseDown={(e) => {
             e.preventDefault();
             ctx.onPlus(side, line);
@@ -73,7 +73,7 @@ function CodeCell({
         <CodeContent content={row.content} tokens={tokensFor(row, side, ctx.sources)} emph={row.emph} />
       </span>
       {row.noNewline && (
-        <span className="no-newline" title={T.semQuebraNoFim}>
+        <span className="no-newline" title={T.noNewlineAtEnd}>
           <Icon name="no-entry" size={12} />
         </span>
       )}
@@ -95,14 +95,14 @@ function GapActions({ gap, ctx }: { gap: GapRow; ctx: RowContext }) {
       <Icon name={icon} />
     </button>
   );
-  const down = button("down", "expand-down", T.mostrarAbaixo);
-  const up = button("up", "expand-up", T.mostrarAcima);
+  const down = button("down", "expand-down", T.showDown);
+  const up = button("up", "expand-up", T.showUp);
 
   let buttons: ReactNode;
   if (gap.position === "top") buttons = up;
   else if (gap.position === "bottom") buttons = down;
   else if (gap.remaining !== null && gap.remaining <= EXPAND_STEP)
-    buttons = button("all", "unfold", T.mostrarTodas);
+    buttons = button("all", "unfold", T.showAllOf);
   else buttons = [down, up];
   return <div className="gap-buttons">{buttons}</div>;
 }

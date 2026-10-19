@@ -12,10 +12,10 @@ import {
 } from "./api";
 import { COLLAPSE_MS, FileDiffView, type NewBookmark } from "./components/FileDiffView";
 import { Icon } from "./components/Icons";
-import { Mudou } from "./components/Mudou";
-import { Sidebar, type GrupoArquivos } from "./components/Sidebar";
+import { Changed } from "./components/Changed";
+import { Sidebar, type GroupFiles } from "./components/Sidebar";
 import { Toolbar } from "./components/Toolbar";
-import { Trechos } from "./components/Trechos";
+import { Snippets } from "./components/Snippets";
 import { T } from "../i18n/differ";
 import { bookmarkReference, checkBookmarks } from "./lib/bookmarks";
 import { incrementalBase, placeBookmarks, type FixPlacement } from "./lib/fixes";
@@ -52,13 +52,13 @@ const STEP_PAUSE_MS = 150;
 const SETTLE_MS = 900;
 
 /** How far the file's top is from where it should be: the top of the scroller, below the sticky gap. */
-function distanciaDoTopo(scroller: HTMLElement, el: HTMLElement): number {
+function distanceFromTop(scroller: HTMLElement, el: HTMLElement): number {
   const gap = parseFloat(getComputedStyle(scroller).getPropertyValue("--sticky-gap")) || 0;
   return el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - gap;
 }
 
 /** How long the glide to the next file takes. */
-const DESLIZE_MS = 450;
+const SLIDE_MS = 450;
 
 /**
  * Glides the file's header to the top, fast at first and slowing down to a stop, then keeps
@@ -70,66 +70,66 @@ const DESLIZE_MS = 450;
  * read as "arrived" even with the scroll in the middle of the diff. Lets go on your first
  * gesture anywhere in the page, on a new trip or when time runs out.
  */
-function pousar(scroller: HTMLElement, arquivo: () => HTMLElement | undefined, cancelada: () => boolean) {
+function land(scroller: HTMLElement, file: () => HTMLElement | undefined, cancelled: () => boolean) {
   /** How far the header still is, or undefined while the file isn't on the page (remounting). */
-  const falta = () => {
-    const el = arquivo();
-    return el?.isConnected ? distanciaDoTopo(scroller, el) : undefined;
+  const missing = () => {
+    const el = file();
+    return el?.isConnected ? distanceFromTop(scroller, el) : undefined;
   };
-  const gestos = ["wheel", "touchstart", "mousedown", "keydown"] as const;
+  const gestures = ["wheel", "touchstart", "mousedown", "keydown"] as const;
   let parado = false;
-  const parar = () => {
+  const stop = () => {
     parado = true;
-    for (const g of gestos) window.removeEventListener(g, parar, true);
+    for (const g of gestures) window.removeEventListener(g, stop, true);
   };
-  for (const g of gestos) window.addEventListener(g, parar, { capture: true, passive: true });
+  for (const g of gestures) window.addEventListener(g, stop, { capture: true, passive: true });
 
   const suave = !matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const desacelera = (t: number) => 1 - (1 - t) ** 3;
-  const inicio = performance.now();
-  const de = scroller.scrollTop;
-  const passo = (agora: number) => {
+  const slows = (t: number) => 1 - (1 - t) ** 3;
+  const beginning = performance.now();
+  const from = scroller.scrollTop;
+  const step = (now: number) => {
     if (parado) return;
-    if (cancelada() || agora - inicio > DESLIZE_MS + SETTLE_MS) return parar();
-    const t = suave ? Math.min(1, (agora - inicio) / DESLIZE_MS) : 1;
-    const d = falta();
+    if (cancelled() || now - beginning > SLIDE_MS + SETTLE_MS) return stop();
+    const t = suave ? Math.min(1, (now - beginning) / SLIDE_MS) : 1;
+    const d = missing();
     if (d !== undefined) {
       // Where the destination is now, in absolute scroll terms.
-      const alvo = scroller.scrollTop + d;
-      const pos = t < 1 ? de + (alvo - de) * desacelera(t) : alvo;
+      const target = scroller.scrollTop + d;
+      const pos = t < 1 ? from + (target - from) * slows(t) : target;
       if (Math.abs(scroller.scrollTop - pos) >= 1) scroller.scrollTop = pos;
     }
-    requestAnimationFrame(passo);
+    requestAnimationFrame(step);
   };
-  requestAnimationFrame(passo);
+  requestAnimationFrame(step);
 }
 
 /** The keys that scroll the page by themselves. */
-const TECLAS_DE_ROLAGEM = new Set([" ", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
+const KEYS_OF_SCROLL = new Set([" ", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
 
 /**
  * Holds the scroll still while a reviewed file closes: the wheel, the trackpad, the keys and
  * the scrollbar don't move it, and whatever moves it anyway goes back. Moving during the
  * close is what made the trip to the next file start from the wrong place. Returns what lets go.
  */
-function travarRolagem(scroller: HTMLElement): () => void {
-  const topo = scroller.scrollTop;
-  const segurar = () => {
-    if (Math.abs(scroller.scrollTop - topo) >= 1) scroller.scrollTop = topo;
+function lockScroll(scroller: HTMLElement): () => void {
+  const top = scroller.scrollTop;
+  const hold = () => {
+    if (Math.abs(scroller.scrollTop - top) >= 1) scroller.scrollTop = top;
   };
-  const barrar = (e: Event) => e.preventDefault();
-  const teclas = (e: KeyboardEvent) => {
-    if (TECLAS_DE_ROLAGEM.has(e.key) && !isTyping(e.target)) e.preventDefault();
+  const blockIt = (e: Event) => e.preventDefault();
+  const keys = (e: KeyboardEvent) => {
+    if (KEYS_OF_SCROLL.has(e.key) && !isTyping(e.target)) e.preventDefault();
   };
-  scroller.addEventListener("scroll", segurar);
-  scroller.addEventListener("wheel", barrar, { passive: false });
-  scroller.addEventListener("touchmove", barrar, { passive: false });
-  window.addEventListener("keydown", teclas, true);
+  scroller.addEventListener("scroll", hold);
+  scroller.addEventListener("wheel", blockIt, { passive: false });
+  scroller.addEventListener("touchmove", blockIt, { passive: false });
+  window.addEventListener("keydown", keys, true);
   return () => {
-    scroller.removeEventListener("scroll", segurar);
-    scroller.removeEventListener("wheel", barrar);
-    scroller.removeEventListener("touchmove", barrar);
-    window.removeEventListener("keydown", teclas, true);
+    scroller.removeEventListener("scroll", hold);
+    scroller.removeEventListener("wheel", blockIt);
+    scroller.removeEventListener("touchmove", blockIt);
+    window.removeEventListener("keydown", keys, true);
   };
 }
 
@@ -165,7 +165,7 @@ function ResolvedCount({
   const resolved = checking.filter((b) => b.resolved).length;
   return (
     <span className={resolved === checking.length ? "badge ok" : "badge"}>
-      {T.marcadoresResolvidos(resolved, checking.length)}
+      {T.bookmarksResolved(resolved, checking.length)}
     </span>
   );
 }
@@ -185,10 +185,10 @@ export default function App() {
   const [activePath, setActivePath] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [mudou, setMudou] = useState(false);
+  const [changed, setChanged] = useState(false);
   /** The tab is on screen. TermIAu says so: inside a hidden iframe, the
       browser's visibility API keeps saying "visible". */
-  const [visivel, setVisivel] = useState(true);
+  const [visible, setVisible] = useState(true);
 
   const scope: Scope = settings?.scope ?? "branch";
   const incremental = scope === "incremental";
@@ -207,24 +207,24 @@ export default function App() {
   const scrollLock = useRef(false);
   /** Where the scroll has to go. A new mark (the header's checkbox) only changes the destination. */
   const jumpTarget = useRef<string | null>(null);
-  /** Qual arquivo fechando destrava a rolagem: fechar e andar junto se atropelam. */
+  /** Qual file closing destrava a scrollPos: close e andar junto se atropelam. */
   const jumpFrom = useRef<string | null>(null);
   const jumpTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  /** Lets go of the scroll held still while the reviewed file closes (see `travarRolagem`). */
-  const destravar = useRef<(() => void) | undefined>(undefined);
+  /** Lets go of the scroll held still while the reviewed file closes (see `lockScroll`). */
+  const unlock = useRef<(() => void) | undefined>(undefined);
   /** Scroll in progress. Changing the number cancels the previous one midway. */
   const scrollAnim = useRef(0);
   /** The cursor as it is now, even before the render happens. */
   const cursor = useRef<string | null>(null);
   /** Marked in this burst of "v", which the screen's `viewedPaths` doesn't have yet. */
-  const marcados = useRef(new Set<string>());
+  const markedOnes = useRef(new Set<string>());
   // When we were the ones who committed. The commit writes refs, the watcher sees it and the
   // "the repository changed" notice would show up right after the diff we already redid.
-  const nossoCommit = useRef(0);
+  const ourCommit = useRef(0);
   /** The last disk signature already on screen. */
-  const marcaNaTela = useRef<string | null>(null);
+  const markInScreen = useRef<string | null>(null);
 
-  const refresh = useCallback(async (root: string, targetBranch: string, escopo: Scope) => {
+  const refresh = useCallback(async (root: string, targetBranch: string, scope: Scope) => {
     const id = ++requestId.current;
     setLoading(true);
     setError(null);
@@ -232,12 +232,12 @@ export default function App() {
       const info = await openRepo(root);
       const key = reviewKey(info.root, info.currentBranch);
       const saved = await persist.loadReview(key);
-      const pendente = escopo === "working";
+      const pendingItem = scope === "working";
       // Incremental starts from the last commit reviewed to the end; before any, it's the branch.
-      let base = escopo === "incremental" ? incrementalBase(saved.completed, info.headSha) : null;
+      let base = scope === "incremental" ? incrementalBase(saved.completed, info.headSha) : null;
       let result: ReviewDiff;
       try {
-        result = pendente
+        result = pendingItem
           ? await loadDiffWorking(root)
           : base
             ? await loadDiffSince(root, base)
@@ -250,7 +250,7 @@ export default function App() {
       }
       // What hasn't been committed was never reviewed: here a commit's complete review
       // doesn't count as a review of what sits on top of it.
-      let state = pendente ? saved : coverCompleted(saved, result);
+      let state = pendingItem ? saved : coverCompleted(saved, result);
       let lost: Set<string>;
       let placed: Map<string, FixPlacement> | null = null;
       if (base) {
@@ -277,16 +277,16 @@ export default function App() {
       // to-be-committed tab, marking is a `git add`, and the diff reloads right after it:
       // cancelling here left the screen still, and with the lock gone the scroll pulled the
       // cursor back to whatever was at the top — so the next "v" marked the wrong file.
-      const destino = jumpTarget.current;
-      if (!destino || !result.files.some((f) => f.path === destino)) {
+      const destination = jumpTarget.current;
+      if (!destination || !result.files.some((f) => f.path === destination)) {
         clearTimeout(jumpTimer.current);
-        destravar.current?.();
-        destravar.current = undefined;
+        unlock.current?.();
+        unlock.current = undefined;
         jumpTarget.current = null;
         jumpFrom.current = null;
         scrollLock.current = false;
       }
-      marcados.current = new Set();
+      markedOnes.current = new Set();
     } catch (err) {
       if (id !== requestId.current) return;
       setDiff(null);
@@ -312,13 +312,13 @@ export default function App() {
         // choice made by hand: that is why it comes after what was stored for this
         // repository. Read from disk, not from state, so it already applies on the first
         // open — which happens before React has the preferences at hand.
-        const padrao = [prefs.defaultTarget, `origin/${prefs.defaultTarget}`].find(
+        const fallback = [prefs.defaultTarget, `origin/${prefs.defaultTarget}`].find(
           (b) => b && branches.includes(b),
         );
         const initial =
           saved && branches.includes(saved.target)
             ? saved.target
-            : (padrao ?? info.suggestedTarget ?? info.localBranches[0] ?? "");
+            : (fallback ?? info.suggestedTarget ?? info.localBranches[0] ?? "");
         setRepo(info);
         setTarget(initial);
         setDiff(null);
@@ -328,16 +328,16 @@ export default function App() {
         setPlacements(null);
         setCollapsedOverrides({});
         setActivePath(null);
-        setMudou(false);
+        setChanged(false);
         scrollerRef.current?.scrollTo(0, 0);
         // From here on this repository's .git is watched; the notice that it
-        // changed arrives as `termiau:mudou`. Failing here doesn't prevent the review —
+        // changed arrives as `termiau:changed`. Failing here doesn't prevent the review —
         // it only costs the notice, and the Refresh button stays in place.
         watchRepo(info.root).catch(() => {});
         // The diff of what is about to be committed doesn't compare against any branch:
         // it opens even in a single-branch repository.
         if (initial || prefs.scope === "working") await refresh(info.root, initial, prefs.scope);
-        else setError(T.semBranchesParaComparar);
+        else setError(T.noBranchesToCompare);
       } catch (err) {
         setError(String(err));
       }
@@ -362,15 +362,15 @@ export default function App() {
   // the floating preferences (⌘,). What arrives replaces what is here — otherwise the next
   // save from this tab would write the old values back over them.
   useEffect(() => {
-    let parar: (() => void) | undefined;
-    let vivo = true;
+    let stop: (() => void) | undefined;
+    let alive = true;
     persist
-      .onSettings((novas) => setSettings((s) => (s && JSON.stringify(s) !== JSON.stringify(novas) ? novas : s)))
-      .then((u) => (vivo ? (parar = u) : u()))
+      .onSettings((newOnes) => setSettings((s) => (s && JSON.stringify(s) !== JSON.stringify(newOnes) ? newOnes : s)))
+      .then((u) => (alive ? (stop = u) : u()))
       .catch(() => {});
     return () => {
-      vivo = false;
-      parar?.();
+      alive = false;
+      stop?.();
     };
   }, []);
 
@@ -379,16 +379,16 @@ export default function App() {
   // happened before this page existed, and in that case the request is stored there
   // waiting for exactly this notice.
   useEffect(() => {
-    const ver = (e: Event) => setVisivel((e as CustomEvent<boolean>).detail);
-    window.addEventListener("termiau:visivel", ver);
-    return () => window.removeEventListener("termiau:visivel", ver);
+    const view = (e: Event) => setVisible((e as CustomEvent<boolean>).detail);
+    window.addEventListener("termiau:visible", view);
+    return () => window.removeEventListener("termiau:visible", view);
   }, []);
 
   useEffect(() => {
-    const abrir = (e: Event) => void openRepoAt((e as CustomEvent<string>).detail);
-    window.addEventListener("termiau:repo", abrir);
+    const openIt = (e: Event) => void openRepoAt((e as CustomEvent<string>).detail);
+    window.addEventListener("termiau:repo", openIt);
     if (window.parent !== window) window.parent.postMessage({ termiauPronto: true }, "*");
-    return () => window.removeEventListener("termiau:repo", abrir);
+    return () => window.removeEventListener("termiau:repo", openIt);
   }, [openRepoAt]);
 
   // With no repository open there is nothing for this tab to show, and TermIAu removes
@@ -396,7 +396,7 @@ export default function App() {
   // on the first render too, when `repo` is still null.
   useEffect(() => {
     if (window.parent === window) return;
-    window.parent.postMessage({ termiauRepoAberto: repo?.root ?? null }, "*");
+    window.parent.postMessage({ termiauRepoOpen: repo?.root ?? null }, "*");
   }, [repo]);
 
   useEffect(() => {
@@ -429,24 +429,24 @@ export default function App() {
   /// and a burst of "v" would fire several `git add`s together — the second
   /// would run into the first one's `index.lock`. The diff is only redone when the
   /// queue empties, and the error is shown after it, or it would erase the error.
-  const filaIndice = useRef<Promise<void>>(Promise.resolve());
-  const naFila = useRef(0);
-  const erroNaFila = useRef<string | null>(null);
+  const queueIndex = useRef<Promise<void>>(Promise.resolve());
+  const inQueue = useRef(0);
+  const queueError = useRef<string | null>(null);
   const setStaged = useCallback(
-    (alvo: string, dentro: boolean) => {
+    (target: string, inside: boolean) => {
       if (!repo) return;
-      naFila.current++;
-      filaIndice.current = filaIndice.current.then(async () => {
+      inQueue.current++;
+      queueIndex.current = queueIndex.current.then(async () => {
         try {
-          await (dentro ? stage : unstage)(repo.root, alvo);
-          marcaNaTela.current = null;
+          await (inside ? stage : unstage)(repo.root, target);
+          markInScreen.current = null;
         } catch (err) {
-          erroNaFila.current = String(err);
+          queueError.current = String(err);
         }
-        if (--naFila.current > 0) return;
+        if (--inQueue.current > 0) return;
         await refresh(repo.root, target, scope);
-        if (erroNaFila.current) setError(erroNaFila.current);
-        erroNaFila.current = null;
+        if (queueError.current) setError(queueError.current);
+        queueError.current = null;
       });
     },
     [repo, target, scope, refresh],
@@ -455,11 +455,11 @@ export default function App() {
   /// The error propagates on purpose: the commit box shows it, beside the
   /// message the user just wrote and must not lose.
   const doCommit = useCallback(
-    async (mensagem: string) => {
+    async (messageText: string) => {
       if (!repo) return;
-      await commitIndex(repo.root, mensagem);
-      nossoCommit.current = Date.now();
-      marcaNaTela.current = null;
+      await commitIndex(repo.root, messageText);
+      ourCommit.current = Date.now();
+      markInScreen.current = null;
       await refresh(repo.root, target, scope);
     },
     [repo, target, scope, refresh],
@@ -483,16 +483,16 @@ export default function App() {
    * while the tab is visible.
    */
   useEffect(() => {
-    if (!repo || !working || !visivel) return;
-    let vivo = true;
+    if (!repo || !working || !visible) return;
+    let alive = true;
     const bater = async () => {
       try {
-        const marca = await workingStamp(repo.root);
-        if (!vivo) return;
-        const anterior = marcaNaTela.current;
-        marcaNaTela.current = marca;
+        const marker = await workingStamp(repo.root);
+        if (!alive) return;
+        const previous = markInScreen.current;
+        markInScreen.current = marker;
         // First tick (or right after one of our `git add`s): just record it.
-        if (anterior !== null && anterior !== marca) doRefresh();
+        if (previous !== null && previous !== marker) doRefresh();
       } catch {
         // Repository unavailable (folder deleted, .git vanishing during a rebase): the
         // next tick tries again, and refresh does the explaining.
@@ -502,29 +502,29 @@ export default function App() {
     // Two seconds: a tick costs a `git diff --raw` and an `ls-files`, which on a
     // large repository aren't free — and nobody edits a file and looks
     // at the tab in the same second.
-    const relogio = setInterval(bater, 2000);
+    const clock = setInterval(bater, 2000);
     return () => {
-      vivo = false;
-      clearInterval(relogio);
+      alive = false;
+      clearInterval(clock);
     };
-  }, [repo, working, visivel, doRefresh]);
+  }, [repo, working, visible, doRefresh]);
 
   // .git changed. A commit writes several files in there, and a fetch
   // writes many: without the wait, the same commit would open the dialog six times.
   useEffect(() => {
     if (!repo) return;
-    let espera: ReturnType<typeof setTimeout>;
-    const avisar = (e: Event) => {
+    let wait: ReturnType<typeof setTimeout>;
+    const notify = (e: Event) => {
       if ((e as CustomEvent<string>).detail !== repo.root) return;
       // The commit came from here: the screen already has it, there is nothing to report.
-      if (Date.now() - nossoCommit.current < 3000) return;
-      clearTimeout(espera);
-      espera = setTimeout(() => setMudou(true), 400);
+      if (Date.now() - ourCommit.current < 3000) return;
+      clearTimeout(wait);
+      wait = setTimeout(() => setChanged(true), 400);
     };
-    window.addEventListener("termiau:mudou", avisar);
+    window.addEventListener("termiau:changed", notify);
     return () => {
-      clearTimeout(espera);
-      window.removeEventListener("termiau:mudou", avisar);
+      clearTimeout(wait);
+      window.removeEventListener("termiau:changed", notify);
     };
   }, [repo]);
 
@@ -547,24 +547,24 @@ export default function App() {
   // In the to-be-committed tab the list comes split in two, like in
   // VS Code: what the commit will take and what it won't. A file half in the index
   // goes in the first group — part of it goes — and shows both buttons.
-  const grupos: GrupoArquivos[] | null = useMemo(() => {
+  const groups: GroupFiles[] | null = useMemo(() => {
     if (!working) return null;
-    const dentro = files.filter((f) => f.staged === "staged" || f.staged === "partial");
-    const fora = files.filter((f) => f.staged === "unstaged");
+    const inside = files.filter((f) => f.staged === "staged" || f.staged === "partial");
+    const outside = files.filter((f) => f.staged === "unstaged");
     return [
       {
-        chave: "indice",
-        titulo: T.noIndice,
-        tree: buildTree(dentro),
-        poeTudo: false,
-        vazio: T.nadaNoIndiceAinda,
+        key: "index",
+        title: T.inIndex,
+        tree: buildTree(inside),
+        stagesAll: false,
+        empty: T.nothingStagedYet,
       },
       {
-        chave: "fora",
-        titulo: T.foraDoIndice,
-        tree: buildTree(fora),
-        poeTudo: true,
-        vazio: T.tudoNoIndice,
+        key: "outside",
+        title: T.outsideIndex,
+        tree: buildTree(outside),
+        stagesAll: true,
+        empty: T.allStaged,
       },
     ];
   }, [working, files]);
@@ -690,17 +690,17 @@ export default function App() {
   }, []);
 
   /** Goes to where the cursor is now — which may no longer be where it was when the trip started. */
-  const alcancarCursor = useCallback(() => {
+  const reachCursor = useCallback(() => {
     clearTimeout(jumpTimer.current);
-    destravar.current?.();
-    destravar.current = undefined;
+    unlock.current?.();
+    unlock.current = undefined;
     jumpFrom.current = null;
-    const alvo = jumpTarget.current;
+    const target = jumpTarget.current;
     jumpTarget.current = null;
     const scroller = scrollerRef.current;
-    if (alvo && scroller) {
+    if (target && scroller) {
       const id = ++scrollAnim.current;
-      pousar(scroller, () => fileEls.current.get(alvo), () => id !== scrollAnim.current);
+      land(scroller, () => fileEls.current.get(target), () => id !== scrollAnim.current);
     }
     // Arrived: "v" works again, and the scroll moves the cursor again.
     scrollLock.current = false;
@@ -713,28 +713,28 @@ export default function App() {
    * misses the target — the rest of the collapse pulls everything up. The clock is the
    * safety net for when the collapse doesn't notify; with nothing closing, it goes right away.
    */
-  const agendarRolagem = useCallback(
-    (destino: string, fechando: string | null) => {
-      jumpTarget.current = destino;
-      jumpFrom.current = fechando;
+  const scheduleScroll = useCallback(
+    (destination: string, closing: string | null) => {
+      jumpTarget.current = destination;
+      jumpFrom.current = closing;
       scrollLock.current = true;
       clearTimeout(jumpTimer.current);
       // Whatever was still holding the previous file at the top lets go: left running, it
       // would pull the scroll back to it during this close.
       ++scrollAnim.current;
-      destravar.current?.();
-      destravar.current = undefined;
+      unlock.current?.();
+      unlock.current = undefined;
       const scroller = scrollerRef.current;
-      const secao = fechando ? fileEls.current.get(fechando) : undefined;
-      if (scroller && secao) {
+      const section = closing ? fileEls.current.get(closing) : undefined;
+      if (scroller && section) {
         // The header of the one closing at the top first, then nothing moves until it closes.
-        const d = distanciaDoTopo(scroller, secao);
+        const d = distanceFromTop(scroller, section);
         if (d < 0) scroller.scrollTop += d;
-        destravar.current = travarRolagem(scroller);
+        unlock.current = lockScroll(scroller);
       }
-      jumpTimer.current = setTimeout(alcancarCursor, fechando ? COLLAPSE_MS + STEP_PAUSE_MS : 0);
+      jumpTimer.current = setTimeout(reachCursor, closing ? COLLAPSE_MS + STEP_PAUSE_MS : 0);
     },
-    [alcancarCursor],
+    [reachCursor],
   );
 
   const handleCollapseEnd = useCallback(
@@ -743,9 +743,9 @@ export default function App() {
       jumpFrom.current = null;
       // A short beat between "closed" and "moving on" so each step reads on its own.
       clearTimeout(jumpTimer.current);
-      jumpTimer.current = setTimeout(alcancarCursor, STEP_PAUSE_MS);
+      jumpTimer.current = setTimeout(reachCursor, STEP_PAUSE_MS);
     },
-    [alcancarCursor],
+    [reachCursor],
   );
 
   /** The file the keyboard acts on: the one at the top of the diff. */
@@ -759,7 +759,7 @@ export default function App() {
 
   // The burst just reached the screen: what was only in the ref is now in state.
   useEffect(() => {
-    marcados.current = new Set();
+    markedOnes.current = new Set();
   }, [viewedPaths]);
 
   /**
@@ -769,47 +769,47 @@ export default function App() {
    * from "v" or from the header's checkbox: left where it was, the scroll would show
    * whatever slid up under it, which in a long diff is its middle.
    */
-  const definirVisto = useCallback(
+  const setSeen = useCallback(
     (file: FileDiff, value: boolean) => {
       // The screen's state plus what this burst already marked and it doesn't show yet.
-      const vistos = marcados.current.size
-        ? new Set([...viewedPaths, ...marcados.current])
+      const seen = markedOnes.current.size
+        ? new Set([...viewedPaths, ...markedOnes.current])
         : viewedPaths;
       // Unviewed files are open unless the user closed them or they're generated.
       const alreadyClosed = collapsedOverrides[fileKey(file)] ?? isGenerated(file.path);
       markViewed(file, value);
       if (!value) {
-        marcados.current.delete(file.path);
+        markedOnes.current.delete(file.path);
         return;
       }
-      marcados.current.add(file.path);
-      const next = nextToReview(files, file.path, vistos);
+      markedOnes.current.add(file.path);
+      const next = nextToReview(files, file.path, seen);
       if (!next) return;
       // The cursor is the list's, not the scroll's: the next one to review, wherever
       // it is on screen.
       cursor.current = next.path;
       setActivePath(next.path);
-      agendarRolagem(next.path, alreadyClosed ? null : file.path);
+      scheduleScroll(next.path, alreadyClosed ? null : file.path);
     },
-    [files, viewedPaths, collapsedOverrides, markViewed, agendarRolagem],
+    [files, viewedPaths, collapsedOverrides, markViewed, scheduleScroll],
   );
 
   // "V" toggles the current file.
   const toggleCurrentViewed = useCallback(() => {
-    const atual = cursor.current ?? currentPath;
-    const file = files.find((f) => f.path === atual);
+    const current = cursor.current ?? currentPath;
+    const file = files.find((f) => f.path === current);
     if (!file) return;
-    const vistos = marcados.current.size ? new Set([...viewedPaths, ...marcados.current]) : viewedPaths;
-    definirVisto(file, !vistos.has(file.path));
-  }, [files, currentPath, viewedPaths, definirVisto]);
+    const seen = markedOnes.current.size ? new Set([...viewedPaths, ...markedOnes.current]) : viewedPaths;
+    setSeen(file, !seen.has(file.path));
+  }, [files, currentPath, viewedPaths, setSeen]);
 
   /** Is everything within this target already in the index? It decides whether the key stages or unstages. */
-  const tudoNoIndice = useCallback(
-    (alvo: string) => {
-      const dentro = files.filter(
-        (f) => alvo === "." || f.path === alvo || f.path.startsWith(`${alvo}/`),
+  const allStaged = useCallback(
+    (target: string) => {
+      const inside = files.filter(
+        (f) => target === "." || f.path === target || f.path.startsWith(`${target}/`),
       );
-      return dentro.length > 0 && dentro.every((f) => f.staged === "staged");
+      return inside.length > 0 && inside.every((f) => f.staged === "staged");
     },
     [files],
   );
@@ -819,16 +819,16 @@ export default function App() {
    * folder and the whole repository. Toggling instead of only staging is what spares a
    * second key for each of the three.
    */
-  const alternarIndice = useCallback(
-    (alvo: string) => void setStaged(alvo, !tudoNoIndice(alvo)),
-    [setStaged, tudoNoIndice],
+  const toggleIndex = useCallback(
+    (target: string) => void setStaged(target, !allStaged(target)),
+    [setStaged, allStaged],
   );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target)) return;
-      const tecla = e.key.toLowerCase();
-      if (tecla === "v") {
+      const keyOf = e.key.toLowerCase();
+      if (keyOf === "v") {
         e.preventDefault();
         // Only the file already on screen can be marked. Held down, the key repeats and
         // would mark the next ones unseen; pressed again during the trip, it would mark
@@ -839,21 +839,21 @@ export default function App() {
       }
       // The index only exists in the to-be-committed tab.
       if (!working) return;
-      const atual = files.find((f) => f.path === (cursor.current ?? currentPath));
-      if (tecla === "s" && atual) {
+      const current = files.find((f) => f.path === (cursor.current ?? currentPath));
+      if (keyOf === "s" && current) {
         e.preventDefault();
         // ⇧S goes up one step: the file's folder — the root is the whole repository.
-        const pasta = atual.path.split("/").slice(0, -1).join("/");
-        alternarIndice(e.shiftKey ? pasta || "." : atual.path);
+        const folder = current.path.split("/").slice(0, -1).join("/");
+        toggleIndex(e.shiftKey ? folder || "." : current.path);
       }
-      if (tecla === "a") {
+      if (keyOf === "a") {
         e.preventDefault();
-        alternarIndice(".");
+        toggleIndex(".");
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [toggleCurrentViewed, working, files, currentPath, alternarIndice]);
+  }, [toggleCurrentViewed, working, files, currentPath, toggleIndex]);
 
   const selectBookmark = useCallback(
     (b: Bookmark) => {
@@ -896,14 +896,14 @@ export default function App() {
 
   return (
     <div className="app">
-      {mudou && (
-        <Mudou
+      {changed && (
+        <Changed
           onReload={() => {
-            setMudou(false);
+            setChanged(false);
             doRefresh();
           }}
-          onDismiss={() => setMudou(false)}
-          visivel={visivel}
+          onDismiss={() => setChanged(false)}
+          visible={visible}
         />
       )}
       {repo && (
@@ -925,7 +925,7 @@ export default function App() {
         <div className="banner error" role="alert">
           <Icon name="warning" />
           <span>{error}</span>
-          <button className="icon-btn" title={T.fechar} onClick={() => setError(null)}>
+          <button className="icon-btn" title={T.close} onClick={() => setError(null)}>
             <Icon name="x" />
           </button>
         </div>
@@ -934,7 +934,7 @@ export default function App() {
         <div className="workspace">
           <Sidebar
             tree={tree}
-            grupos={grupos}
+            groups={groups}
             files={files}
             viewedPaths={viewedPaths}
             activePath={currentPath}
@@ -943,7 +943,7 @@ export default function App() {
             placements={placements}
             referenceOf={referenceOf}
             staging={working}
-            noIndice={files.filter((f) => f.staged === "staged" || f.staged === "partial").length}
+            inIndex={files.filter((f) => f.staged === "staged" || f.staged === "partial").length}
             onStage={setStaged}
             onCommit={doCommit}
             onSelectFile={selectFile}
@@ -958,22 +958,22 @@ export default function App() {
                 <div className="diff-summary">
                   {working ? (
                     <span>
-                      <Trechos de={T.resumoWorking(diff.branch ?? "HEAD")} />
+                      <Snippets from={T.summaryWorking(diff.branch ?? "HEAD")} />
                     </span>
                   ) : sinceBase ? (
                     <span>
-                      <Trechos de={T.resumoIncremental(diff.branch ?? "HEAD", sinceBase.slice(0, 7))} />
+                      <Snippets from={T.summaryIncremental(diff.branch ?? "HEAD", sinceBase.slice(0, 7))} />
                     </span>
                   ) : (
                     <span>
-                      <Trechos de={T.resumoBranch(diff.branch ?? "HEAD", diff.target)} />
-                      {incremental && T.semRevisaoCompleta}
+                      <Snippets from={T.summaryBranch(diff.branch ?? "HEAD", diff.target)} />
+                      {incremental && T.noCompleteReview}
                     </span>
                   )}
                   {sinceBase && <ResolvedCount bookmarks={bookmarks} placements={placements} />}
                   {working ? (
-                    <span className="sha" title={`head ${diff.headSha}\n${T.ladoNovoEODisco}`}>
-                      {diff.headSha.slice(0, 7)}…{T.disco}
+                    <span className="sha" title={`head ${diff.headSha}\n${T.newSideIsDisk}`}>
+                      {diff.headSha.slice(0, 7)}…{T.disk}
                     </span>
                   ) : (
                     <span className="sha" title={`base ${diff.mergeBase}\nhead ${diff.headSha}`}>
@@ -984,25 +984,25 @@ export default function App() {
               )}
               {diff && files.length === 0 && sinceBase && (
                 <div className="empty-diff">
-                  <h2>{T.nadaNovo}</h2>
+                  <h2>{T.nothingNew}</h2>
                   <p>
-                    <Trechos de={T.nadaNovoTexto(diff.branch ?? "HEAD", sinceBase.slice(0, 7))} />
+                    <Snippets from={T.nothingNewText(diff.branch ?? "HEAD", sinceBase.slice(0, 7))} />
                   </p>
                 </div>
               )}
               {diff && files.length === 0 && working && (
                 <div className="empty-diff">
-                  <h2>{T.nadaParaCommitar}</h2>
+                  <h2>{T.nothingForCommit}</h2>
                   <p>
-                    <Trechos de={T.nadaParaCommitarTexto(diff.branch ?? "HEAD")} />
+                    <Snippets from={T.nothingForCommitText(diff.branch ?? "HEAD")} />
                   </p>
                 </div>
               )}
               {diff && files.length === 0 && !sinceBase && !working && (
                 <div className="empty-diff">
-                  <h2>{T.nadaParaRevisar}</h2>
+                  <h2>{T.nothingForReview}</h2>
                   <p>
-                    <Trechos de={T.nadaParaRevisarTexto(diff.branch ?? "HEAD", diff.target)} />
+                    <Snippets from={T.nothingForReviewText(diff.branch ?? "HEAD", diff.target)} />
                   </p>
                 </div>
               )}
@@ -1029,7 +1029,7 @@ export default function App() {
                       registerElement={registerElement}
                       onCollapse={setCollapsed}
                       onCollapseEnd={handleCollapseEnd}
-                      onSetViewed={definirVisto}
+                      onSetViewed={setSeen}
                       onAddBookmark={addBookmark}
                       onUpdateBookmark={updateBookmark}
                       onRemoveBookmark={removeBookmark}
@@ -1037,7 +1037,7 @@ export default function App() {
                     />
                   );
                 })}
-              {!diff && loading && <div className="loading-state">{T.carregandoDiff}</div>}
+              {!diff && loading && <div className="loading-state">{T.loadingDiff}</div>}
             </div>
           </main>
         </div>

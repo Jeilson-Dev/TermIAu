@@ -55,7 +55,7 @@ async function decode(root: string, oid: string, type: string): Promise<LoadedIm
     await element.decode();
   } catch {
     URL.revokeObjectURL(url);
-    throw new Error(T.imagemIlegivel);
+    throw new Error(T.unreadableImage);
   }
   return { url, width: element.naturalWidth, height: element.naturalHeight, size: bytes.byteLength, element };
 }

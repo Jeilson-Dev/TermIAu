@@ -23,28 +23,28 @@
   --yellow: #f1fa8c;
 
   /* The gap between panels: the divider's width in the grid (written by
-     `aplicarFracao`, in src/main.ts) and the thickness of the drawer's handle. It is what
+     `applyFraction`, in src/main.ts) and the thickness of the drawer's handle. It is what
      keeps one panel away from another — with the screen split, the gap is background, not border. */
-  --vao: 10px;
-  --canto: 10px;
+  --gap: 10px;
+  --corner: 10px;
   /* How much the panel without the keyboard dims. It dims entirely — background, text and
-     shadow — and, since what is behind it is `--fosso`, dimming is receding. */
-  --apagado: 0.42;
+     shadow — and, since what is behind it is `--trench`, dimming is receding. */
+  --dimmed: 0.42;
   /* The background showing in the gaps and around the cards. Darker than
      `--bg-darker`, the deepest in the palette: here it isn't an app surface,
      it is the void between surfaces, and the contrast with it is what gives relief. */
-  --fosso: #0c0d11;
+  --trench: #0c0d11;
   /* The timing of focus changes — panel, tab, purple ring. All with the same
      duration on purpose: it is always the same thing happening, focus going from one
      place to another, and different durations would make them look like separate effects. */
-  --tempo: 560ms;
+  --time: 560ms;
 }
 
 html, body {
   margin: 0;
   height: 100%;
   overflow: hidden;
-  background: var(--fosso);
+  background: var(--trench);
 }
 
 body {
@@ -68,23 +68,23 @@ body {
    panel or with six: ⌘D must not move the terminal — what was
    written on the line above would stay on the line above, but shifted, and that
    is what shows up as a jitter. */
-.aba {
+.tab-body {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: var(--vao);
+  padding: var(--gap);
   box-sizing: border-box;
-  background: var(--fosso);
+  background: var(--trench);
 }
 
-.aba > .folha,
-.aba > .divisao,
-.aba > .moldura {
+.tab-body > .leaf,
+.tab-body > .split,
+.tab-body > .outline {
   flex: 1;
   min-height: 0;
 }
 
-.aba[hidden] {
+.tab-body[hidden] {
   display: none;
 }
 
@@ -92,28 +92,28 @@ body {
    it comes from `display:none` — there is no previous state to transition from, and the
    browser restarts the animation every time it is shown again. Opacity
    only: touching the scale would blur the terminal's text midway. */
-@keyframes termiau-aba-entra {
+@keyframes termiau-tab-enter {
   from { opacity: 0.4; }
   to { opacity: 1; }
 }
 
-.aba:not([hidden]) {
-  animation: termiau-aba-entra var(--tempo) ease-out;
+.tab-body:not([hidden]) {
+  animation: termiau-tab-enter var(--time) ease-out;
 }
 
 /* The card. `overflow:hidden` is what makes the panel bar, on top, and the
    drawer, below, respect the rounding — and the shadow lifts it off the
    background. Applies to the tree's leaves, split or not; the terminal inside
    a drawer is left out, since it is already inside a card. */
-.aba > .folha,
-.aba .divisao > .folha,
-.aba > .moldura {
+.tab-body > .leaf,
+.tab-body .split > .leaf,
+.tab-body > .outline {
   position: relative;
-  border-radius: var(--canto);
+  border-radius: var(--corner);
   overflow: hidden;
   background: var(--bg);
   box-shadow: 0 1px 4px #000000a6;
-  --borda: var(--bg-lighter);
+  --border: var(--bg-lighter);
   /* The card is its own stacking context: what goes up inside it (the chat, the
      viewer, xterm's layers) stays below its border, and nothing escapes outside. */
   isolation: isolate;
@@ -124,18 +124,18 @@ body {
    ate the top stroke and xterm, which overflows its own box, the bottom one. The
    ::after is the last child, so it goes over all of them and closes all four
    sides. `inherit` on the radius keeps it glued to the rounded corner. */
-.aba > .folha::after,
-.aba .divisao > .folha::after,
-.aba > .moldura::after {
+.tab-body > .leaf::after,
+.tab-body .split > .leaf::after,
+.tab-body > .outline::after {
   content: "";
   position: absolute;
   inset: 0;
-  border: 1px solid var(--borda);
+  border: 1px solid var(--border);
   border-radius: inherit;
   /* It covers the whole terminal: without this, clicking and dragging text would stop
      on it instead of reaching xterm. */
   pointer-events: none;
-  transition: border-color var(--tempo) ease;
+  transition: border-color var(--time) ease;
   /* Above everything in the card: split, the terminal's side covered the border
      and only the viewer's half pulsed. */
   z-index: 30;
@@ -144,42 +144,42 @@ body {
 /* Out of focus the panel dims — but only when there is another panel to
    tell it apart from. With a single one it is always focused, and dimming it would dim the
    whole window. */
-.aba.dividida .divisao > .folha {
-  opacity: var(--apagado);
+.tab-body.divided .split > .leaf {
+  opacity: var(--dimmed);
   /* The focus change is instant, but lighting up isn't: the trail says where the
      keyboard came from. */
-  transition: opacity var(--tempo) ease;
+  transition: opacity var(--time) ease;
 }
 
 /* A maximized panel: only the path from the root to it stays on screen
-   (`marcarMaximizada` marks it). That path's splits become flex, and the grid with
+   (`markMaximized` marks it). That path's splits become flex, and the grid with
    each one's fractions stays stored in `style` for when it restores. The other
    panels just go out of view — they stay alive, with the shell running. */
-.aba.maximizada .divisao.caminho {
+.tab-body.maximized .split.path {
   display: flex;
   flex-direction: column;
 }
 
-.aba.maximizada .divisao.caminho > :not(.caminho) {
+.tab-body.maximized .split.path > :not(.path) {
   display: none;
 }
 
-.aba.maximizada .divisao.caminho > .caminho {
+.tab-body.maximized .split.path > .path {
   flex: 1;
 }
 
 /* Alone on screen, there is nothing to tell it apart from: the dimming and the ring go away. */
-.aba.maximizada.dividida .divisao > .folha.caminho {
+.tab-body.maximized.divided .split > .leaf.path {
   opacity: 1;
-  --borda: var(--bg-lighter);
+  --border: var(--bg-lighter);
   box-shadow: 0 1px 4px #000000a6;
 }
 
-/* A split: first child, divider, second child. `aplicarFracao` in src/main.ts
+/* A split: first child, divider, second child. `applyFraction` in src/main.ts
    writes the tracks, because the share changes when dragging the divider.
    No background on purpose, including in nested splits: what shows in the gaps
    is always the tab's background. */
-.divisao {
+.split {
   display: grid;
   height: 100%;
   background: transparent;
@@ -187,14 +187,14 @@ body {
 
 /* Grid items don't shrink below their content by default, and the content here is
    a terminal: without this a squeezed panel would push its neighbor out. */
-.divisao > * {
+.split > * {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
 
 /* The panel itself: bar on top, terminal in the middle, drawer below. */
-.folha {
+.leaf {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -204,14 +204,14 @@ body {
 /* The terminal inside the panel: between the bar, on top, and the drawer, below.
    Inside it, `.folha-tela` (the terminal and the chat) and, when the viewer is
    split, the handle and the viewer beside it. */
-.folha-termo {
+.leaf-term {
   flex: 1;
   min-height: 0;
   box-sizing: border-box;
   display: flex;
 }
 
-.folha-tela {
+.leaf-screen {
   flex: 1 1 0;
   min-width: 0;
   min-height: 0;
@@ -223,7 +223,7 @@ body {
    `border-box`), the 10px top+bottom counted as free
    space — whenever the remainder of dividing by the cell height was less than
    10px, we got one more line than fit, and the last one came out clipped. */
-.folha-tela > .xterm {
+.leaf-screen > .xterm {
   height: 100%;
   padding: 6px 4px 4px 8px;
   box-sizing: border-box;
@@ -236,18 +236,18 @@ body {
   background: transparent;
 }
 
-.divisor.lado {
+.divisor.side {
   cursor: col-resize;
 }
 
-.divisor.abaixo {
+.divisor.below {
   cursor: row-resize;
 }
 
 /* Which panel has the keyboard. Only shows when there is more than one: with one, the
    outline would be a permanent frame around the whole window. */
-.folha.com-gaveta.focada > .folha-termo,
-.gaveta > .folha.focada {
+.leaf.with-drawer.focused > .leaf-term,
+.drawer > .leaf.focused {
   box-shadow: inset 0 0 0 1px var(--selection);
 }
 
@@ -255,24 +255,24 @@ body {
    corner and the deeper shadow lifting it above its neighbors. Only with the
    screen split — with a single panel the ring would be a permanent frame, and there is
    nothing to tell it apart from. */
-.aba.dividida .divisao > .folha.focada {
+.tab-body.divided .split > .leaf.focused {
   opacity: 1;
-  --borda: var(--comment);
+  --border: var(--comment);
   box-shadow: 0 6px 22px #000000bf;
 }
 
 /* Three states speak even without the keyboard: the panel waiting for you, the one
    about to get the file being dragged and the one with full context. Dimming them
    would swallow the notice. */
-.aba.dividida .divisao > .folha.esperando,
-.aba.dividida .divisao > .folha.recebendo,
-.aba.dividida .divisao > .folha.contexto-cheio {
+.tab-body.divided .split > .leaf.waiting,
+.tab-body.divided .split > .leaf.receiving,
+.tab-body.divided .split > .leaf.context-full {
   opacity: 1;
 }
 
 /* The drawer: the terminal of the app the panel's play button runs, below its
    terminal. The handle is as thick as the divider, and dragging it changes the height. */
-.gaveta {
+.drawer {
   flex: none;
   display: flex;
   flex-direction: column;
@@ -280,18 +280,18 @@ body {
   min-height: 80px;
 }
 
-.gaveta[hidden] {
+.drawer[hidden] {
   display: none;
 }
 
-.gaveta-alca {
+.drawer-handle {
   flex: none;
-  height: var(--vao);
+  height: var(--gap);
   background: var(--bg-darker);
   cursor: row-resize;
 }
 
-.gaveta > .folha {
+.drawer > .leaf {
   flex: 1;
   min-height: 0;
 }
@@ -357,15 +357,15 @@ body {
   align-items: stretch;
   /* The same background as the gaps between panels: the bar stops being a surface
      with tabs stuck to it and becomes the dark where the chips float. The gap
-     between them is the same `--vao` as there, halved — they are chips, not panels. */
-  gap: calc(var(--vao) / 2);
+     between them is the same `--gap` as there, halved — they are chips, not panels. */
+  gap: calc(var(--gap) / 2);
   /* Below, nothing: the gap between the chips and the card comes from the tab's
-     `padding`, right below, which is also `--vao`. Adding both made the bottom one
-     three times the top. On the sides the same `--vao` as the tab, so the chips
+     `padding`, right below, which is also `--gap`. Adding both made the bottom one
+     three times the top. On the sides the same `--gap` as the tab, so the chips
      start and end in the same column as the card. */
-  padding: var(--vao) var(--vao) 0;
+  padding: var(--gap) var(--gap) 0;
   box-sizing: border-box;
-  background: var(--fosso);
+  background: var(--trench);
   /* The bar must not shrink or scroll along: with many tabs they are what
      squeeze, like in Terminal.app. */
   flex: none;
@@ -400,14 +400,14 @@ body {
   border: none;
   /* A bit less than the panel's corner: the chip is smaller, and the same radius on it
      would look rounder than there. */
-  border-radius: calc(var(--canto) - 2px);
+  border-radius: calc(var(--corner) - 2px);
   cursor: default;
   /* Anchor for the purple ring, which is an ::after. */
   position: relative;
   /* Idle tabs stay receded, like panels without the keyboard. */
   opacity: 0.7;
-  transition: opacity var(--tempo) ease, background-color var(--tempo) ease,
-    color var(--tempo) ease;
+  transition: opacity var(--time) ease, background-color var(--time) ease,
+    color var(--time) ease;
 }
 
 /* The current tab's ring. It arrives closing over the chip — comes in a bit
@@ -423,11 +423,11 @@ body {
   transform: scale(1.06);
   /* The ring covers the whole chip, including the close X. */
   pointer-events: none;
-  transition: opacity var(--tempo) ease, transform var(--tempo) cubic-bezier(0.2, 0.7, 0.3, 1),
-    border-color var(--tempo) ease;
+  transition: opacity var(--time) ease, transform var(--time) cubic-bezier(0.2, 0.7, 0.3, 1),
+    border-color var(--time) ease;
 }
 
-.tab.ativa::after {
+.tab.active::after {
   opacity: 1;
   transform: none;
 }
@@ -438,7 +438,7 @@ body {
    away — the ring outlines the whole tab and answers that on its own.
 
    `transition: none` here and not on `.tab::after`: the focus ring arrives slowly
-   on purpose (--tempo, 560ms), but this is a notice within a 1s
+   on purpose (--time, 560ms), but this is a notice within a 1s
    window, and a notice that takes half a second to show arrives late. So it comes in
    sharp. Leaving is the opposite: with the class removed, the timings above apply
    again, and the red fades at the same pace as the rest of the bar — which is the
@@ -458,13 +458,13 @@ body {
 /* The current tab: fully lit and in the terminal's tone. The purple ring took the
    place of the stroke that sat on top — on a rounded chip the stroke becomes a crooked
    arc. ::after, right above, draws it. */
-.tab.ativa {
+.tab.active {
   opacity: 1;
   color: var(--fg);
   background: var(--bg);
 }
 
-.tab-titulo {
+.tab-title {
   /* As wide as the text: the branch comes right after it, and ✕ goes to the right
      through `margin-left: auto`. */
   flex: 0 1 auto;
@@ -474,7 +474,7 @@ body {
   white-space: nowrap;
 }
 
-.tab-fechar {
+.tab-close {
   flex: none;
   margin-left: auto;
   display: flex;
@@ -490,17 +490,17 @@ body {
 }
 
 /* The drawing doesn't take the click: the chip asks whether the target is ✕ itself. */
-.tab-fechar svg {
+.tab-close svg {
   display: block;
   pointer-events: none;
 }
 
-.tab:hover .tab-fechar,
-.tab.ativa .tab-fechar {
+.tab:hover .tab-close,
+.tab.active .tab-close {
   opacity: 1;
 }
 
-.tab-fechar:hover {
+.tab-close:hover {
   background: var(--bg-lighter);
   color: var(--fg);
 }
@@ -508,29 +508,29 @@ body {
 /* The pinned tab: icon only, fixed width, against the left. It is always
    on the bar — a chip the size of the others would steal space from the name of what is
    running, which is the information that changes. */
-.tab.presa {
+.tab.pinned {
   flex: none;
   width: 34px;
   justify-content: center;
   padding: 6px 0;
   /* The stroke that separated the fixture from the real tabs doesn't survive the rounded
      corner: what separates now is a gap larger than the other chips'. */
-  margin-right: calc(var(--vao) / 2);
+  margin-right: calc(var(--gap) / 2);
 }
 
-.tab.presa svg {
+.tab.pinned svg {
   display: block;
 }
 
 /* The "+": a chip the size of the tabs' ✕, against the end of the bar. `order`
    keeps it there without depending on DOM order — a new tab's chip always comes in at the
    end of the bar, and without this it would push the button into the row. */
-.tab-mais {
+.tab-more {
   order: 1;
   flex: none;
   /* One gap more than the chips' among themselves, like the pinned tab's on the other side:
      it is no longer a tab in the row, it is what opens the next one. */
-  margin-left: calc(var(--vao) / 2);
+  margin-left: calc(var(--gap) / 2);
   /* Flex, not the centering <button> gives for free: the inside of the button is
      text alignment, by the baseline. Here what is inside is a drawing,
      and a drawing is centered by its box. */
@@ -540,7 +540,7 @@ body {
   width: 28px;
   padding: 0;
   border: none;
-  border-radius: calc(var(--canto) - 2px);
+  border-radius: calc(var(--corner) - 2px);
   background: transparent;
   color: var(--comment);
   cursor: default;
@@ -549,11 +549,11 @@ body {
 
 /* `block`: an <svg> is inline by default and would get the line's descender
    space below, pushing the drawing up. */
-.tab-mais svg {
+.tab-more svg {
   display: block;
 }
 
-.tab-mais:hover {
+.tab-more:hover {
   background: var(--bg-dark);
   color: var(--fg);
 }
@@ -562,7 +562,7 @@ body {
    diff button of that project's panel. Both lit at the same time is what says
    one is showing the other. It beats the active tab's highlight on purpose — the
    link still holds with the tab in front. */
-.tab.presa.ligado {
+.tab.pinned.on {
   color: var(--purple);
   opacity: 1;
 }
@@ -571,8 +571,8 @@ body {
    it is fixed, and vanishing and coming back would make the other chips dance — but dimmed and
    not reacting to the pointer, which is what says clicking there leads
    nowhere. :hover must come along, otherwise the tabs' highlight would relight it. */
-.tab.desabilitada,
-.tab.desabilitada:hover {
+.tab.disabled,
+.tab.disabled:hover {
   opacity: 0.3;
   color: var(--comment);
   cursor: default;
@@ -581,7 +581,7 @@ body {
 /* Dimmed and on screen at the same time: it is ⌘, — the preferences live in the differ and
    open with no repository. It gets out of the eye's way less than the other
    dimmed ones, otherwise the tab being viewed would seem not to be. */
-.tab.desabilitada.ativa {
+.tab.disabled.active {
   opacity: 0.55;
 }
 
@@ -589,7 +589,7 @@ body {
    global (it touches body, button, the scrollbar) and its shortcuts are
    single keys — none of that reaches the terminal from here. The frame is what clips the
    corner: the card's `border-radius` doesn't reach an iframe's content. */
-.quadro {
+.frame {
   display: block;
   width: 100%;
   height: 100%;
@@ -599,7 +599,7 @@ body {
 /* The tab being dragged goes over the others, and the shadow lifts it off the
    bar — without it, two tabs of similar color crossing become a blur
    and you can't see which one is in hand. */
-.tab.arrastando {
+.tab.dragging {
   position: relative;
   z-index: 1;
   cursor: grabbing;
@@ -613,7 +613,7 @@ body {
 /* A line at the top of each panel: its title and what can be done with it. The
    typography is the tabs'. Dimmed on panels without the keyboard — with the screen
    split, the lit title says at a glance which panel is focused. */
-.painel-barra {
+.panel-bar {
   flex: none;
   display: flex;
   align-items: center;
@@ -629,7 +629,7 @@ body {
   -webkit-user-select: none;
 }
 
-.tarefa-titulo {
+.task-title {
   /* As wide as the text, not stretched: the branch comes right after it.
      The controls' `margin-left: auto` is what pushes them to the right. */
   flex: 0 1 auto;
@@ -640,28 +640,28 @@ body {
   color: var(--comment);
 }
 
-.folha.focada > .painel-barra .tarefa-titulo {
+.leaf.focused > .panel-bar .task-title {
   color: var(--fg);
 }
 
 /* The branch, in brackets, after the title — on the panel bar and on the tab
    chip. It doesn't shrink: the title is what gives up space, with an ellipsis. */
-.ramo {
+.branch {
   flex: none;
   display: inline-flex;
   align-items: baseline;
   white-space: nowrap;
 }
 
-.ramo[hidden] {
+.branch[hidden] {
   display: none;
 }
 
 /* The Claude session's context, after the branch: a single pill, with the
    bar filling inside and the number on top. It is a button — the click sends
    /compact. */
-.tarefa-btn.tarefa-contexto {
-  --cor: var(--purple);
+.task-btn.task-context {
+  --tint: var(--purple);
   position: relative;
   flex: none;
   justify-content: center;
@@ -680,19 +680,19 @@ body {
   cursor: pointer;
 }
 
-.tarefa-contexto[hidden] {
+.task-context[hidden] {
   display: none;
 }
 
-.tarefa-contexto-cheio {
+.task-context-full {
   position: absolute;
   inset: 0 auto 0 0;
   width: 0;
-  background: color-mix(in srgb, var(--cor), transparent 45%);
+  background: color-mix(in srgb, var(--tint), transparent 45%);
   transition: width 600ms cubic-bezier(0.22, 0.61, 0.36, 1), background-color 300ms ease;
 }
 
-.tarefa-contexto-num {
+.task-context-num {
   position: relative;
   display: block;
   text-align: center;
@@ -700,17 +700,17 @@ body {
   color: var(--fg);
 }
 
-.tarefa-btn.tarefa-contexto:hover {
-  box-shadow: inset 0 0 0 1px var(--cor);
+.task-btn.task-context:hover {
+  box-shadow: inset 0 0 0 1px var(--tint);
 }
 
 /* Yellow from 60% used, red from 75%: time to compact. */
-.tarefa-contexto[data-nivel="atencao"] { --cor: var(--yellow); }
-.tarefa-contexto[data-nivel="perigo"] { --cor: var(--red); }
+.task-context[data-level="attention"] { --tint: var(--yellow); }
+.task-context[data-level="danger"] { --tint: var(--red); }
 
 /* Model and effort, right after the context: the same box, without the bar
    filling. The click opens the list to change them. */
-.tarefa-btn.tarefa-claude-opcao {
+.task-btn.task-claude-option {
   flex: none;
   height: 16px;
   margin-left: 4px;
@@ -724,41 +724,41 @@ body {
   cursor: pointer;
 }
 
-.tarefa-btn.tarefa-claude-opcao:hover {
+.task-btn.task-claude-option:hover {
   box-shadow: inset 0 0 0 1px var(--purple);
 }
 
-.tarefa-claude-opcao[hidden] {
+.task-claude-option[hidden] {
   display: none;
 }
 
-.tarefa-ramo {
+.task-branch {
   margin-left: -4px;
   color: var(--purple);
   opacity: 0.8;
 }
 
 /* The chip already gives a 6px gap; a text space is enough between title and branch. */
-.tab-ramo {
+.tab-branch {
   margin-left: -3px;
 }
 
 /* The cap is the width of "branch-longa": whatever exceeds it scrolls inside,
    the same way as the station's name in the footer. */
-.ramo-caixa {
+.branch-box {
   display: inline-block;
   max-width: 12ch;
   overflow: hidden;
   vertical-align: bottom;
 }
 
-.ramo-texto {
+.branch-text {
   display: inline-block;
   white-space: nowrap;
   will-change: transform;
 }
 
-.tarefa-aviso {
+.task-notice {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 45%;
@@ -768,26 +768,26 @@ body {
   color: var(--orange);
 }
 
-.tarefa-controles,
-.tarefa-acoes {
+.task-controls,
+.task-actions {
   flex: none;
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.tarefa-controles {
+.task-controls {
   margin-left: auto;
 }
 
-.tarefa-controles[hidden],
-.tarefa-btn[hidden],
-.tarefa-play-grupo[hidden],
-.tarefa-menu[hidden] {
+.task-controls[hidden],
+.task-btn[hidden],
+.task-play-group[hidden],
+.task-menu[hidden] {
   display: none;
 }
 
-.tarefa-btn {
+.task-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -801,17 +801,17 @@ body {
   cursor: pointer;
 }
 
-.tarefa-btn:hover:not(:disabled) {
+.task-btn:hover:not(:disabled) {
   background: var(--bg-lighter);
   color: var(--fg);
 }
 
-.tarefa-btn:disabled {
+.task-btn:disabled {
   cursor: default;
   opacity: 0.4;
 }
 
-.tarefa-btn svg {
+.task-btn svg {
   display: block;
 }
 
@@ -820,28 +820,28 @@ body {
    target — ran the app instead of opening the choice. Now they are two separate buttons,
    like the others on the bar: ▶ runs, the name with the arrow picks. The group
    remained as the unit that goes away together where there is no launch.json. */
-.tarefa-play-grupo {
+.task-play-group {
   display: flex;
   gap: 4px;
 }
 
-.tarefa-play .tarefa-icone {
+.task-play .task-icon {
   display: flex;
   color: var(--green);
 }
 
-.tarefa-nome {
+.task-name {
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tarefa-escolher {
+.task-choose {
   gap: 4px;
 }
 
-.tarefa-seta {
+.task-arrow {
   display: flex;
   color: var(--comment);
 }
@@ -849,51 +849,51 @@ body {
 /* A single configuration: there is nothing to pick, but the name still says what ▶
    runs. The button stays and becomes a label — no arrow, no hover and none of the dimming of
    disabled buttons, which here would hide precisely the information. */
-.tarefa-escolher.rotulo {
+.task-choose.label {
   cursor: default;
 }
 
-.tarefa-escolher.rotulo:disabled {
+.task-choose.label:disabled {
   opacity: 1;
 }
 
-.tarefa-escolher.rotulo .tarefa-seta {
+.task-choose.label .task-arrow {
   display: none;
 }
 
-.tarefa-parar {
+.task-stop {
   color: var(--red);
 }
 
-.tarefa-gaveta.ligado,
-.tarefa-maximizar.ligado {
+.task-drawer.on,
+.task-maximize.on {
   background: var(--bg-light);
   color: var(--fg);
 }
 
 /* Closing kills the shell: the ✕ turns red under the mouse. */
-.tarefa-fechar:hover:not(:disabled) {
+.task-close:hover:not(:disabled) {
   color: var(--red);
 }
 
-.tarefa-acao {
+.task-action {
   color: var(--yellow);
 }
 
 /* The diff button of the panel whose repository is open in the diff tab. Purple is
    the color the top bar already uses for "this is where you are". */
-.tarefa-diff.ligado {
+.task-diff.on {
   color: var(--purple);
 }
 
-.tarefa-diff.ligado:hover:not(:disabled) {
+.task-diff.on:hover:not(:disabled) {
   color: var(--purple);
   background: var(--bg-lighter);
 }
 
 /* A single list for the window, placed beside the button that opened it
-   (`alternarMenu` writes top and right): inside the panel, its edge would clip it. */
-.tarefa-menu {
+   (`toggleMenu` writes top and right): inside the panel, its edge would clip it. */
+.task-menu {
   position: fixed;
   z-index: 20;
   /* Loose in body, the list doesn't inherit the bar's font: without this the items came out
@@ -916,7 +916,7 @@ body {
 }
 
 /* launch.json's "──── DEV ────": a group title, not clickable. */
-.tarefa-menu-grupo {
+.task-menu-group {
   padding: 8px 10px 3px;
   color: var(--comment);
   font-size: 10px;
@@ -925,11 +925,11 @@ body {
   text-transform: uppercase;
 }
 
-.tarefa-menu-grupo:first-child {
+.task-menu-group:first-child {
   padding-top: 4px;
 }
 
-.tarefa-menu button {
+.task-menu button {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -944,15 +944,15 @@ body {
   cursor: pointer;
 }
 
-.tarefa-menu button:hover {
+.task-menu button:hover {
   background: var(--selection);
 }
 
-.tarefa-menu button.escolhida {
+.task-menu button.chosen {
   color: var(--green);
 }
 
-.tarefa-menu-tipo {
+.task-menu-kind {
   margin-left: auto;
   color: var(--comment);
   font-size: 11px;
@@ -963,7 +963,7 @@ body {
 
 /* A dot before the tab's title. With no session it is transparent, but takes the
    same space: the title doesn't dance when Claude starts or finishes. */
-.tab-sinal {
+.tab-dot {
   flex: none;
   width: 6px;
   height: 6px;
@@ -972,17 +972,17 @@ body {
 }
 
 /* Working: present, without calling attention. It is corner-of-the-eye information. */
-.tab[data-claude="trabalhando"] .tab-sinal {
+.tab[data-claude="working"] .tab-dot {
   background: var(--comment);
 }
 
 /* Waiting for you: the paw's color, blinking. */
-.tab[data-claude="esperando"] .tab-sinal {
+.tab[data-claude="waiting"] .tab-dot {
   background: var(--orange);
-  animation: termiau-pulso 1.1s ease-in-out infinite;
+  animation: termiau-pulse 1.1s ease-in-out infinite;
 }
 
-@keyframes termiau-pulso {
+@keyframes termiau-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.2; }
 }
@@ -993,24 +993,24 @@ body {
    already has an orange outline, and the focus purple is what says where you are. Armed
    wins: the red is a 1s notice and must not be swallowed by the blinking. The
    tab also stops being receded, otherwise the orange would come out dimmed. */
-.tab[data-claude="esperando"]:not(.ativa) {
+.tab[data-claude="waiting"]:not(.active) {
   opacity: 1;
   color: var(--fg-dim);
 }
 
-.tab[data-claude="esperando"]:not(.ativa):not(.armada)::after {
+.tab[data-claude="waiting"]:not(.active):not(.armada)::after {
   border-color: var(--orange);
   box-shadow: 0 0 8px #ffb86c66;
   transform: none;
-  animation: termiau-pulso 1.1s ease-in-out infinite;
+  animation: termiau-pulse 1.1s ease-in-out infinite;
 }
 
 /* On the panel, `outline` and not `box-shadow`: box-shadow already belongs to the focused panel,
    and both may apply at the same time — the waiting panel may be the focused one. */
-.folha.esperando {
+.leaf.waiting {
   outline: 1px solid var(--orange);
   outline-offset: -1px;
-  animation: termiau-pulso 1.6s ease-in-out infinite;
+  animation: termiau-pulse 1.6s ease-in-out infinite;
 }
 
 /* The panel about to get the file being dragged. It comes after
@@ -1019,7 +1019,7 @@ body {
    focus outline because it is the only response there is while the pointer
    holds the file — the app's cursor doesn't even show. */
 /* What is being dragged out of the explorer, following the pointer. */
-.arrasto-fantasma {
+.drag-ghost {
   position: fixed;
   top: 0;
   left: 0;
@@ -1034,12 +1034,12 @@ body {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
 }
 
-body.arrastando,
-body.arrastando * {
+body.dragging,
+body.dragging * {
   cursor: grabbing !important;
 }
 
-.folha.recebendo {
+.leaf.receiving {
   outline: 2px solid var(--cyan);
   outline-offset: -2px;
   background: var(--bg-light);
@@ -1047,9 +1047,9 @@ body.arrastando * {
 }
 
 
-/* ---------- voice strip ---------- */
+/* ---------- the footer ---------- */
 
-#voz {
+#status-bar {
   flex: none;
   display: flex;
   align-items: center;
@@ -1062,53 +1062,14 @@ body.arrastando * {
   background: var(--bg-dark);
   border-top: 1px solid var(--bg-darker);
   font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
-  /* Dimmed: the partial is a guess, and will still change while you speak. */
   color: var(--comment);
 }
 
-/* The wave is the only sign the microphone is really open — the partial stays
-   still while you don't speak, and still doesn't tell on from frozen.
-   Each little bar is an instant: ~20 arrive per second, new ones from the right. */
-.voz-onda {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  width: 65px;
-  height: 14px;
-  /* Quiet, the strip is empty, but the wave's place stays taken: the text
-     starts in the same column with the microphone open or closed. */
-  opacity: 0;
-  transition: opacity 140ms linear;
-}
-
-#voz.escutando .voz-onda {
-  opacity: 1;
-}
-
-.voz-onda > span {
-  flex: 1;
-  height: 100%;
-  border-radius: 1px;
-  background: var(--pink);
-  /* Mirrored in the middle: scaleY grows both ways from the center. */
-  transform: scaleY(0.06);
-  transition: transform 80ms linear;
-}
-
-.voz-texto {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-
 /* ---------- Claude usage in the footer ---------- */
 
-/* In the strip's left corner, before the voice wave. Hover opens the details
-   to the right, over the partial (which is almost always empty). */
-#uso {
+/* In the strip's left corner, before the plugins' left slots. Hover opens the
+   details to the right, over them. */
+#usage {
   flex: none;
   display: flex;
   align-items: center;
@@ -1120,67 +1081,67 @@ body.arrastando * {
   cursor: default;
 }
 
-#uso[hidden] {
+#usage[hidden] {
   display: none;
 }
 
 /* 1px above center: the strip has its border on top, and a truly centered
    circle looked low. */
-.uso-icone {
+.usage-icon {
   display: inline-flex;
   transform: translateY(-1px);
 }
 
 /* The clock is time: in the cyan of the time bars, and it doesn't light up with
    the pace — the tokens, beside it, are what light up. */
-.uso-icone .circulo {
+.usage-icon .circle {
   stroke: #3a9fb5;
   transition: stroke-dashoffset 900ms cubic-bezier(0.22, 0.61, 0.36, 1), stroke 300ms ease;
 }
 
 /* The hands: they rotate around the circle's center (8,8 in the viewBox). The
    hour hand follows the tip of the lit segment; the minute hand makes a turn on hover,
-   through `escoarUso` (src/main.ts), and stops. */
-.uso-icone .ponteiros {
+   through `drainUsage` (src/main.ts), and stops. */
+.usage-icon .pointers {
   color: var(--fg-dim);
 }
 
-.uso-icone .ponteiro-hora,
-.uso-icone .ponteiro-minuto {
+.usage-icon .pointer-hour,
+.usage-icon .pointer-minute {
   transform-box: view-box;
   transform-origin: 8px 8px;
 }
 
-.uso-icone .ponteiro-hora {
+.usage-icon .pointer-hour {
   transition: transform 900ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 /* The shine running along the circle, from tip to start: it draining. */
-.uso-icone .circulo-brilho {
+.usage-icon .circle-glow {
   stroke: color-mix(in srgb, #3a9fb5, white 50%);
   opacity: 0;
 }
 
 /* The available tokens: an upright bar, emptying from top to bottom, and
    the number beside it. */
-.uso-resumo {
+.usage-summary {
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.uso-pct {
+.usage-pct {
   font-size: 11px;
 }
 
-.uso-trilho.uso-mini {
+.usage-track.usage-mini {
   position: relative;
   width: 5px;
   height: 18px;
 }
 
 /* Upright, the fill rises from the bottom: the height is the fraction, and the width is full. */
-.uso-mini .uso-cheio {
+.usage-mini .usage-full {
   position: absolute;
   left: 0;
   right: 0;
@@ -1190,7 +1151,7 @@ body.arrastando * {
   transition: height 900ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-.uso-mini .uso-ponteiro {
+.usage-mini .usage-pointer {
   left: 0;
   right: 0;
   top: auto;
@@ -1201,14 +1162,14 @@ body.arrastando * {
 
 /* The color is the pace's: orange is going too fast, red is running out before
    renewing. On pace, the tokens stay in the radio's purple. */
-#uso[data-nivel="atencao"] .uso-mini .uso-cheio { --cor: var(--orange); }
-#uso[data-nivel="perigo"] .uso-mini .uso-cheio { --cor: var(--red); }
-#uso[data-nivel="atencao"] .uso-pct { color: var(--orange); }
-#uso[data-nivel="perigo"] .uso-pct { color: var(--red); font-weight: 600; }
+#usage[data-level="attention"] .usage-mini .usage-full { --tint: var(--orange); }
+#usage[data-level="danger"] .usage-mini .usage-full { --tint: var(--red); }
+#usage[data-level="attention"] .usage-pct { color: var(--orange); }
+#usage[data-level="danger"] .usage-pct { color: var(--red); font-weight: 600; }
 
 /* Two columns, session and week, each with two lines in the middle of the 30px
    strip. Closed, they take no space; hover opens them to the right. */
-.uso-detalhe {
+.usage-detail {
   display: flex;
   align-items: center;
   gap: 14px;
@@ -1220,36 +1181,36 @@ body.arrastando * {
   line-height: 12px;
 }
 
-#uso:hover .uso-detalhe {
+#usage:hover .usage-detail {
   max-width: 640px;
   opacity: 1;
   margin-left: 6px;
 }
 
-.uso-coluna {
+.usage-column {
   display: flex;
   align-items: center;
   gap: 6px;
   white-space: nowrap;
 }
 
-.uso-coluna + .uso-coluna {
+.usage-column + .usage-column {
   padding-left: 14px;
   border-left: 1px solid var(--bg-lighter);
 }
 
-.uso-titulo {
+.usage-title {
   color: var(--fg-dim);
   font-size: 11px;
 }
 
-.uso-linhas {
+.usage-lines {
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
 
-.uso-linha {
+.usage-line {
   display: flex;
   align-items: center;
   gap: 5px;
@@ -1257,11 +1218,11 @@ body.arrastando * {
 
 /* The labels say what the bar counts ("Time left", "Tokens
    available"): a fixed width so the bars on both lines align. */
-.uso-rotulo {
+.usage-label {
   width: 92px;
 }
 
-.uso-trilho {
+.usage-track {
   width: 72px;
   height: 5px;
   border-radius: 2px;
@@ -1269,45 +1230,45 @@ body.arrastando * {
   overflow: hidden;
 }
 
-/* Time is cyan, usage is purple (or the pace's color). The color goes in `--cor`
+/* Time is cyan, usage is purple (or the pace's color). The color goes in `--tint`
    so the inner little bar comes out of it, only lighter. */
-.uso-cheio {
-  --cor: var(--purple);
+.usage-full {
+  --tint: var(--purple);
   display: block;
   height: 100%;
   width: 0;
   border-radius: 2px;
   position: relative;
-  background-color: var(--cor);
+  background-color: var(--tint);
   transition: width 900ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 /* Like the hand rotating inside the circle: a little bar inside the bar,
    a few shades lighter than it, that leaves the tip and travels to the start
-   shrinking — the direction in which the bar decreases. `escoarUso`
+   shrinking — the direction in which the bar decreases. `drainUsage`
    (src/main.ts) animates it, along with the circle's shine. */
-.uso-ponteiro {
+.usage-pointer {
   position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
   width: 10px;
   border-radius: 2px;
-  background: color-mix(in srgb, var(--cor), white 50%);
+  background: color-mix(in srgb, var(--tint), white 50%);
   opacity: 0;
 }
 
 /* A deeper cyan than the theme's: in the light one the moving little bar vanished. */
-.uso-tempo .uso-cheio {
-  --cor: #3a9fb5;
+.usage-time .usage-full {
+  --tint: #3a9fb5;
 }
 
-.uso-linha[data-nivel="atencao"] .uso-cheio { --cor: var(--orange); }
-.uso-linha[data-nivel="perigo"] .uso-cheio { --cor: var(--red); }
-.uso-linha[data-nivel="atencao"] .uso-num { color: var(--orange); }
-.uso-linha[data-nivel="perigo"] .uso-num { color: var(--red); }
+.usage-line[data-level="attention"] .usage-full { --tint: var(--orange); }
+.usage-line[data-level="danger"] .usage-full { --tint: var(--red); }
+.usage-line[data-level="attention"] .usage-num { color: var(--orange); }
+.usage-line[data-level="danger"] .usage-num { color: var(--red); }
 
-.uso-num {
+.usage-num {
   width: 34px;
   color: var(--fg-dim);
 }
@@ -1315,7 +1276,7 @@ body.arrastando * {
 /* ---------- a long task's progress, in the footer ---------- */
 
 /* Beside the usage: one pill per panel whose Claude published a plan. */
-#progresso {
+#progress {
   flex: none;
   display: flex;
   align-items: center;
@@ -1324,11 +1285,11 @@ body.arrastando * {
   min-width: 0;
 }
 
-#progresso[hidden] {
+#progress[hidden] {
   display: none;
 }
 
-.progresso-pilula {
+.progress-pill {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1345,32 +1306,32 @@ body.arrastando * {
   cursor: pointer;
 }
 
-.progresso-pilula:hover,
-.progresso-pilula.aberta {
+.progress-pill:hover,
+.progress-pill.open {
   background: var(--bg-light);
   border-color: var(--bg-lighter);
   color: var(--fg-dim);
 }
 
-.progresso-pilula svg {
+.progress-pill svg {
   flex: none;
   transform: translateY(-0.5px);
 }
 
-.progresso-arco {
+.progress-arc {
   stroke: var(--purple);
   transition: stroke-dashoffset 900ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-.progresso-pilula.completo .progresso-arco {
+.progress-pill.complete .progress-arc {
   stroke: var(--green);
 }
 
-.progresso-pct {
+.progress-pct {
   color: var(--fg-dim);
 }
 
-.progresso-onde {
+.progress-where {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1378,7 +1339,7 @@ body.arrastando * {
 }
 
 /* The open list, above the footer and its pill. */
-.progresso-painel {
+.progress-panel {
   position: fixed;
   bottom: 36px;
   z-index: 50;
@@ -1396,28 +1357,28 @@ body.arrastando * {
   font-variant-numeric: tabular-nums;
 }
 
-.progresso-cabeca {
+.progress-head {
   display: flex;
   align-items: flex-start;
   gap: 6px;
 }
 
-.progresso-textos {
+.progress-texts {
   flex: 1;
   min-width: 0;
 }
 
-.progresso-titulo {
+.progress-title {
   font-size: 13px;
   font-weight: 600;
 }
 
-.progresso-sub {
+.progress-sub {
   color: var(--comment);
   font-size: 11px;
 }
 
-.progresso-btn {
+.progress-btn {
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -1432,33 +1393,33 @@ body.arrastando * {
   cursor: pointer;
 }
 
-.progresso-btn:hover {
+.progress-btn:hover {
   color: var(--fg);
 }
 
-.progresso-tirar {
+.progress-remove {
   padding: 0 4px;
 }
 
-.progresso-total {
+.progress-total {
   display: flex;
   align-items: center;
   gap: 8px;
   margin: 10px 0 8px;
 }
 
-.progresso-total .progresso-trilho {
+.progress-total .progress-track {
   flex: 1;
   width: auto;
   height: 7px;
 }
 
-.progresso-resumo {
+.progress-summary {
   color: var(--fg-dim);
   white-space: nowrap;
 }
 
-.progresso-trilho {
+.progress-track {
   flex: none;
   width: 90px;
   height: 5px;
@@ -1467,7 +1428,7 @@ body.arrastando * {
   overflow: hidden;
 }
 
-.progresso-cheio {
+.progress-full {
   display: block;
   height: 100%;
   border-radius: inherit;
@@ -1475,87 +1436,113 @@ body.arrastando * {
   transition: width 600ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-.progresso-blocos,
-.progresso-itens {
+.progress-blocks,
+.progress-items {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.progresso-bloco {
+.progress-block {
   padding: 4px 0;
   border-top: 1px solid var(--bg-light);
 }
 
-.progresso-linha,
-.progresso-item {
+.progress-line,
+.progress-item {
   display: flex;
   align-items: center;
   gap: 7px;
 }
 
-.progresso-sinal {
+.progress-dot {
   flex: none;
   width: 12px;
   text-align: center;
   color: var(--comment);
 }
 
-.progresso-nome {
+.progress-name {
   flex: 1;
   min-width: 0;
 }
 
-.progresso-num {
+.progress-num {
   width: 38px;
   text-align: right;
   color: var(--fg-dim);
 }
 
-.progresso-itens {
+.progress-items {
   margin: 3px 0 2px 19px;
   font-size: 11px;
   color: var(--fg-dim);
 }
 
-[data-status="done"] > .progresso-sinal,
-[data-status="done"] > .progresso-linha > .progresso-sinal {
+[data-status="done"] > .progress-dot,
+[data-status="done"] > .progress-line > .progress-dot {
   color: var(--green);
 }
 
-[data-status="doing"] > .progresso-sinal,
-[data-status="doing"] > .progresso-linha > .progresso-sinal {
+[data-status="doing"] > .progress-dot,
+[data-status="doing"] > .progress-line > .progress-dot {
   color: var(--orange);
 }
 
-.progresso-bloco[data-status="doing"] > .progresso-linha > .progresso-nome {
+.progress-block[data-status="doing"] > .progress-line > .progress-name {
   font-weight: 600;
 }
 
-.progresso-bloco[data-status="done"] .progresso-cheio {
+.progress-block[data-status="done"] .progress-full {
   background: var(--green);
 }
 
-.progresso-bloco[data-status="todo"] > .progresso-linha > .progresso-nome,
-.progresso-item[data-status="todo"] {
+.progress-block[data-status="todo"] > .progress-line > .progress-name,
+.progress-item[data-status="todo"] {
   color: var(--comment);
 }
 
-/* ---------- the footer radio ---------- */
+/* ---------- the footer's plugin slots ---------- */
 
 /* On the other side of the same strip. `margin-left: auto` is what pushes it to the
-   right without `.voz-texto` needing any width: with the
-   microphone closed the partial is empty, and the radio stays in its usual place. */
-#lofi {
+   right whatever the left slots hold. Each plugin gets one slot per region it
+   declares (see src/plugins/host.ts). */
+#status-bar-plugins {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 10px;
   margin-left: auto;
   padding-left: 10px;
 }
 
-.lofi-btn {
+#status-bar-plugins:empty {
+  display: none;
+}
+
+/* The left end, after the usage and progress pills: dictation's wave and text. It
+   takes what is left of the strip; the right slots don't shrink. */
+#status-bar-left {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#status-bar-left:empty {
+  display: none;
+}
+
+.status-bar-slot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* A footer button: the help's ✕, the dialogs' ✕ and every plugin's controls. */
+.footer-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1570,133 +1557,21 @@ body.arrastando * {
   cursor: pointer;
 }
 
-.lofi-btn:hover:not(:disabled) {
+.footer-btn:hover:not(:disabled) {
   background: var(--bg-light);
   color: var(--fg);
 }
 
-/* No station, nothing to play; with only one, nowhere to go. */
-.lofi-btn:disabled {
+.footer-btn:disabled {
   opacity: 0.35;
   cursor: default;
 }
 
-/* While playing, ▶/⏸ lights up: it is the only way to know, without sound, that the radio is
-   on air — the other clues (the title, the volume) look the same when stopped. */
-#lofi.tocando .lofi-tocar {
-  color: var(--purple);
-}
-
-/* While the stream opens the button doesn't respond for the first second, and blinking
-   is what says it heard the click. */
-#lofi.carregando .lofi-tocar {
-  color: var(--purple);
-  animation: lofi-pulso 1s ease-in-out infinite;
-}
-
-@keyframes lofi-pulso {
-  50% { opacity: 0.35; }
-}
-
-/* Thin on purpose: it is a secondary control on a 30px strip, and a
-   normal-height slider would push the rest out of alignment. */
-/* The volume is a button like the others, and what changes on it is the inner ring: the
-   transition is on the stroke, so the step doesn't show as a jump.
-
-   The lit stroke is the same purple as ▶ — it is the clue that there is a level there, and two
-   colors for two things that say "on" would make you look for the difference. The
-   ring's background and the mute slash stay in the strip's color: mute is the absence of
-   purple, and the whole button dims along. */
-.lofi-volume .anel {
-  stroke: var(--purple);
-  transition: stroke-dashoffset 140ms ease-out;
-}
-
-/* The spectrum analyzer. Ten 3px columns with a 1px gap: 39px in the strip's
-   tight corner, which it shares with the station's name. */
-.spec {
-  flex: none;
-  display: flex;
-  align-items: flex-end;
-  gap: 1px;
-  height: 14px;
-  margin-left: 8px;
-  opacity: 0;
-  transition: opacity 140ms linear;
-}
-
-#lofi.tocando .spec {
-  opacity: 1;
-}
-
-.spec-col {
-  position: relative;
-  width: 3px;
-  height: 100%;
-}
-
-/* The bar and the peak grow from the column's floor. The color belongs to the COLUMN, not the bar:
-   the gradient is measured over the full 14px and stays pinned at the bottom (`background-size`
-   + `bottom`), so red only shows when the bar really reaches the
-   top — if it followed the bar's height, any one-segment little
-   bar would be born red at its top.
-
-   The mask is what cuts it into LEDs instead of a smooth bar. It also runs
-   `to top`, from the floor: were it `to bottom`, the segments would start at the top of each
-   bar and the ten columns would be misaligned with each other. */
-.spec-nivel,
-.spec-pico {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-image: linear-gradient(to top, var(--purple) 0%, var(--purple) 52%, var(--pink) 100%);
-  background-size: 100% 14px;
-  background-position: bottom;
-  background-repeat: no-repeat;
-  -webkit-mask-image: repeating-linear-gradient(to top, #000 0 2px, transparent 2px 3px);
-  mask-image: repeating-linear-gradient(to top, #000 0 2px, transparent 2px 3px);
-}
-
-/* The peak is a loose segment, and so it doesn't use the mask: it ALREADY is the size
-   of an LED, and with the mask it would fall into the gap between two and vanish half the time.
-   Flat color, not the gradient: floating at different heights, the gradient would be
-   measured from the peak ITSELF, and it would come out purple at any height. */
-.spec-pico {
-  height: 2px;
-  background-image: none;
-  background-color: var(--fg);
-  -webkit-mask-image: none;
-  mask-image: none;
-  opacity: 0.9;
-}
-
-/* The station's name, and the current track behind it. A FIXED width, not a
-   cap: the track changes on its own with every song, and with a cap the box shrank and
-   grew along with the text — the buttons and the volume, which come before it on the
-   same line, jumped from side to side on every song change. Fixed,
-   nothing moves: whatever doesn't fit scrolls inside. */
-.lofi-titulo {
-  flex: none;
-  width: 100px;
-  overflow: hidden;
-}
-
-/* What scrolls. `inline-block` to have its own width: the difference between
-   it and the box's is what says how far there is to go, and a plain `span` would always measure
-   the box's width. The transition is set up and torn down by JS, which
-   knows the distance — and the distance depends on the text. */
-.lofi-titulo-texto {
-  display: inline-block;
-  white-space: nowrap;
-  will-change: transform;
-}
-
-/* ---------- the station editor (Radio ▸ Stations…) ---------- */
+/* ---------- the dialog shell (shortcuts, questions, plugins) ---------- */
 
 /* The `hidden` rule comes along: the `display: flex` down here would beat the
    `display: none` the attribute brings by default, and the box would never vanish. */
-.lofi-editor {
+.dialog {
   position: fixed;
   inset: 0;
   z-index: 40;
@@ -1706,11 +1581,11 @@ body.arrastando * {
   background: #0007;
 }
 
-.lofi-editor[hidden] {
+.dialog[hidden] {
   display: none;
 }
 
-.lofi-caixa {
+.dialog-box {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1727,96 +1602,38 @@ body.arrastando * {
   outline: none;
 }
 
-.lofi-cabeca {
+.dialog-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
 /* The dialogs' ✕, the same as the differ's Preferences (.icon-btn there). */
-.lofi-btn.lofi-fechar {
+.footer-btn.dialog-close {
   width: 24px;
   height: 24px;
   color: var(--fg-dim);
 }
 
-.lofi-btn.lofi-fechar:hover:not(:disabled) {
+.footer-btn.dialog-close:hover:not(:disabled) {
   background: var(--selection);
   color: var(--fg);
 }
 
-.lofi-cabeca-titulo {
+.dialog-title {
   color: var(--fg);
   /* The same title as the differ's Preferences. */
   font-size: 14px;
   font-weight: 600;
 }
 
-/* The list of forty-six. `flex-basis: auto` — and NOT `flex: 1 1 0` — because
-   the box sizes itself by its content: with a zero basis the list is born with zero
-   height, the content stays inside scrollable and invisible, and the box shows up empty.
-   With `auto` it asks for the content's height, `max-height` cuts it, and the rest
-   scrolls. */
-.lofi-lista {
+/* What a plugin's dialog holds (see createDialog in ui.ts). It sizes itself by its
+   content and lets its own list scroll inside it. */
+.dialog-body {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  overflow-y: auto;
   flex: 0 1 auto;
   min-height: 0;
-  max-height: 60vh;
-}
-
-/* The genre, behind the station's name. It helps choose among two hundred and
-   fifty names that don't say what they play — "Moss Garden" and "Limbik
-   Frequencies" don't explain themselves. */
-.lofi-genero {
-  margin-left: 8px;
-  color: var(--comment);
-  font-size: 11px;
-}
-
-/* The mark for the ones that play without a display. In the corner, small and dimmed: it is a
-   small difference, and whoever is choosing a radio is choosing sound. */
-.lofi-sem-spec {
-  flex: none;
-  padding-right: 9px;
-  color: var(--comment);
-  font-size: 10px;
-  opacity: 0.75;
-  white-space: nowrap;
-}
-
-.lofi-linha {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  border-radius: 5px;
-}
-
-.lofi-linha:hover {
-  background: var(--bg-lighter);
-}
-
-/* The one on air gets the same purple as ▶ down below: it is the same information, and
-   two colors for it would make you look for the difference. */
-.lofi-linha.atual .lofi-nome {
-  color: var(--purple);
-}
-
-.lofi-nome {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  text-align: left;
-  padding: 6px 8px;
-  border: none;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
 }
 
 
@@ -1843,14 +1660,14 @@ body.arrastando * {
 
 /* ---------- the shortcut list (Help ▸ Keyboard Shortcuts) ---------- */
 
-/* The shell is the station picker's (.lofi-editor, .lofi-caixa); here only
+/* The shell is the shared dialog's (.dialog, .dialog-box); here only
    what belongs to the list. Two columns of groups when the window allows: there are six
    short groups, and a single column would scroll for nothing. */
-.ajuda-caixa {
+.help-box {
   width: 640px;
 }
 
-.ajuda-lista {
+.help-list {
   flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -1861,12 +1678,12 @@ body.arrastando * {
   column-gap: 24px;
 }
 
-.ajuda-grupo {
+.help-group {
   break-inside: avoid;
   margin-bottom: 14px;
 }
 
-.ajuda-grupo-nome {
+.help-group-name {
   margin: 0 0 4px;
   font-size: 11px;
   font-weight: 600;
@@ -1875,7 +1692,7 @@ body.arrastando * {
   color: var(--purple);
 }
 
-.ajuda-linha {
+.help-line {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1883,17 +1700,17 @@ body.arrastando * {
   padding: 3px 0;
 }
 
-.ajuda-oque {
+.help-what {
   min-width: 0;
 }
 
-.ajuda-teclas {
+.help-keys {
   flex: none;
   display: flex;
   gap: 4px;
 }
 
-.ajuda-tecla {
+.help-key {
   padding: 1px 6px;
   border: 1px solid var(--selection);
   border-radius: 4px;
@@ -1904,24 +1721,26 @@ body.arrastando * {
 }
 
 /* The dialog (⌘Q, the hooks). Narrow: it is one sentence and two buttons. */
-.pergunta-caixa {
+.question-box {
   width: 400px;
   gap: 10px;
   padding: 16px;
 }
 
-.pergunta-texto {
+.question-text {
   margin: 0;
+  /* A text may come in paragraphs (the plugin install question). */
+  white-space: pre-line;
 }
 
-.pergunta-botoes {
+.question-buttons {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 6px;
 }
 
-.pergunta-btn {
+.question-btn {
   padding: 5px 12px;
   font: inherit;
   color: var(--fg);
@@ -1932,25 +1751,25 @@ body.arrastando * {
 }
 
 /* "Discard": apart from the other two, on the left, and red — the answer that loses something. */
-.pergunta-alternativa {
+.question-alternative {
   margin-right: auto;
   color: var(--red);
   background: rgba(255, 85, 85, 0.12);
   border-color: rgba(255, 85, 85, 0.45);
 }
 
-.pergunta-alternativa:hover {
+.question-alternative:hover {
   background: rgba(255, 85, 85, 0.22);
 }
 
-.pergunta-btn kbd {
+.question-btn kbd {
   margin-left: 6px;
   font: inherit;
   font-size: 11px;
   opacity: 0.6;
 }
 
-.pergunta-sim {
+.question-yes {
   color: var(--bg-darker);
   background: var(--purple);
   border-color: var(--purple);
@@ -1958,12 +1777,12 @@ body.arrastando * {
 }
 
 /* The ring says which of the two space and ↩ will press. */
-.pergunta-btn:focus {
+.question-btn:focus {
   outline: 2px solid var(--fg);
   outline-offset: 2px;
 }
 
-.pergunta-btn[hidden] {
+.question-btn[hidden] {
   display: none;
 }
 
@@ -1974,7 +1793,7 @@ body.arrastando * {
    over the text, so it is a thin veil and a bar in the margin — enough
    for the eye to find your lines in the scrollback without hiding what is written. The
    click goes through: selecting the text below still works. */
-.xterm .xterm-decoration.prompt-marca {
+.xterm .xterm-decoration.prompt-mark {
   box-sizing: border-box;
   border-left: 2px solid var(--pink);
   background: rgba(255, 121, 198, 0.13);
@@ -1986,7 +1805,7 @@ body.arrastando * {
 
 /* The chat covers the terminal without moving it: xterm keeps measuring the
    same area underneath. */
-.folha-termo {
+.leaf-term {
   position: relative;
 }
 
@@ -2006,18 +1825,18 @@ body.arrastando * {
 /* Outside the visible area a turn is neither drawn nor measured: changing the panel's
    width (split, maximize) costs what is on screen, not the whole conversation.
    The reserved size is a guess until it shows up once. */
-.chat-fala,
-.chat-ferramenta {
+.chat-message,
+.chat-tool {
   flex: none;
   content-visibility: auto;
   contain-intrinsic-size: auto 60px;
 }
 
-.chat-ferramenta {
+.chat-tool {
   contain-intrinsic-size: auto 18px;
 }
 
-.chat-mais {
+.chat-more {
   flex: none;
   align-self: center;
   padding: 4px 12px;
@@ -2030,21 +1849,21 @@ body.arrastando * {
   cursor: pointer;
 }
 
-.chat-mais:hover {
+.chat-more:hover {
   background: var(--bg-light);
   color: var(--fg);
 }
 
-.chat-mais[hidden] {
+.chat-more[hidden] {
   display: none;
 }
 
 .chat[hidden],
-.chat-aviso[hidden] {
+.chat-notice[hidden] {
   display: none;
 }
 
-.chat-lista {
+.chat-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -2056,13 +1875,13 @@ body.arrastando * {
   -webkit-user-select: text;
 }
 
-.chat-fala {
+.chat-message {
   max-width: min(100%, 860px);
   overflow-wrap: anywhere;
 }
 
 /* Your bubble: on the right and in another color, which is what the terminal doesn't give. */
-.chat-voce {
+.chat-you {
   align-self: flex-end;
   max-width: min(82%, 720px);
   padding: 8px 12px;
@@ -2072,7 +1891,7 @@ body.arrastando * {
   white-space: pre-wrap;
 }
 
-.chat-voce {
+.chat-you {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -2080,14 +1899,14 @@ body.arrastando * {
 
 /* A long text (a pasted log) is born collapsed to a few lines, with a
    fade below saying there is more. */
-.chat-recolhivel.recolhida .chat-recolhivel-corpo {
+.chat-collapsible.folded .chat-collapsible-body {
   max-height: 8lh;
   overflow: hidden;
   mask-image: linear-gradient(to bottom, #000 60%, transparent);
   -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent);
 }
 
-.chat-recolhivel-botao {
+.chat-collapsible-button {
   display: block;
   margin: 6px 0 0 auto;
   padding: 2px 10px;
@@ -2101,14 +1920,14 @@ body.arrastando * {
   cursor: pointer;
 }
 
-.chat-recolhivel-botao:hover {
+.chat-collapsible-button:hover {
   background: var(--bg-light);
   color: var(--fg);
 }
 
 /* Open, "Collapse" floats at the bottom of the list while the text passes through
    it: you can close it midway, without scrolling to the end. */
-.chat-recolhivel:not(.recolhida) > .chat-recolhivel-botao {
+.chat-collapsible:not(.folded) > .chat-collapsible-button {
   position: sticky;
   bottom: 8px;
   z-index: 1;
@@ -2116,26 +1935,26 @@ body.arrastando * {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
-.chat-recolhivel:not(.recolhida) > .chat-recolhivel-botao:hover {
+.chat-collapsible:not(.folded) > .chat-collapsible-button:hover {
   background: var(--bg-light);
 }
 
 /* What you pasted: in a separate box, in a terminal font, which is what it
    usually is (a log, a command's output). */
-.chat-colado {
+.chat-pasted {
   padding: 6px 10px 8px;
   border-radius: 8px;
   background: var(--bg-dark);
   font: 12px/1.5 "MesloLGS NF", Menlo, monospace;
 }
 
-.chat-colado-titulo {
+.chat-pasted-title {
   margin-bottom: 4px;
   color: var(--comment);
   font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
 }
 
-.chat-imagem {
+.chat-image {
   display: block;
   max-width: 100%;
   max-height: 260px;
@@ -2145,7 +1964,7 @@ body.arrastando * {
   cursor: zoom-in;
 }
 
-.chat-imagem-ampliada {
+.chat-image-enlarged {
   position: fixed;
   inset: 0;
   z-index: 1000;
@@ -2157,7 +1976,7 @@ body.arrastando * {
   cursor: zoom-out;
 }
 
-.chat-imagem-ampliada img {
+.chat-image-enlarged img {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
@@ -2218,11 +2037,11 @@ body.arrastando * {
 }
 
 /* The block and its copy button, which shows when the mouse is over it. */
-.codigo-bloco {
+.code-block {
   position: relative;
 }
 
-.copiar-codigo {
+.copy-code {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -2241,18 +2060,18 @@ body.arrastando * {
   transition: opacity 0.12s ease;
 }
 
-.codigo-bloco:hover .copiar-codigo,
-.copiar-codigo.copiado {
+.code-block:hover .copy-code,
+.copy-code.copied {
   opacity: 1;
 }
 
-.copiar-codigo:hover {
+.copy-code:hover {
   background: var(--bg-lighter);
   color: var(--fg);
 }
 
-.copiar-codigo.copiado,
-.visor-btn.copiado {
+.copy-code.copied,
+.viewer-btn.copied {
   color: var(--green);
 }
 
@@ -2286,7 +2105,7 @@ body.arrastando * {
 
 /* What Claude did between one turn and another: one dimmed line per tool,
    which fits at a glance and doesn't compete with the conversation. */
-.chat-ferramenta {
+.chat-tool {
   display: flex;
   gap: 1ch;
   margin: -6px 0;
@@ -2295,7 +2114,7 @@ body.arrastando * {
   color: var(--comment);
 }
 
-.chat-ferramenta-resumo {
+.chat-tool-summary {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2315,7 +2134,7 @@ body.arrastando * {
 }
 
 /* Side by side is two columns of code: the unified one's 1000px squeezed them. */
-.chat-diffs:has(.lado-a-lado) {
+.chat-diffs:has(.side-by-side) {
   width: 90%;
 }
 
@@ -2328,13 +2147,13 @@ body.arrastando * {
   overflow: clip;
 }
 
-.chat-diff-resumo {
+.chat-diff-summary {
   padding: 4px 10px;
   color: var(--comment);
   font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
 }
 
-.chat-diff-linhas {
+.chat-diff-lines {
   margin: 0;
   padding: 0;
   overflow-x: auto;
@@ -2343,39 +2162,39 @@ body.arrastando * {
   -webkit-user-select: text;
 }
 
-.chat-diff-linha {
+.chat-diff-line {
   padding: 0 10px;
   white-space: pre;
   color: var(--fg);
 }
 
 /* The terminal diff's colors, more muted: it is for reading, not shouting. */
-.chat-diff-linha.menos {
+.chat-diff-line.less {
   background: color-mix(in srgb, var(--red) 22%, transparent);
 }
 
-.chat-diff-linha.mais {
+.chat-diff-line.more {
   background: color-mix(in srgb, var(--green) 18%, transparent);
 }
 
-.chat-diff-linha.pulo {
+.chat-diff-line.jump {
   color: var(--comment);
 }
 
-.chat-ferramenta-nome {
+.chat-tool-name {
   flex: none;
   color: var(--purple);
   opacity: 0.8;
 }
 
-.chat-nota {
+.chat-note {
   align-self: center;
   font-size: 11px;
   color: var(--comment);
 }
 
 /* Claude stopped to ask something, and the question is in the terminal. */
-.chat-aviso {
+.chat-notice {
   flex: none;
   display: flex;
   align-items: center;
@@ -2388,7 +2207,7 @@ body.arrastando * {
   font-size: 12px;
 }
 
-.chat-aviso-texto {
+.chat-notice-text {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -2396,9 +2215,9 @@ body.arrastando * {
   white-space: nowrap;
 }
 
-.chat-aviso-sim,
-.chat-aviso-nao,
-.chat-aviso-ver {
+.chat-notice-yes,
+.chat-notice-not,
+.chat-notice-view {
   flex: none;
   padding: 3px 9px;
   border: none;
@@ -2412,19 +2231,19 @@ body.arrastando * {
 
 /* Allow is the action: filled, in the notice's color. Deny and going to the terminal stay
    outlined only. */
-.chat-aviso-nao,
-.chat-aviso-sim:not([hidden]) ~ .chat-aviso-ver {
+.chat-notice-not,
+.chat-notice-yes:not([hidden]) ~ .chat-notice-view {
   background: transparent;
   color: var(--orange);
   box-shadow: inset 0 0 0 1px var(--orange);
 }
 
-.chat-aviso-sim[hidden],
-.chat-aviso-nao[hidden] {
+.chat-notice-yes[hidden],
+.chat-notice-not[hidden] {
   display: none;
 }
 
-.chat-anexos {
+.chat-attachments {
   flex: none;
   display: flex;
   flex-wrap: wrap;
@@ -2432,11 +2251,11 @@ body.arrastando * {
   margin: 0 12px 6px;
 }
 
-.chat-anexos[hidden] {
+.chat-attachments[hidden] {
   display: none;
 }
 
-.chat-anexo {
+.chat-attachment {
   width: 64px;
   height: 64px;
   object-fit: cover;
@@ -2446,25 +2265,25 @@ body.arrastando * {
 }
 
 /* Your message already on screen, before Claude stores it. */
-.chat-voce.pendente {
+.chat-you.pending {
   opacity: 0.55;
 }
 
 /* Claude is on its turn: the line that stands in for the terminal's spinning
    asterisk. */
-.chat-pensando {
+.chat-thinking {
   flex: none;
   margin: 0 16px 6px;
   color: var(--comment);
   font-size: 12px;
-  animation: chat-pensando 1.6s ease-in-out infinite;
+  animation: chat-thinking 1.6s ease-in-out infinite;
 }
 
-.chat-pensando[hidden] {
+.chat-thinking[hidden] {
   display: none;
 }
 
-@keyframes chat-pensando {
+@keyframes chat-thinking {
   50% {
     opacity: 0.45;
   }
@@ -2473,7 +2292,7 @@ body.arrastando * {
 /* Claude's question, answered from here: in place of the notice strip, with the
    same color. Several questions scroll inside the card, without pushing the
    field off the screen. */
-.chat-pergunta {
+.chat-question {
   flex: none;
   display: flex;
   flex-direction: column;
@@ -2488,20 +2307,20 @@ body.arrastando * {
   background: var(--bg-dark);
 }
 
-.chat-pergunta[hidden],
-.chat-pergunta-outra[hidden],
-.chat-pergunta-previa[hidden] {
+.chat-question[hidden],
+.chat-question-other[hidden],
+.chat-question-preview[hidden] {
   display: none;
 }
 
 /* The step-by-step questions: the current one lit, the answered ones with ✓. */
-.chat-pergunta-abas {
+.chat-question-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
 
-.chat-pergunta-aba {
+.chat-question-tab {
   padding: 2px 9px;
   border: none;
   border-radius: 999px;
@@ -2512,23 +2331,23 @@ body.arrastando * {
   cursor: pointer;
 }
 
-.chat-pergunta-aba:hover {
+.chat-question-tab:hover {
   color: var(--fg);
 }
 
-.chat-pergunta-aba[aria-current="true"] {
+.chat-question-tab[aria-current="true"] {
   background: color-mix(in srgb, var(--orange) 20%, transparent);
   color: var(--orange);
   font-weight: 600;
 }
 
-.chat-pergunta-dica {
+.chat-question-hint {
   color: var(--comment);
   font-weight: 400;
   font-size: 11px;
 }
 
-.chat-pergunta-etiqueta {
+.chat-question-label {
   padding: 1px 7px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--orange) 20%, transparent);
@@ -2539,19 +2358,19 @@ body.arrastando * {
   letter-spacing: 0.04em;
 }
 
-.chat-pergunta-texto {
+.chat-question-text {
   color: var(--fg);
   font-weight: 600;
 }
 
-.chat-pergunta-opcoes {
+.chat-question-options {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   width: 100%;
 }
 
-.chat-opcao {
+.chat-option {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -2567,25 +2386,25 @@ body.arrastando * {
   cursor: pointer;
 }
 
-.chat-opcao:hover {
+.chat-option:hover {
   background: var(--bg-light);
 }
 
-.chat-opcao[aria-pressed="true"] {
+.chat-option[aria-pressed="true"] {
   border-color: var(--orange);
   background: color-mix(in srgb, var(--orange) 14%, transparent);
 }
 
-.chat-opcao-rotulo {
+.chat-option-label {
   font-weight: 600;
 }
 
-.chat-opcao-descricao {
+.chat-option-description {
   color: var(--fg-dim);
   font-size: 11px;
 }
 
-.chat-pergunta-outra {
+.chat-question-other {
   box-sizing: border-box;
   width: 100%;
   padding: 6px 10px;
@@ -2597,11 +2416,11 @@ body.arrastando * {
   outline: none;
 }
 
-.chat-pergunta-outra:focus {
+.chat-question-other:focus {
   border-color: var(--orange);
 }
 
-.chat-pergunta-previa {
+.chat-question-preview {
   box-sizing: border-box;
   width: 100%;
   margin: 0;
@@ -2612,15 +2431,15 @@ body.arrastando * {
   font: 12px/1.5 "MesloLGS NF", Menlo, monospace;
 }
 
-.chat-pergunta-acoes {
+.chat-question-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   align-self: stretch;
 }
 
-.chat-pergunta-responder,
-.chat-pergunta-terminal {
+.chat-question-answer,
+.chat-question-terminal {
   padding: 4px 12px;
   border: none;
   border-radius: 6px;
@@ -2629,23 +2448,23 @@ body.arrastando * {
   cursor: pointer;
 }
 
-.chat-pergunta-responder {
+.chat-question-answer {
   background: var(--orange);
   color: var(--bg-darker);
 }
 
-.chat-pergunta-responder:disabled {
+.chat-question-answer:disabled {
   opacity: 0.4;
   cursor: default;
 }
 
-.chat-pergunta-terminal {
+.chat-question-terminal {
   background: transparent;
   color: var(--orange);
   box-shadow: inset 0 0 0 1px var(--orange);
 }
 
-.chat-campo {
+.chat-field {
   flex: none;
   margin: 0 12px 12px;
   padding: 9px 12px;
@@ -2659,29 +2478,29 @@ body.arrastando * {
   outline: none;
 }
 
-.chat-campo:focus {
+.chat-field:focus {
   border-color: var(--comment);
 }
 
-.chat-campo::placeholder {
+.chat-field::placeholder {
   color: var(--comment);
 }
 
-.tarefa-chat.ligado {
+.task-chat.on {
   color: var(--pink);
 }
 
-.tarefa-visor.ligado {
+.task-viewer.on {
   color: var(--cyan);
 }
 
-.tarefa-explorar.ligado {
+.task-explore.on {
   color: var(--purple);
 }
 
 /* The floating preferences (⌘,): a transparent page over the whole window, above
    everything — the dimmed backdrop and the box are drawn in there. */
-.prefs-quadro {
+.prefs-frame {
   position: fixed;
   inset: 0;
   z-index: 1100;
@@ -2697,7 +2516,7 @@ body.arrastando * {
   pointer-events: none;
 }
 
-.prefs-quadro.pronta {
+.prefs-frame.ready {
   opacity: 1;
   pointer-events: auto;
   transition: opacity 0.15s ease;
@@ -2708,7 +2527,7 @@ body.arrastando * {
 /* It slides over the terminal, the chat and the viewer without pushing them: absolute,
    and hidden off the edge when closed (`visibility` waits for the slide to finish, and keeps
    the closed tree out of the keyboard's reach). */
-.explorador {
+.explorer {
   position: absolute;
   top: 0;
   bottom: 0;
@@ -2726,7 +2545,7 @@ body.arrastando * {
   transition: transform 0.2s ease, visibility 0s linear 0.2s, box-shadow 0.2s ease;
 }
 
-.explorador.aberto {
+.explorer.opened {
   transform: none;
   visibility: visible;
   box-shadow: 6px 0 18px #0009;
@@ -2735,37 +2554,37 @@ body.arrastando * {
 
 /* Pinned: no longer over the panel, but beside what is in it. The drawer stays put
    on the left, and the panel's content steps aside by its width. */
-.explorador.aberto.fixo {
-  width: var(--explorador-fixo);
+.explorer.opened.docked {
+  width: var(--explorer-docked);
   box-shadow: none;
   transition: none;
 }
 
-.folha-termo {
-  --explorador-fixo: 260px;
+.leaf-term {
+  --explorer-docked: 260px;
 }
 
-.folha-termo.explorador-fixo {
-  padding-left: var(--explorador-fixo);
+.leaf-term.explorer-docked {
+  padding-left: var(--explorer-docked);
 }
 
 /* Over the terminal (no split), the viewer is absolute and would cover the tree. */
-.folha-termo.explorador-fixo:not(.visor-lado):not(.visor-abaixo) > .visor {
-  left: var(--explorador-fixo);
+.leaf-term.explorer-docked:not(.viewer-side):not(.viewer-below) > .viewer {
+  left: var(--explorer-docked);
 }
 
-.explorador-alfinete.ligado {
+.explorer-pin.on {
   color: var(--purple);
 }
 
-.explorador-cabeca {
+.explorer-head {
   flex: none;
   display: flex;
   align-items: center;
   padding: 6px 6px 6px 12px;
 }
 
-.explorador-titulo {
+.explorer-title {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -2778,7 +2597,7 @@ body.arrastando * {
   color: var(--fg-dim);
 }
 
-.explorador-arvore {
+.explorer-tree {
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -2787,7 +2606,7 @@ body.arrastando * {
   user-select: none;
 }
 
-.explorador-item {
+.explorer-item {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2797,38 +2616,38 @@ body.arrastando * {
   cursor: pointer;
 }
 
-.explorador-item:hover {
+.explorer-item:hover {
   background: var(--bg-light);
 }
 
-.explorador-item.atual {
+.explorer-item.current {
   background: var(--selection);
 }
 
 /* Folders: a chevron that turns when open. Files: the mark of their kind. */
-.explorador-marca {
+.explorer-mark {
   flex: none;
   width: 16px;
   text-align: center;
   font: 700 9px/1 "MesloLGS NF", Menlo, monospace;
 }
 
-.explorador-item[data-pasta] .explorador-marca {
+.explorer-item[data-folder] .explorer-mark {
   font: 15px/1 -apple-system, BlinkMacSystemFont, sans-serif;
   color: var(--fg-dim);
   transition: transform 0.12s ease;
 }
 
-.explorador-item.aberta .explorador-marca {
+.explorer-item.open .explorer-mark {
   transform: rotate(90deg);
 }
 
-.explorador-nome {
+.explorer-name {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.explorador-aviso {
+.explorer-notice {
   height: 22px;
   line-height: 22px;
   color: var(--comment);
@@ -2839,7 +2658,7 @@ body.arrastando * {
 
 /* Like the chat, but over it: opened from inside the chat (⌘-click on a
    reference), closing goes back to the conversation. */
-.visor {
+.viewer {
   position: absolute;
   inset: 0;
   z-index: 21;
@@ -2851,7 +2670,7 @@ body.arrastando * {
   contain: strict;
 }
 
-.visor[hidden] {
+.viewer[hidden] {
   display: none;
 }
 
@@ -2859,22 +2678,22 @@ body.arrastando * {
    terminal keeps the rest, and FitAddon measures it at the new size. */
 /* Stacked, the file goes on top and the terminal (or the chat) below: the
    reverse of the DOM order, which is screen, handle, viewer. */
-.folha-termo.visor-abaixo {
+.leaf-term.viewer-below {
   flex-direction: column-reverse;
 }
 
-.visor-lado > .visor,
-.visor-abaixo > .visor {
+.viewer-side > .viewer,
+.viewer-below > .viewer {
   position: relative;
   inset: auto;
   z-index: auto;
-  flex: 0 0 var(--visor-fatia, 50%);
+  flex: 0 0 var(--viewer-share, 50%);
   min-width: 0;
   min-height: 0;
 }
 
 /* The border between the two, which can be dragged. Wider than the visible line. */
-.visor-alca {
+.viewer-handle {
   display: none;
   flex: none;
   background: var(--bg-lighter);
@@ -2882,7 +2701,7 @@ body.arrastando * {
   z-index: 2;
 }
 
-.visor-lado > .visor-alca {
+.viewer-side > .viewer-handle {
   display: block;
   width: 4px;
   margin: 0 -3px;
@@ -2890,7 +2709,7 @@ body.arrastando * {
   cursor: col-resize;
 }
 
-.visor-abaixo > .visor-alca {
+.viewer-below > .viewer-handle {
   display: block;
   height: 4px;
   margin: -3px 0;
@@ -2898,12 +2717,12 @@ body.arrastando * {
   cursor: row-resize;
 }
 
-.visor-alca:hover,
-.visor-alca.arrastando {
+.viewer-handle:hover,
+.viewer-handle.dragging {
   background-color: var(--purple);
 }
 
-.visor-cabeca {
+.viewer-head {
   flex: none;
   display: flex;
   align-items: center;
@@ -2914,7 +2733,7 @@ body.arrastando * {
   background: var(--bg-dark);
 }
 
-.visor-caminho {
+.viewer-path {
   flex: 1 1 auto;
   min-width: 0;
   margin-left: 4px;
@@ -2928,7 +2747,7 @@ body.arrastando * {
   color: var(--fg-dim);
 }
 
-.visor-ref {
+.viewer-ref {
   flex: none;
   padding: 1px 7px;
   border-radius: 10px;
@@ -2937,14 +2756,14 @@ body.arrastando * {
   font: 11px/1.5 "MesloLGS NF", Menlo, monospace;
 }
 
-.visor-ref[hidden] {
+.viewer-ref[hidden] {
   display: none;
 }
 
 /* The line height equal to the button's, not `line-height: 1` with flex: with the
    system font the text box has more slack below than above, and the
    label rose. */
-.visor-btn {
+.viewer-btn {
   flex: none;
   box-sizing: border-box;
   min-width: 24px;
@@ -2962,34 +2781,34 @@ body.arrastando * {
   cursor: pointer;
 }
 
-.visor-btn-texto {
+.viewer-btn-text {
   font-size: 12px;
 }
 
-.visor-btn-icone {
+.viewer-btn-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0 5px;
 }
 
-.visor-btn[hidden] {
+.viewer-btn[hidden] {
   display: none;
 }
 
-.visor-btn:hover:not(:disabled) {
+.viewer-btn:hover:not(:disabled) {
   background: var(--bg-lighter);
   color: var(--fg);
 }
 
-.visor-btn:disabled {
+.viewer-btn:disabled {
   opacity: 0.3;
   cursor: default;
 }
 
 /* The open files, one tab each, between the header and the body. Too many scroll
    sideways, without a bar. */
-.visor-abas {
+.viewer-tabs {
   flex: none;
   display: flex;
   overflow-x: auto;
@@ -3001,11 +2820,11 @@ body.arrastando * {
   -webkit-user-select: none;
 }
 
-.visor-abas::-webkit-scrollbar {
+.viewer-tabs::-webkit-scrollbar {
   display: none;
 }
 
-.visor-aba {
+.viewer-tab {
   flex: none;
   display: flex;
   align-items: center;
@@ -3018,30 +2837,30 @@ body.arrastando * {
   cursor: pointer;
 }
 
-.visor-aba:hover {
+.viewer-tab:hover {
   background: var(--bg-light);
 }
 
 /* The one on screen: the body's background, so it joins it, and a purple line on top. */
-.visor-aba.atual {
+.viewer-tab.current {
   background: var(--bg);
   color: var(--fg);
   box-shadow: inset 0 2px 0 var(--purple);
 }
 
-.visor-aba-nome {
+.viewer-tab-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.visor-aba-ref {
+.viewer-tab-ref {
   flex: none;
   color: var(--orange);
   font: 10px/1 "MesloLGS NF", Menlo, monospace;
 }
 
-.visor-aba-fechar {
+.viewer-tab-close {
   flex: none;
   display: flex;
   align-items: center;
@@ -3053,27 +2872,27 @@ body.arrastando * {
   opacity: 0;
 }
 
-.visor-aba-fechar svg {
+.viewer-tab-close svg {
   display: block;
   pointer-events: none;
 }
 
-.visor-aba:hover .visor-aba-fechar,
-.visor-aba.atual .visor-aba-fechar {
+.viewer-tab:hover .viewer-tab-close,
+.viewer-tab.current .viewer-tab-close {
   opacity: 1;
 }
 
-.visor-aba-fechar:hover {
+.viewer-tab-close:hover {
   background: var(--bg-lighter);
   color: var(--fg);
 }
 
 /* Unsaved changes: a dot in place of ✕, always visible; under the mouse ✕ comes back. */
-.visor-aba.suja .visor-aba-fechar {
+.viewer-tab.dirty .viewer-tab-close {
   opacity: 1;
 }
 
-.visor-aba.suja .visor-aba-fechar::before {
+.viewer-tab.dirty .viewer-tab-close::before {
   content: "";
   width: 8px;
   height: 8px;
@@ -3081,19 +2900,19 @@ body.arrastando * {
   background: var(--purple);
 }
 
-.visor-aba.suja .visor-aba-fechar svg {
+.viewer-tab.dirty .viewer-tab-close svg {
   display: none;
 }
 
-.visor-aba.suja .visor-aba-fechar:hover::before {
+.viewer-tab.dirty .viewer-tab-close:hover::before {
   display: none;
 }
 
-.visor-aba.suja .visor-aba-fechar:hover svg {
+.viewer-tab.dirty .viewer-tab-close:hover svg {
   display: block;
 }
 
-.visor-corpo {
+.viewer-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
@@ -3102,7 +2921,7 @@ body.arrastando * {
 
 /* An image, fitted to the body with its size below; `.real` (a click) shows it at
    actual size, scrolling when it doesn't fit. */
-.visor-imagem {
+.viewer-image {
   box-sizing: border-box;
   height: 100%;
   display: flex;
@@ -3113,7 +2932,7 @@ body.arrastando * {
   padding: 16px;
 }
 
-.visor-imagem img {
+.viewer-image img {
   flex: 0 1 auto;
   min-height: 0;
   max-width: 100%;
@@ -3122,18 +2941,18 @@ body.arrastando * {
   cursor: zoom-in;
 }
 
-.visor-imagem.real {
+.viewer-image.real {
   height: auto;
   min-height: 100%;
   align-items: flex-start;
 }
 
-.visor-imagem.real img {
+.viewer-image.real img {
   max-width: none;
   cursor: zoom-out;
 }
 
-.visor-imagem-tamanho {
+.viewer-image-size {
   flex: none;
   font: 11px/1.4 "MesloLGS NF", Menlo, monospace;
   color: var(--comment);
@@ -3142,21 +2961,21 @@ body.arrastando * {
 /* Edit mode: the numbers in a margin of their own, and the text box over a colored
    copy of its lines. The box's text is transparent; what is read is the copy below,
    which follows the scroll. Both share font, padding and tab size to the pixel. */
-.visor-editor {
+.viewer-editor {
   display: flex;
   height: 100%;
   overflow: hidden;
   font: 12px/1.55 "MesloLGS NF", Menlo, monospace;
 }
 
-.visor-editor-margem {
+.viewer-editor-margin {
   flex: none;
   overflow: hidden;
 }
 
-.visor-editor-numeros {
+.viewer-editor-numbers {
   box-sizing: content-box;
-  width: calc(var(--digitos, 3) * 1ch);
+  width: calc(var(--digits, 3) * 1ch);
   margin: 0;
   padding: 6px 14px 40vh 12px;
   font: inherit;
@@ -3166,15 +2985,15 @@ body.arrastando * {
   user-select: none;
 }
 
-.visor-editor-campo {
+.viewer-editor-field {
   position: relative;
   flex: 1;
   min-width: 0;
   overflow: hidden;
 }
 
-.visor-editor-cores,
-.visor-edicao {
+.viewer-editor-colors,
+.viewer-edit {
   margin: 0;
   padding: 6px 12px 40vh 0;
   font: inherit;
@@ -3182,7 +3001,7 @@ body.arrastando * {
   tab-size: 4;
 }
 
-.visor-editor-cores {
+.viewer-editor-colors {
   position: absolute;
   top: 0;
   left: 0;
@@ -3192,7 +3011,7 @@ body.arrastando * {
   pointer-events: none;
 }
 
-.visor-edicao {
+.viewer-edit {
   position: absolute;
   inset: 0;
   box-sizing: border-box;
@@ -3208,12 +3027,12 @@ body.arrastando * {
   caret-color: var(--purple);
 }
 
-.visor-edicao::selection {
+.viewer-edit::selection {
   background: rgba(189, 147, 249, 0.3);
 }
 
 /* Reading or editing: the eye and the pencil in one pill, the current one lit. */
-.visor-modos {
+.viewer-modes {
   flex: none;
   display: inline-flex;
   gap: 2px;
@@ -3222,53 +3041,53 @@ body.arrastando * {
   background: var(--bg-darker);
 }
 
-.visor-modos[hidden] {
+.viewer-modes[hidden] {
   display: none;
 }
 
-.visor-modos .visor-btn {
+.viewer-modes .viewer-btn {
   height: 20px;
   min-width: 22px;
 }
 
-.visor-modos .visor-btn.ligado {
+.viewer-modes .viewer-btn.on {
   background: var(--bg-lighter);
   color: var(--fg);
 }
 
-.visor-modos .visor-btn:last-child.ligado {
+.viewer-modes .viewer-btn:last-child.on {
   color: var(--purple);
 }
 
 /* Editing shows on the header: a purple line under it. */
-.visor.editando .visor-cabeca {
+.viewer.is-editing .viewer-head {
   border-bottom-color: var(--purple);
 }
 
-.visor-btn-salvar:not(:disabled) {
+.viewer-btn-save:not(:disabled) {
   color: var(--purple);
 }
 
-.visor-codigo {
+.viewer-code {
   min-width: max-content;
   padding: 6px 0 40vh;
   font: 12px/1.55 "MesloLGS NF", Menlo, monospace;
 }
 
-.visor-linha {
+.viewer-line {
   display: flex;
   white-space: pre;
 }
 
-.visor-linha.marcada {
+.viewer-line.marked {
   background: rgba(241, 250, 140, 0.12);
   box-shadow: inset 3px 0 0 var(--yellow);
 }
 
-.visor-num {
+.viewer-num {
   flex: none;
   box-sizing: content-box;
-  width: calc(var(--digitos, 3) * 1ch);
+  width: calc(var(--digits, 3) * 1ch);
   padding: 0 14px 0 12px;
   text-align: right;
   color: var(--comment);
@@ -3276,81 +3095,81 @@ body.arrastando * {
   user-select: none;
 }
 
-.visor-linha.marcada .visor-num {
+.viewer-line.marked .viewer-num {
   color: var(--yellow);
 }
 
 /* The blocks a requested line became, in a rendered .md: the same mark as in the source. */
-.visor-md .marcada {
+.viewer-md .marked {
   background: rgba(241, 250, 140, 0.12);
   box-shadow: -10px 0 0 rgba(241, 250, 140, 0.12), -13px 0 0 var(--yellow);
 }
 
 /* A table row: on the cells — WebKit doesn't draw a <tr>'s shadow, and a cell's own
    background would cover the row's. */
-.visor-md tr.marcada {
+.viewer-md tr.marked {
   background: none;
   box-shadow: none;
 }
 
-.visor-md tr.marcada > td,
-.visor-md tr.marcada > th {
+.viewer-md tr.marked > td,
+.viewer-md tr.marked > th {
   background: rgba(241, 250, 140, 0.12);
 }
 
-.visor-md tr.marcada > :first-child {
+.viewer-md tr.marked > :first-child {
   box-shadow: inset 3px 0 0 var(--yellow);
 }
 
-.visor-texto {
+.viewer-text {
   padding-right: 24px;
   --syntax-comment: var(--comment);
 }
 
-.visor-md {
+.viewer-md {
   max-width: 860px;
   margin: 0 auto;
   padding: 18px 24px 40vh;
 }
 
-.visor-md {
+.viewer-md {
   font-size: 14px;
   line-height: 1.6;
 }
 
-.visor-md h1,
-.visor-md h2,
-.visor-md h3 {
+.viewer-md h1,
+.viewer-md h2,
+.viewer-md h3 {
   margin: 22px 0 10px;
   color: var(--purple);
 }
 
-.visor-md h1 {
+.viewer-md h1 {
   padding-bottom: 6px;
   border-bottom: 1px solid var(--bg-lighter);
   font-size: 22px;
 }
 
-.visor-md h2 {
+.viewer-md h2 {
   padding-bottom: 4px;
   border-bottom: 1px solid var(--bg-lighter);
   font-size: 18px;
 }
 
-.visor-md h3 {
+.viewer-md h3 {
   font-size: 15px;
 }
 
 /* A mermaid diagram, in a box of its own: the zoom scrolls inside it, and the
    buttons show on hover. */
-.visor-mermaid {
+.viewer-mermaid {
   position: relative;
   margin: 0 0 8px;
   border: 1px solid var(--bg-lighter);
   border-radius: 8px;
 }
 
-.visor-mermaid-area {
+.viewer-mermaid-area {
   overflow: auto;
   max-height: 80vh;
   padding: 12px;
@@ -3358,12 +3177,12 @@ body.arrastando * {
   cursor: grab;
 }
 
-.visor-mermaid-area.arrastando {
+.viewer-mermaid-area.dragging {
   cursor: grabbing;
   user-select: none;
 }
 
-.visor-mermaid-zoom {
+.viewer-mermaid-zoom {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -3373,11 +3192,11 @@ body.arrastando * {
   transition: opacity 0.15s;
 }
 
-.visor-mermaid:hover .visor-mermaid-zoom {
+.viewer-mermaid:hover .viewer-mermaid-zoom {
   opacity: 1;
 }
 
-.visor-mermaid-zoom button {
+.viewer-mermaid-zoom button {
   min-width: 26px;
   padding: 2px 8px;
   border: none;
@@ -3388,18 +3207,18 @@ body.arrastando * {
   cursor: pointer;
 }
 
-.visor-mermaid-zoom button:hover {
+.viewer-mermaid-zoom button:hover {
   background: var(--bg-lighter);
 }
 
 /* A `- [ ]` item: the checkbox takes the bullet's place. */
-.visor-md li:has(> .tarefa) {
+.viewer-md li:has(> .task) {
   list-style: none;
 }
 
 /* Round: an open circle, and when checked a thick ✓ that leaves through the opening.
    Both are drawn in the same box, so checking doesn't move anything. */
-.visor-md .tarefa {
+.viewer-md .task {
   appearance: none;
   width: 17px;
   height: 17px;
@@ -3410,26 +3229,26 @@ body.arrastando * {
 }
 
 /* In a table cell there is no bullet to take the place of. */
-.visor-md td > .tarefa {
+.viewer-md td > .task {
   margin: 0 7px 0 0;
 }
 
-.visor-md td > .tarefa:last-child {
+.viewer-md td > .task:last-child {
   margin-right: 0;
 }
 
-.visor-md .tarefa:checked {
+.viewer-md .task:checked {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23bd93f9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13.2 4.6A8.5 8.5 0 1 0 19.4 11.6' stroke-width='2.4'/%3E%3Cpath d='M7 12.3 10.6 16 21 4.5' stroke-width='3.4'/%3E%3C/svg%3E");
 }
 
 /* Checking by click jumps and lets out a purple glow. Only by click: the class comes
    from the viewer, otherwise every redraw would animate the boxes already checked. */
-.visor-md .tarefa.marcou {
+.viewer-md .task.just-marked {
   border-radius: 50%;
-  animation: tarefa-marcou 0.4s cubic-bezier(0.3, 1.6, 0.5, 1);
+  animation: task-just-marked 0.4s cubic-bezier(0.3, 1.6, 0.5, 1);
 }
 
-@keyframes tarefa-marcou {
+@keyframes task-just-marked {
   0% {
     transform: scale(0.4) rotate(-20deg);
     box-shadow: 0 0 0 0 rgba(189, 147, 249, 0.6);
@@ -3444,26 +3263,26 @@ body.arrastando * {
 }
 
 /* What is done steps back, so what is left stands out. */
-.visor-md li:has(> .tarefa:checked) {
+.viewer-md li:has(> .task:checked) {
   color: var(--fg-dim);
 }
 
-.visor-md .tarefa:disabled {
+.viewer-md .task:disabled {
   opacity: 0.6;
 }
 
-.visor-md .tarefa[data-linha] {
+.viewer-md .task[data-line] {
   cursor: pointer;
 }
 
-.visor-erro {
+.viewer-error {
   padding: 24px;
   color: var(--red);
 }
 
 /* The /commands list: above the field, as wide as it, and with a cap — there are
    dozens, and it must not push the conversation off the screen. */
-.chat-comandos {
+.chat-commands {
   flex: none;
   max-height: 220px;
   overflow-y: auto;
@@ -3475,11 +3294,11 @@ body.arrastando * {
   font-size: 12px;
 }
 
-.chat-comandos[hidden] {
+.chat-commands[hidden] {
   display: none;
 }
 
-.chat-comando {
+.chat-command {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -3488,18 +3307,18 @@ body.arrastando * {
   cursor: pointer;
 }
 
-.chat-comando.escolhido,
-.chat-comando:hover {
+.chat-command.selected,
+.chat-command:hover {
   background: var(--selection);
 }
 
-.chat-comando-nome {
+.chat-command-name {
   flex: none;
   font: 12px/1.5 "MesloLGS NF", Menlo, monospace;
   color: var(--purple);
 }
 
-.chat-comando-descricao {
+.chat-command-description {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -3509,7 +3328,7 @@ body.arrastando * {
 }
 
 /* Before the first turn: Claude just opened, or the conversation is new. */
-.chat-lista:not(:has(.chat-fala, .chat-ferramenta))::before {
+.chat-list:not(:has(.chat-message, .chat-tool))::before {
   content: "Nenhuma mensagem ainda. Escreva abaixo para começar.";
   margin: auto;
   font-size: 12px;
@@ -3518,13 +3337,13 @@ body.arrastando * {
 
 /* The /resume list uses the same box as the commands: an instruction line
    on top, and in each session the title on the left and the age on the right. */
-.chat-comandos-cabeca {
+.chat-commands-head {
   padding: 4px 8px 6px;
   font-size: 11px;
   color: var(--comment);
 }
 
-.chat-sessao-titulo {
+.chat-session-title {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -3532,30 +3351,30 @@ body.arrastando * {
   white-space: nowrap;
 }
 
-.chat-sessao-quando {
+.chat-session-when {
   flex: none;
   font-size: 11px;
   color: var(--comment);
 }
 
-.chat-diff-arquivo {
+.chat-diff-file {
   color: var(--fg-dim);
   font-weight: 600;
 }
 
 /* The preview button, inside the diff box, doesn't touch the edge. */
-.chat-diff .chat-recolhivel-botao {
+.chat-diff .chat-collapsible-button {
   margin-right: 8px;
 }
 
 /* Unified or side by side: the icon sits in the corner of the diff header. */
-.chat-diff-resumo:has(.chat-diff-modo) {
+.chat-diff-summary:has(.chat-diff-mode) {
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.chat-diff-modo {
+.chat-diff-mode {
   display: inline-flex;
   margin-left: auto;
   padding: 2px 4px;
@@ -3566,33 +3385,33 @@ body.arrastando * {
   cursor: pointer;
 }
 
-.chat-diff-modo:hover {
+.chat-diff-mode:hover {
   background: var(--bg-lighter);
   color: var(--fg);
 }
 
 /* Two columns, before and after. Each half wraps its own lines instead of
    scrolling: horizontal scrolling in a single column would misalign the two. */
-.chat-diff-linhas.lado-a-lado {
+.chat-diff-lines.side-by-side {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   overflow-x: hidden;
 }
 
-.lado-a-lado .chat-diff-linha {
+.side-by-side .chat-diff-line {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.lado-a-lado .chat-diff-linha:nth-child(odd of :not(.inteira)) {
+.side-by-side .chat-diff-line:nth-child(odd of :not(.whole)) {
   border-right: 1px solid var(--bg-lighter);
 }
 
-.lado-a-lado .chat-diff-linha.inteira {
+.side-by-side .chat-diff-line.whole {
   grid-column: 1 / -1;
 }
 
-.lado-a-lado .chat-diff-linha.vazia {
+.side-by-side .chat-diff-line.empty {
   background: color-mix(in srgb, var(--comment) 8%, transparent);
 }
 
@@ -3600,20 +3419,20 @@ body.arrastando * {
    gets a pulsing red border, time to compact. On ::after, which is the
    card's border and goes over the terminal; `outline` stays free for the
    orange of the waiting panel, and both apply at the same time. */
-.aba > .folha.contexto-cheio::after,
-.aba .divisao > .folha.contexto-cheio::after {
+.tab-body > .leaf.context-full::after,
+.tab-body .split > .leaf.context-full::after {
   border: 2px solid var(--red);
   box-shadow: inset 0 0 14px #ff555559;
-  animation: contexto-pulso 1.4s ease-in-out infinite;
+  animation: context-pulse 1.4s ease-in-out infinite;
 }
 
 /* The split's border is part of the panel: it pulses along with it. */
-.folha.contexto-cheio .visor-alca {
+.leaf.context-full .viewer-handle {
   background-color: var(--red);
-  animation: contexto-pulso 1.4s ease-in-out infinite;
+  animation: context-pulse 1.4s ease-in-out infinite;
 }
 
-@keyframes contexto-pulso {
+@keyframes context-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }

@@ -10,7 +10,7 @@
       <!-- The "+" always stays at the end of the row through `order` in CSS, not
            through the order here: tab chips come in via `appendChild` and would
            go past it. It does the same as ⌘T. -->
-      <button id="nova-aba" class="tab-mais" title="New tab (⌘T)" aria-label="New tab">
+      <button id="new-tab" class="tab-more" title="New tab (⌘T)" aria-label="New tab">
         <!-- Drawn, not the "+" character: the glyph rests on the baseline and
              sits high inside the button. Two strokes in a square viewBox land
              truly in the center. -->
@@ -21,23 +21,21 @@
       </button>
     </div>
     <div id="panes"></div>
-    <!-- Voice strip: its space is always reserved. Appearing and disappearing
-         would make the panels shrink and grow on every ⌘E — the whole
-         terminal jumped. Empty, it is just a dark line in the footer.
-         src/main.ts creates the wave's little bars. -->
-    <div id="voz">
+    <!-- The footer: its space is always reserved. Appearing and disappearing
+         would make the panels shrink and grow — the whole terminal jumped.
+         Empty, it is just a dark line. -->
+    <div id="status-bar">
       <!-- Claude's usage (session and week) in the left corner: hovering opens
            the details to the right. src/main.ts builds it. -->
-      <div id="uso"></div>
+      <div id="usage"></div>
       <!-- Beside it, the progress of the long tasks Claude published with
-           `termiau progresso`, one pill per panel. src/main.ts builds it. -->
-      <div id="progresso"></div>
-      <span class="voz-onda" aria-hidden="true"></span>
-      <span class="voz-texto"></span>
-      <!-- The radio sits on the same strip, against the other side: dictation
-           rules the left (wave and partial), the radio the right. src/main.ts
-           creates the buttons, the volume and the hidden iframe. -->
-      <div id="lofi"></div>
+           `termiau progress`, one pill per panel. src/main.ts builds it. -->
+      <div id="progress"></div>
+      <!-- The plugins' footer slots: after the pills on the left (dictation's
+           wave and partial text) and against the right end (the radio).
+           src/plugins/host.ts fills both. -->
+      <div id="status-bar-left"></div>
+      <div id="status-bar-plugins"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

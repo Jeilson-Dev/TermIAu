@@ -10,8 +10,13 @@
     "app:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
     "app:build:dev": "tauri build --config src-tauri/tauri.dev.conf.json --bundles app",
     "app:build": "tauri build",
-    "app:instalar:dev": "./scripts/instalar.sh dev",
-    "app:instalar": "./scripts/instalar.sh prod",
+    "app:install:dev": "./scripts/install.sh dev",
+    "app:install": "./scripts/install.sh prod",
+    "app:instalar:dev": "./scripts/install.sh dev",
+    "app:instalar": "./scripts/install.sh prod",
+    "plugin:radio": "./scripts/package-plugin.sh radio",
+    "plugin:dictation": "./scripts/package-plugin.sh dictation",
+    "marketplace": "node scripts/build-marketplace.mjs",
     "test": "vitest run"
   },
   "dependencies": {

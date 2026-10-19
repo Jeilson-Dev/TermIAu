@@ -10,10 +10,10 @@ import type { ClaudeSession, FileDiff } from "../types";
 import { Icon } from "./Icons";
 
 const MODELS = [
-  { id: "", label: T.modeloPadrao },
-  { id: "haiku", label: T.haikuRapido },
+  { id: "", label: T.modelDefault },
+  { id: "haiku", label: T.haikuFast },
   { id: "sonnet", label: "Sonnet" },
-  { id: "opus", label: T.opusCuidadoso },
+  { id: "opus", label: T.opusCareful },
 ];
 /** Diff lines shown per changed file; the rest is seen in the pending tab. */
 const PATCH_MAX_LINES = 300;
@@ -30,15 +30,15 @@ function sessionsOf(root: string): Promise<ClaudeSession[]> {
 }
 
 const liveLabel = (s: LiveSession) =>
-  `${s.titulo && s.titulo !== s.nome ? `${s.nome} · ${s.titulo}` : s.nome}${s.estado === "trabalhando" ? ` · ${T.trabalhando}` : s.estado === "esperando" ? ` · ${T.esperandoVoce}` : ""}`;
+  `${s.title && s.title !== s.name ? `${s.name} · ${s.title}` : s.name}${s.state === "working" ? ` · ${T.working}` : s.state === "waiting" ? ` · ${T.waitingForYou}` : ""}`;
 
 function ago(ms: number): string {
   const min = Math.round((Date.now() - ms) / 60_000);
-  if (min < 1) return T.agora;
+  if (min < 1) return T.now;
   if (min < 60) return T.haMin(min);
   const h = Math.round(min / 60);
-  if (h < 24) return T.haHoras(h);
-  return T.haDias(Math.round(h / 24));
+  if (h < 24) return T.hoursAgo(h);
+  return T.daysAgo(Math.round(h / 24));
 }
 
 /** Just enough Markdown for the answer to read well: code blocks, `code` and **bold**. */
@@ -91,7 +91,7 @@ function ChangeView({ change }: { change: AskChange }) {
 
   const label =
     change.before === null && change.after !== null && change.undoable
-      ? "novo"
+      ? "new"
       : change.after === null && change.before !== null
         ? "apagado"
         : null;
@@ -107,7 +107,7 @@ function ChangeView({ change }: { change: AskChange }) {
             <span className="add">+{patch.add}</span> <span className="del">−{patch.del}</span>
           </span>
         ) : (
-          <span className="badge warn">{T.binarioSemFoto}</span>
+          <span className="badge warn">{T.binaryWithoutSnapshot}</span>
         )}
       </button>
       {open && patch && (
@@ -118,7 +118,7 @@ function ChangeView({ change }: { change: AskChange }) {
             </div>
           ))}
           {patch.lines.length > PATCH_MAX_LINES && (
-            <div className="ask-patch-hunk">{T.maisLinhas(patch.lines.length - PATCH_MAX_LINES)}</div>
+            <div className="ask-patch-hunk">{T.moreLines(patch.lines.length - PATCH_MAX_LINES)}</div>
           )}
         </pre>
       )}
@@ -136,14 +136,14 @@ function Changes({ ask, index, root }: { ask: AskState; index: number; root: str
       <div className="ask-changes-head">
         <Icon name="edit" size={13} />
         <span>
-          {turn.undone ? T.alteracoesDesfeitasTitulo : T.alterouArquivos(turn.changes.length)}
+          {turn.undone ? T.changesUndoneTitle : T.changedFiles(turn.changes.length)}
         </span>
         <span className="spacer" />
         {!turn.undone && undoable && (
           <button
             className="btn"
             disabled={undoing || !!ask.running}
-            title={T.desfazerDica}
+            title={T.undoHint}
             onClick={async () => {
               setUndoing(true);
               await asks.undo(ask.id, root, index);
@@ -151,13 +151,13 @@ function Changes({ ask, index, root }: { ask: AskState; index: number; root: str
             }}
           >
             <Icon name="history" size={13} />
-            {T.desfazer}
+            {T.undo}
           </button>
         )}
       </div>
       {turn.undoKept && (
         <div className="ask-error">
-          {T.naoDesfeitos(turn.undoKept.join(", "))}
+          {T.notUndone(turn.undoKept.join(", "))}
         </div>
       )}
       {!turn.undone && turn.changes.map((c) => <ChangeView key={c.path} change={c} />)}
@@ -182,7 +182,7 @@ export function AskBox({
   const { id, turns, input, model, session, allowEdits, toSession, panel, running, decision, draft, noteError } = ask;
   const live = useLiveSessions(root);
   // The chosen panel may have closed; then the first open one in the repository takes its place.
-  const target = live.find((s) => s.painel === panel) ?? live[0];
+  const target = live.find((s) => s.panel === panel) ?? live[0];
   const set = (patch: Partial<AskState>) => asks.update(id, patch);
 
   useEffect(() => {
@@ -198,8 +198,8 @@ export function AskBox({
   const send = () => {
     if (!toSession) return asks.send(id, root, file);
     if (!target) return;
-    set({ panel: target.painel });
-    return asks.sendToPanel(id, root, file, target.nome);
+    set({ panel: target.panel });
+    return asks.sendToPanel(id, root, file, target.name);
   };
   const draftNote = () => asks.draftNote(id, root, file);
   const sessionTitle = sessions?.find((s) => s.id === session)?.title;
@@ -211,14 +211,14 @@ export function AskBox({
         <Icon name="sparkle" />
         <span>{rangeLabel({ side: ask.side, startLine: ask.start, endLine: ask.end })}</span>
         {sessionTitle && (
-          <span className="badge" title={T.copiaDaSessaoDica}>
+          <span className="badge" title={T.copyOfSessionHint}>
             {sessionTitle}
           </span>
         )}
         <span className="spacer" />
         <button
           className="icon-btn"
-          title={running ? T.fecharECancelar : T.fecharPergunta}
+          title={running ? T.closeAndCancel : T.closeQuestion}
           onClick={() => asks.close(id)}
         >
           <Icon name="x" />
@@ -231,14 +231,14 @@ export function AskBox({
         <div className="ask-turn" key={i}>
           <div className="ask-question">
             {t.question}
-            {t.edits && <span className="badge warn">{T.alteracoesLiberadas}</span>}
+            {t.edits && <span className="badge warn">{T.changesAllowed}</span>}
           </div>
           {t.answer !== undefined && <Answer text={t.answer} />}
           {t.sentTo && (
             <div className="ask-waiting">
-              {T.enviadoParaSessao(t.sentTo.nome)}
-              <button className="link-btn" onClick={() => goToPanel(t.sentTo!.painel)}>
-                {T.irAoPainel}
+              {T.sentForSession(t.sentTo.name)}
+              <button className="link-btn" onClick={() => goToPanel(t.sentTo!.panel)}>
+                {T.goToPanel}
               </button>
             </div>
           )}
@@ -246,9 +246,9 @@ export function AskBox({
           {t.error && <div className="ask-error">{t.error}</div>}
           {t.answer === undefined && !t.error && !t.sentTo && (
             <div className="ask-waiting">
-              {t.edits ? T.alterando : session ? T.perguntandoComSessao : T.perguntando}
+              {t.edits ? T.changing : session ? T.askingWithSession : T.asking}
               <button className="link-btn" onClick={() => asks.cancel(id)}>
-                {T.cancelar}
+                {T.cancel}
               </button>
             </div>
           )}
@@ -257,7 +257,7 @@ export function AskBox({
 
       {draft !== null ? (
         <>
-          <div className="ask-label">{T.marcadorParaOAgente}</div>
+          <div className="ask-label">{T.bookmarkForAgent}</div>
           <textarea
             autoFocus
             rows={4}
@@ -274,24 +274,24 @@ export function AskBox({
             }}
           />
           <div className="bookmark-actions">
-            <span className="hint">{T.salvaVoltaDecisao}</span>
+            <span className="hint">{T.saveBackDecision}</span>
             <button className="btn" onClick={() => set({ draft: null })}>
-              {T.refazer}
+              {T.redo}
             </button>
             <button className="btn primary" disabled={!draft.trim()} onClick={() => onDecide(draft.trim())}>
-              {ask.bookmarkId ? T.reescreverMarcador : T.criarMarcador}
+              {ask.bookmarkId ? T.rewriteBookmark : T.createBookmark}
             </button>
           </div>
         </>
       ) : decision !== null ? (
         <>
-          <div className="ask-label">{T.oQueDecidiu}</div>
+          <div className="ask-label">{T.whatWasDecided}</div>
           <textarea
             autoFocus
             rows={2}
             value={decision}
             disabled={!!running}
-            placeholder={T.exemploDecisao}
+            placeholder={T.exampleDecision}
             onChange={(e) => set({ decision: e.target.value })}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -306,19 +306,19 @@ export function AskBox({
           {noteError && <div className="ask-error">{noteError}</div>}
           {running ? (
             <div className="ask-waiting">
-              {T.escrevendoMarcador}
+              {T.writingBookmark}
               <button className="link-btn" onClick={() => asks.cancel(id)}>
-                {T.cancelar}
+                {T.cancel}
               </button>
             </div>
           ) : (
             <div className="bookmark-actions">
-              <span className="hint">{T.elaboraVolta}</span>
+              <span className="hint">{T.elaborateBack}</span>
               <button className="btn" onClick={() => set({ decision: null })}>
-                {T.voltar}
+                {T.goBack}
               </button>
               <button className="btn primary" disabled={!decision.trim()} onClick={draftNote}>
-                {T.elaborarMarcador}
+                {T.elaborateBookmark}
               </button>
             </div>
           )}
@@ -332,12 +332,12 @@ export function AskBox({
             disabled={!!running}
             placeholder={
               toSession
-                ? T.oQueAlterarNaSessao
+                ? T.whatToChangeInSession
                 : allowEdits
-                ? T.oQueAlterar
+                ? T.whatToChange
                 : turns.length
-                  ? T.continuarConversa
-                  : T.oQueSaber
+                  ? T.continueConversation
+                  : T.whatToKnow
             }
             onChange={(e) => set({ input: e.target.value })}
             onKeyDown={(e) => {
@@ -351,25 +351,25 @@ export function AskBox({
             }}
           />
           <div className="bookmark-actions ask-actions">
-            <label className={toSession ? "ask-edits on" : "ask-edits"} title={T.pedirNaSessaoDica}>
+            <label className={toSession ? "ask-edits on" : "ask-edits"} title={T.askInSessionHint}>
               <input
                 type="checkbox"
                 checked={toSession}
                 disabled={!!running}
                 onChange={(e) => set({ toSession: e.target.checked })}
               />
-              {T.pedirNaSessao}
+              {T.askInSession}
             </label>
             {toSession ? (
               <select
-                value={target?.painel ?? ""}
+                value={target?.panel ?? ""}
                 disabled={!!running || !live.length}
                 onChange={(e) => set({ panel: Number(e.target.value) })}
-                title={T.sessaoQueAltera}
+                title={T.editingSession}
               >
-                {!live.length && <option value="">{T.nenhumaSessaoAberta}</option>}
+                {!live.length && <option value="">{T.noSessionOpen}</option>}
                 {live.map((s) => (
-                  <option key={s.painel} value={s.painel}>
+                  <option key={s.panel} value={s.panel}>
                     {liveLabel(s)}
                   </option>
                 ))}
@@ -380,7 +380,7 @@ export function AskBox({
                   value={model}
                   disabled={!!running}
                   onChange={(e) => asks.setModel(id, e.target.value)}
-                  title={T.modeloQueResponde}
+                  title={T.answeringModel}
                 >
                   {MODELS.map((m) => (
                     <option key={m.id} value={m.id}>
@@ -392,10 +392,10 @@ export function AskBox({
                   value={session}
                   disabled={!!running}
                   onChange={(e) => set({ session: e.target.value })}
-                  title={T.mencionarSessaoDica}
+                  title={T.mentionSessionHint}
                 >
-                  <option value="">{T.semSessao}</option>
-                  {sessions === null && <option disabled>{T.carregandoSessoes}</option>}
+                  <option value="">{T.noSession}</option>
+                  {sessions === null && <option disabled>{T.loadingSessions}</option>}
                   {sessions?.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.title} · {ago(s.modified)}
@@ -404,7 +404,7 @@ export function AskBox({
                 </select>
                 <label
                   className={allowEdits ? "ask-edits on" : "ask-edits"}
-                  title={T.permitirAlteracoesDica}
+                  title={T.allowChangesHint}
                 >
                   <input
                     type="checkbox"
@@ -412,15 +412,15 @@ export function AskBox({
                     disabled={!!running}
                     onChange={(e) => set({ allowEdits: e.target.checked })}
                   />
-                  {T.permitirAlteracoes}
+                  {T.allowChanges}
                 </label>
               </>
             )}
-            <span className="hint">{allowEdits || toSession ? T.enviaAtalho : T.perguntaAtalho}</span>
+            <span className="hint">{allowEdits || toSession ? T.sendsShortcut : T.questionShortcut}</span>
             {answered && (
               <button className="btn" disabled={!!running} onClick={() => set({ decision: "" })}>
                 <Icon name="bookmark" size={13} />
-                {T.registrarDecisao}
+                {T.recordDecision}
               </button>
             )}
             <button
@@ -428,7 +428,7 @@ export function AskBox({
               disabled={!input.trim() || !!running || (toSession && !target)}
               onClick={send}
             >
-              {toSession ? T.enviarParaSessao : allowEdits ? T.pedirAlteracao : T.perguntar}
+              {toSession ? T.sendForSession : allowEdits ? T.askChange : T.ask}
             </button>
           </div>
         </>

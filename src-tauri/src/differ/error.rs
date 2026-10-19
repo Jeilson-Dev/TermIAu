@@ -19,7 +19,7 @@ pub enum Error {
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if !crate::idioma::portugues() {
+        if !crate::language::portuguese() {
             return match self {
                 Error::NotARepo(path) => write!(f, "The folder is not a git repository: {path}"),
                 Error::NoCommits => write!(f, "The repository has no commits yet."),

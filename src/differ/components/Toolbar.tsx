@@ -24,49 +24,49 @@ export function Toolbar(props: Props) {
 
   return (
     <header className="toolbar">
-      <span className="repo-nome" title={repo?.root}>
+      <span className="repo-name" title={repo?.root}>
         <Icon name="folder" />
         {repo?.name ?? "Diff"}
       </span>
       {repo && (
-        <div className="segmented" role="group" aria-label={T.escopoDaRevisao}>
+        <div className="segmented" role="group" aria-label={T.scopeOfReview}>
           <button
             className={scope === "branch" ? "active" : ""}
-            title={T.escopoBranchDica}
+            title={T.scopeBranchHint}
             onClick={() => props.onScope("branch")}
           >
             <Icon name="git-branch" size={14} />
-            {T.escopoBranch}
+            {T.scopeBranch}
           </button>
           <button
             className={scope === "incremental" ? "active" : ""}
-            title={T.escopoIncrementalDica}
+            title={T.scopeIncrementalHint}
             onClick={() => props.onScope("incremental")}
           >
             <Icon name="history" size={14} />
-            {T.escopoIncremental}
+            {T.scopeIncremental}
           </button>
           <button
             className={scope === "working" ? "active" : ""}
-            title={T.escopoWorkingDica}
+            title={T.scopeWorkingHint}
             onClick={() => props.onScope("working")}
           >
             <Icon name="pencil" size={14} />
-            {T.escopoWorking}
+            {T.scopeWorking}
           </button>
         </div>
       )}
       {repo && (
         <div className="compare">
           {scope === "working" ? (
-            <span className="base-pill" title={T.baseHeadDica}>
+            <span className="base-pill" title={T.baseHeadHint}>
               <Icon name="git-commit" size={14} />
               HEAD
             </span>
           ) : sinceBase ? (
             <span
               className="base-pill"
-              title={T.baseRevisaoDica(sinceBase)}
+              title={T.baseReviewHint(sinceBase)}
             >
               <Icon name="check" size={14} />
               {sinceBase.slice(0, 7)}
@@ -74,19 +74,19 @@ export function Toolbar(props: Props) {
           ) : (
             <select
               className="branch-select"
-              aria-label={T.branchAlvo}
-              title={T.branchAlvoDica}
+              aria-label={T.branchTarget}
+              title={T.branchTargetHint}
               value={target}
               onChange={(e) => props.onTargetChange(e.target.value)}
             >
               {target && !knownTarget && <option>{target}</option>}
-              <optgroup label={T.branchesLocais}>
+              <optgroup label={T.branchesLocal}>
                 {repo.localBranches.map((b) => (
                   <option key={b}>{b}</option>
                 ))}
               </optgroup>
               {repo.remoteBranches.length > 0 && (
-                <optgroup label={T.branchesRemotas}>
+                <optgroup label={T.branchesRemote}>
                   {repo.remoteBranches.map((b) => (
                     <option key={b}>{b}</option>
                   ))}
@@ -95,15 +95,15 @@ export function Toolbar(props: Props) {
             </select>
           )}
           <Icon name="arrow-left" className="compare-arrow" />
-          <span className="branch-pill" title={T.branchEmRevisaoDica}>
+          <span className="branch-pill" title={T.branchInReviewHint}>
             <Icon name="git-branch" size={14} />
-            {repo.currentBranch ?? T.headDestacado}
+            {repo.currentBranch ?? T.headHighlighted}
           </span>
         </div>
       )}
       {diff && (
         <span className="toolbar-stats">
-          {T.arquivos(fileCount)} <span className="add">+{diff.additions}</span>{" "}
+          {T.files(fileCount)} <span className="add">+{diff.additions}</span>{" "}
           <span className="del">−{diff.deletions}</span>
         </span>
       )}
@@ -113,26 +113,26 @@ export function Toolbar(props: Props) {
           changes. All that's left is the sign that it is being redone — reloading with
           nothing flashing looks like nothing happened. */}
       {props.loading && (
-        <span className="recarregando">
+        <span className="reloading">
           <Icon name="refresh" size={14} className="spin" />
-          {T.atualizando}
+          {T.updating}
         </span>
       )}
       {repo && (
-        <div className="segmented" role="group" aria-label={T.modoDeVisualizacao}>
+        <div className="segmented" role="group" aria-label={T.modeOfView}>
           <button
             className={props.viewMode === "unified" ? "active" : ""}
             onClick={() => props.onViewMode("unified")}
           >
             <Icon name="unified" size={14} />
-            {T.unificado}
+            {T.unified}
           </button>
           <button
             className={props.viewMode === "split" ? "active" : ""}
             onClick={() => props.onViewMode("split")}
           >
             <Icon name="split" size={14} />
-            {T.ladoALado}
+            {T.sideBySide}
           </button>
         </div>
       )}
@@ -144,9 +144,9 @@ function ReviewProgress({ viewed, total }: { viewed: number; total: number }) {
   return (
     <div
       className={viewed === total ? "progress done" : "progress"}
-      title={T.progressoDica}
+      title={T.progressHint}
     >
-      <span>{T.revisados(viewed, total)}</span>
+      <span>{T.reviewedOnes(viewed, total)}</span>
       <div className="progress-bar">
         <div style={{ width: `${(viewed / total) * 100}%` }} />
       </div>

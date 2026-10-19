@@ -578,7 +578,7 @@ code {
   transition: transform 0.28s ease;
 }
 
-.tree-chevron.fechado {
+.tree-chevron.closed {
   transform: rotate(-90deg);
 }
 
@@ -592,7 +592,7 @@ code {
   transition: grid-template-rows 0.28s ease;
 }
 
-.tree-dobra.aberta {
+.tree-dobra.open {
   grid-template-rows: 1fr;
 }
 
@@ -692,7 +692,7 @@ code {
 
 /* Git's refusal — a hook that blocked it, identity not configured, empty index —
    stays beside the typed message, which isn't lost. */
-.commit-erro {
+.commit-error {
   margin: 0;
   color: var(--red);
   font-size: 12px;
@@ -701,12 +701,12 @@ code {
 
 /* The single paste of the whole review, at the top of the bookmark list: the gesture is
    for all of them at once, so the button is spelled out, not just an icon. */
-.bookmark-tudo {
+.bookmark-all {
   display: flex;
   padding: 8px 8px 4px;
 }
 
-.copiar-tudo {
+.copy-all {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -719,19 +719,19 @@ code {
   color: var(--fg-dim);
 }
 
-.copiar-tudo:hover {
+.copy-all:hover {
   border-color: var(--purple);
   color: var(--fg);
 }
 
-.copiar-tudo.copied {
+.copy-all.copied {
   border-color: var(--green);
   color: var(--green);
 }
 
 /* The header of each list group — "Staged" and "Unstaged" — with the
    count of what is inside and the button that stages or unstages the whole repository. */
-.tree-grupo {
+.tree-group {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -740,7 +740,7 @@ code {
 
 /* The whole header is the gesture to open and close the group; the index button
    beside it is its sibling — inside, a click on one would become a click on the other. */
-.tree-grupo-botao {
+.tree-group-button {
   display: flex;
   flex: 1;
   align-items: center;
@@ -756,11 +756,11 @@ code {
   text-transform: uppercase;
 }
 
-.tree-grupo-botao:hover {
+.tree-group-button:hover {
   color: var(--fg-dim);
 }
 
-.tree-grupo-nome {
+.tree-group-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -769,23 +769,23 @@ code {
 
 /* The group's button doesn't hide like the rows' do: it is the "all at once"
    gesture, and hunting for it with the pointer would be more work than the gesture is worth. */
-.tree-grupo .stage-btn {
+.tree-group .stage-btn {
   flex: none;
 }
 
 /* The file row with the index buttons beside it: they are siblings of the button
    that selects, not its children. */
-.tree-file-linha {
+.tree-file-line {
   display: flex;
   align-items: center;
 }
 
-.tree-file-linha .tree-file {
+.tree-file-line .tree-file {
   flex: 1;
   min-width: 0;
 }
 
-.stage-acoes {
+.stage-actions {
   display: flex;
   flex: none;
   gap: 2px;
@@ -796,9 +796,9 @@ code {
   opacity: 0;
 }
 
-.tree-file-linha:hover .stage-acoes,
-.stage-acoes.staged,
-.stage-acoes.partial {
+.tree-file-line:hover .stage-actions,
+.stage-actions.staged,
+.stage-actions.partial {
   opacity: 1;
 }
 
@@ -821,8 +821,8 @@ code {
 }
 
 /* Green is "in the index, goes in the commit"; the minus that removes it stays neutral. */
-.stage-acoes.staged .stage-btn,
-.stage-acoes.partial .stage-btn.tirar {
+.stage-actions.staged .stage-btn,
+.stage-actions.partial .stage-btn.remove {
   color: var(--green);
 }
 
@@ -908,10 +908,10 @@ code {
 }
 
 .icon-btn.copied svg {
-  animation: copiado-pulo 260ms cubic-bezier(0.3, 1.6, 0.5, 1);
+  animation: copied-jump 260ms cubic-bezier(0.3, 1.6, 0.5, 1);
 }
 
-.copiado-balao {
+.copied-bubble {
   position: absolute;
   /* Below, not above: the header sticks to the top of the scroll and would clip the bubble. */
   top: calc(100% + 6px);
@@ -925,10 +925,10 @@ code {
   white-space: nowrap;
   pointer-events: none;
   transform: translateX(-50%);
-  animation: copiado-balao 1500ms ease forwards;
+  animation: copied-bubble 1500ms ease forwards;
 }
 
-.copiado-balao::after {
+.copied-bubble::after {
   content: "";
   position: absolute;
   bottom: 100%;
@@ -938,7 +938,7 @@ code {
   transform: translateX(-50%);
 }
 
-@keyframes copiado-pulo {
+@keyframes copied-jump {
   from {
     transform: scale(0.4);
     opacity: 0;
@@ -949,7 +949,7 @@ code {
   }
 }
 
-@keyframes copiado-balao {
+@keyframes copied-bubble {
   0% {
     opacity: 0;
     transform: translate(-50%, -4px);
@@ -967,7 +967,7 @@ code {
 
 @media (prefers-reduced-motion: reduce) {
   .icon-btn.copied svg,
-  .copiado-balao {
+  .copied-bubble {
     animation: none;
   }
 }
@@ -2152,7 +2152,7 @@ tr.gap {
 
 /* Above everything, including the toolbar: ⌘, may arrive with no
    repository open, when the bar doesn't even exist. */
-.prefs-fundo {
+.prefs-background {
   position: fixed;
   inset: 0;
   z-index: 40;
@@ -2166,11 +2166,11 @@ tr.gap {
 .prefs {
   display: flex;
   flex-direction: column;
-  width: min(460px, calc(100vw - 32px));
+  width: min(600px, calc(100vw - 32px));
   /* Taller than the window, the fields scroll below the fixed header: the backdrop
      starts 14vh from the top. */
   max-height: calc(86vh - 16px);
-  /* The same padding as the terminal's dialogs (the radio's, .lofi-caixa). */
+  /* The same padding as the terminal's dialogs (.dialog-box). */
   padding: 12px;
   border: 1px solid var(--selection);
   border-radius: 10px;
@@ -2178,7 +2178,7 @@ tr.gap {
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
 }
 
-.prefs-topo {
+.prefs-top {
   flex: none;
   display: flex;
   align-items: center;
@@ -2186,7 +2186,7 @@ tr.gap {
   margin-bottom: 14px;
 }
 
-.prefs-corpo {
+.prefs-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -2195,33 +2195,33 @@ tr.gap {
   padding: 0 4px;
 }
 
-.prefs-topo h2 {
+.prefs-top h2 {
   margin: 0;
   font-size: 14px;
   font-weight: 600;
 }
 
-.prefs-campo {
+.prefs-field {
   display: block;
 }
 
-.prefs-campo + .prefs-campo {
+.prefs-field + .prefs-field {
   margin-top: 18px;
 }
 
-.prefs-ajuda code {
+.prefs-help code {
   font-family: var(--mono);
   color: var(--fg-dim);
 }
 
-.prefs-nome {
+.prefs-name {
   display: block;
   margin-bottom: 6px;
   font-size: 12px;
   color: var(--fg-dim);
 }
 
-.prefs-campo input {
+.prefs-field input {
   width: 100%;
   padding: 7px 9px;
   border: 1px solid var(--selection);
@@ -2231,12 +2231,12 @@ tr.gap {
   font-size: 12px;
 }
 
-.prefs-campo input:focus {
+.prefs-field input:focus {
   border-color: var(--purple);
   outline: none;
 }
 
-.prefs-ajuda {
+.prefs-help {
   display: block;
   margin-top: 8px;
   font-size: 11.5px;
@@ -2244,9 +2244,180 @@ tr.gap {
   color: var(--comment);
 }
 
+/* TermIAu's own settings and the Plugins tab. */
+.prefs-tabs {
+  flex: none;
+  align-self: flex-start;
+  margin-bottom: 16px;
+}
+
+/* ---------- preferences: the Plugins tab ---------- */
+
+.plugins-tab .plugins-trust {
+  margin-top: 0;
+}
+
+.plugins-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 14px;
+}
+
+.plugins-message {
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--green);
+}
+
+.plugins-message.error {
+  color: var(--red);
+}
+
+.plugins-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plugin-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--selection);
+  border-radius: 6px;
+  background: var(--bg-dark);
+}
+
+.plugin-row.disabled .plugin-info,
+.plugin-row.disabled .plugin-icon {
+  opacity: 0.55;
+}
+
+.plugin-icon {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+  object-fit: contain;
+}
+
+.plugin-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.plugin-name {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.plugin-version {
+  margin-left: 6px;
+  color: var(--comment);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.plugin-id {
+  color: var(--comment);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.plugin-description {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--fg-dim);
+}
+
+.plugin-error {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--red);
+  overflow-wrap: anywhere;
+}
+
+.plugin-controls {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.plugin-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+/* While the list loads: checking signatures hashes each plugin's files. */
+.plugins-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The removal asks twice: the second click is the one that deletes. */
+.btn.plugin-remove.confirming {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+/* Both labels stacked in one cell: the width is the longer one's, so nothing jumps on the
+   first click. They cross-fade, sliding up on the way in and back down on the way out,
+   while the border and text turn red (and back, when the confirmation times out). */
+.btn.plugin-remove {
+  display: inline-grid;
+  overflow: hidden;
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.btn.plugin-remove > span {
+  grid-area: 1 / 1;
+  text-align: center;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease,
+    visibility 0.2s;
+}
+
+.btn.plugin-remove > span[aria-hidden="true"] {
+  opacity: 0;
+  transform: translateY(70%);
+  visibility: hidden;
+}
+
+/* "Remove" leaves upwards; "Really remove?" comes from below and goes back down. */
+.btn.plugin-remove > span:first-child[aria-hidden="true"] {
+  transform: translateY(-70%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn.plugin-remove,
+  .btn.plugin-remove > span {
+    transition: none;
+  }
+}
+
 /* The name of the repository under review. It is a label, not a button: picking a project is
    the terminal's job, through each panel's diff button. */
-.repo-nome {
+.repo-name {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2256,7 +2427,7 @@ tr.gap {
   color: var(--fg);
 }
 
-.repo-nome .icon {
+.repo-name .icon {
   color: var(--purple);
 }
 
@@ -2264,7 +2435,7 @@ tr.gap {
 
 /* Pinned to the top, not centered: it interrupts a reading, and the text
    the person was reading stays visible below while they decide. */
-.mudou-fundo {
+.changed-background {
   position: fixed;
   inset: 0;
   z-index: 40;
@@ -2275,7 +2446,7 @@ tr.gap {
   background: rgba(25, 26, 33, 0.5);
 }
 
-.mudou {
+.changed {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -2287,12 +2458,12 @@ tr.gap {
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
 }
 
-.mudou > .icon {
+.changed > .icon {
   flex: none;
   color: var(--purple);
 }
 
-.mudou-texto {
+.changed-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -2300,19 +2471,19 @@ tr.gap {
   flex: 1;
 }
 
-.mudou-texto span {
+.changed-text span {
   font-size: 12px;
   color: var(--fg-dim);
 }
 
-.mudou-botoes {
+.changed-buttons {
   display: flex;
   flex: none;
   gap: 8px;
 }
 
 /* Sign that the diff is being redone, where the button used to be. */
-.recarregando {
+.reloading {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2322,13 +2493,13 @@ tr.gap {
 }
 
 /* The two context limits side by side, each with the color it lights up. */
-.prefs-limites {
+.prefs-limits {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 18px;
 }
 
-.prefs-limite {
+.prefs-limit {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2336,26 +2507,206 @@ tr.gap {
   color: var(--fg);
 }
 
-.prefs-campo .prefs-limite input[type="checkbox"] {
+.prefs-field .prefs-limit input[type="checkbox"] {
   width: auto;
   margin: 0;
 }
 
-.prefs-campo .prefs-limite input:disabled {
+.prefs-field .prefs-limit input:disabled {
   opacity: 0.5;
 }
 
-.prefs-campo .prefs-limite input[type="number"] {
+.prefs-field .prefs-limit input[type="number"] {
   width: 56px;
   padding: 4px 6px;
   text-align: right;
 }
 
-.prefs-bolinha {
+.prefs-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
 }
 
-.prefs-bolinha.atencao { background: var(--yellow); }
-.prefs-bolinha.perigo { background: var(--red); }
+.prefs-dot.attention { background: var(--yellow); }
+.prefs-dot.danger { background: var(--red); }
+
+/* ---------- the marketplace (Preferences ▸ Plugins ▸ Open the marketplace) ---------- */
+
+/* Over the Preferences, and bigger: a catalog needs room for cards side by side. */
+.market-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(25, 26, 33, 0.6);
+}
+
+.market {
+  display: flex;
+  flex-direction: column;
+  width: min(980px, calc(100vw - 48px));
+  height: min(720px, calc(100vh - 64px));
+  padding: 14px;
+  border: 1px solid var(--selection);
+  border-radius: 10px;
+  background: var(--bg-light);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+}
+
+.market-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.market-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.market-title h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.market-count {
+  font-size: 12px;
+  color: var(--comment);
+}
+
+.market-search {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--selection);
+  border-radius: 6px;
+  background: var(--bg-dark);
+  font-size: 12.5px;
+}
+
+.market-search:focus {
+  border-color: var(--purple);
+  outline: none;
+}
+
+.market-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.market-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.market-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--selection);
+  border-radius: 8px;
+  background: var(--bg-dark);
+}
+
+.market-card:hover {
+  border-color: var(--comment);
+}
+
+.market-card-top {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.market-icon {
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  object-fit: contain;
+}
+
+.market-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.market-name {
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.market-author,
+.market-meta {
+  font-size: 11.5px;
+  color: var(--comment);
+}
+
+.market-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.market-description {
+  flex: 1;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg-dim);
+}
+
+.market-failure {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--red);
+  overflow-wrap: anywhere;
+}
+
+.market-card-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.market-empty {
+  margin: 40px 0;
+  text-align: center;
+  color: var(--comment);
+}
+
+.market-empty.error {
+  color: var(--red);
+}
+
+/* Signed by a trusted publisher (see src-tauri/src/signing.rs). */
+.plugin-verified {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 8px;
+  padding: 1px 6px 1px 4px;
+  border-radius: 9px;
+  background: rgba(80, 250, 123, 0.12);
+  color: var(--green);
+  font-size: 10.5px;
+  font-weight: 500;
+  vertical-align: 1px;
+}
+
+.plugin-verified svg {
+  width: 11px;
+  height: 11px;
+}

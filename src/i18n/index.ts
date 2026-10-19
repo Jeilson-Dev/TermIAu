@@ -7,40 +7,40 @@
 /// `{ pt, en }` pair with the same shape — `en`'s type is `pt`'s, and forgetting a
 /// key in one of the languages is a compile error.
 
-export type Idioma = "pt" | "en";
+export type Language = "pt" | "en";
 
 /// Only the first language in the list decides: whoever put English in front wants the app
 /// in English, even with Portuguese right behind.
-export function idiomaDe(tags: readonly string[]): Idioma {
+export function languageOf(tags: readonly string[]): Language {
   return tags[0]?.toLowerCase().startsWith("pt") ? "pt" : "en";
 }
 
-const doSistema = (): readonly string[] => {
+const fromSystem = (): readonly string[] => {
   if (typeof navigator === "undefined") return [];
   return navigator.languages?.length ? navigator.languages : [navigator.language];
 };
 
-let atual: Idioma = idiomaDe(doSistema());
+let current: Language = languageOf(fromSystem());
 
-export const idioma = (): Idioma => atual;
+export const language = (): Language => current;
 
 /// For tests: Node doesn't have the macOS language.
-export function definirIdioma(i: Idioma) {
-  atual = i;
+export function setLanguage(i: Language) {
+  current = i;
 }
 
 /// The locale for dates and numbers: the system's when it is in the same language as the
 /// app (en-AU formats as in Australia), otherwise the language's default.
-export function localidade(): string {
-  const primeiro = doSistema()[0];
-  if (primeiro && idiomaDe([primeiro]) === atual) return primeiro;
-  return atual === "pt" ? "pt-BR" : "en-US";
+export function locale(): string {
+  const firstOne = fromSystem()[0];
+  if (firstOne && languageOf([firstOne]) === current) return firstOne;
+  return current === "pt" ? "pt-BR" : "en-US";
 }
 
 /// The texts of a part of the app, in the current language. Read at access time,
 /// not at module load: that is what lets a test switch the language.
-export function traducoes<T extends object>(par: { pt: T; en: T }): T {
+export function translations<T extends object>(pair: { pt: T; en: T }): T {
   return new Proxy({} as T, {
-    get: (_, chave) => (par[atual] as Record<string | symbol, unknown>)[chave],
+    get: (_, key) => (pair[current] as Record<string | symbol, unknown>)[key],
   });
 }

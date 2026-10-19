@@ -2,9 +2,57 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <!-- Asked for the Dictation plugin's engine: macOS counts a child process's
+       microphone use as TermIAu's (see src-tauri/src/plugin_process.rs). -->
   <key>NSMicrophoneUsageDescription</key>
-  <string>O TermIAu usa o microfone para transcrever a sua fala e digitar por você. O áudio é processado no seu computador e nunca sai dele.</string>
+  <string>O plugin Escuta do TermIAu usa o microfone para transcrever a sua fala e digitar por você. O áudio é processado no seu computador e nunca sai dele.</string>
   <key>NSBluetoothAlwaysUsageDescription</key>
-  <string>O TermIAu usa o Bluetooth para captar a sua voz por fones e headsets sem fio.</string>
+  <string>O plugin Escuta do TermIAu usa o Bluetooth para captar a sua voz por fones e headsets sem fio.</string>
+  <!-- .termiau plugin packages (see src-tauri/src/plugins.rs): Finder shows them with
+       plugin.icns, and opening one hands it to TermIAu, which asks before installing.
+       Declared here and not in tauri.conf.json's fileAssociations because that
+       one has no field for the document's icon. -->
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>dev.jeilson.termiau.plugin</string>
+      <key>UTTypeDescription</key>
+      <string>TermIAu Plugin</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.data</string>
+        <string>public.archive</string>
+      </array>
+      <key>UTTypeIconFile</key>
+      <string>plugin.icns</string>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>termiau</string>
+        </array>
+        <key>public.mime-type</key>
+        <string>application/x-termiau-plugin</string>
+      </dict>
+    </dict>
+  </array>
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>TermIAu Plugin</string>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+      <key>LSHandlerRank</key>
+      <string>Owner</string>
+      <key>CFBundleTypeIconFile</key>
+      <string>plugin.icns</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>dev.jeilson.termiau.plugin</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>

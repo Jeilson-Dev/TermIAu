@@ -99,12 +99,12 @@ const dot = <circle cx="8" cy="8" r="1.8" fill="currentColor" stroke="none" />;
 const arrow = <path d="M5 8h6M9 6l2 2-2 2" />;
 
 const STATUS: Record<FileStatus, { className: string; label: string; symbol: ReactElement }> = {
-  added: { className: "added", label: T.adicionado, symbol: <path d="M8 5.5v5M5.5 8h5" /> },
-  modified: { className: "modified", label: T.modificado, symbol: dot },
-  deleted: { className: "deleted", label: T.removido, symbol: <path d="M5.5 8h5" /> },
-  renamed: { className: "renamed", label: T.renomeado, symbol: arrow },
-  copied: { className: "renamed", label: T.copiadoArquivo, symbol: arrow },
-  typeChanged: { className: "modified", label: T.tipoAlterado, symbol: dot },
+  added: { className: "added", label: T.added, symbol: <path d="M8 5.5v5M5.5 8h5" /> },
+  modified: { className: "modified", label: T.modified, symbol: dot },
+  deleted: { className: "deleted", label: T.removed, symbol: <path d="M5.5 8h5" /> },
+  renamed: { className: "renamed", label: T.renamed, symbol: arrow },
+  copied: { className: "renamed", label: T.copiedFile, symbol: arrow },
+  typeChanged: { className: "modified", label: T.kindChanged, symbol: dot },
 };
 
 export function StatusIcon({ status }: { status: FileStatus }) {
@@ -134,7 +134,7 @@ export function DiffStat({ additions, deletions }: { additions: number; deletion
   const green = total ? Math.round((additions / total) * 5) : 0;
   const red = total ? 5 - green : 0;
   return (
-    <span className="diffstat" title={T.adicoesRemocoes(additions, deletions)}>
+    <span className="diffstat" title={T.additionsDeletions(additions, deletions)}>
       <span className="add">+{additions}</span>
       <span className="del">−{deletions}</span>
       <span className="blocks">

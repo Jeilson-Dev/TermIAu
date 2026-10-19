@@ -3,3 +3,7 @@ dist
 src-tauri/target
 src-tauri/gen
 .DS_Store
+dist-plugins
+plugins/*/dist
+dist-marketplace
+plugins/*/engine/target
