@@ -2,6 +2,8 @@ mod area;
 mod differ;
 mod escuta;
 mod idioma;
+mod janela;
+mod progresso;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -709,6 +711,19 @@ fn ouvir_hooks(app: AppHandle, caminho: PathBuf) {
                 if texto.trim().is_empty() {
                     return;
                 }
+                // `termiau progresso` waits for the answer: a plan that doesn't hold up goes
+                // back to Claude as the command's error, for it to fix.
+                if let Some(conferido) = progresso::do_socket(&texto) {
+                    let mut fluxo = fluxo;
+                    let _ = match conferido {
+                        Ok(evento) => {
+                            let _ = app.emit("claude://evento", evento);
+                            fluxo.write_all(b"ok\n")
+                        }
+                        Err(e) => writeln!(fluxo, "error: {e}"),
+                    };
+                    return;
+                }
                 // The question gets a number, which goes along to the webview: it is
                 // how the answer comes back to this connection.
                 let texto = match pergunta_em_espera(&texto) {
@@ -979,6 +994,21 @@ fn arquivos_existem(base: String, candidatos: Vec<String>) -> Vec<Option<String>
             p.is_file().then(|| p.to_string_lossy().into_owned())
         })
         .collect()
+}
+
+/// The file's folder in Finder, with the file selected (`open -R`). Gone from disk
+/// (a file seen at a git ref, since deleted), the nearest folder that still exists.
+#[tauri::command]
+fn mostrar_no_finder(caminho: String) -> Result<(), String> {
+    let mut alvo = std::path::Path::new(&caminho);
+    if !alvo.is_absolute() {
+        return Err(format!("{}: {caminho}", tr("caminho relativo", "relative path")));
+    }
+    while !alvo.exists() {
+        alvo = alvo.parent().ok_or_else(|| tr("pasta não encontrada", "folder not found").to_string())?;
+    }
+    std::process::Command::new("/usr/bin/open").arg("-R").arg(alvo).spawn().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Opens the file in the editor, at the line. `comando` is the one from Preferences, with
@@ -1521,12 +1551,12 @@ fn montar_menu(app: &AppHandle) -> tauri::Result<()> {
         true,
         &[
             &MenuItem::with_id(app, "nova-aba", tr("Nova Aba", "New Tab"), true, Some("CmdOrCtrl+T"))?,
-            // Like in the browser: brings back the last closed tab, with its
+            // Like in the browser: brings back the last closed tab (or panel), with its
             // layout and Claude sessions resumed.
             &MenuItem::with_id(
                 app,
                 "reabrir-aba",
-                tr("Reabrir Aba Fechada", "Reopen Closed Tab"),
+                tr("Reabrir Aba ou Painel Fechado", "Reopen Closed Tab or Panel"),
                 true,
                 Some("CmdOrCtrl+Shift+T"),
             )?,
@@ -1687,11 +1717,21 @@ pub fn run() {
             app.manage(Pendentes::default());
             app.manage(differ::Vigia::default());
             app.manage(differ::Perguntas::default());
+            app.manage(janela::Ultima::default());
+            // Born hidden (tauri.conf.json): it shows already in its place, without jumping there.
+            if let Some(w) = app.get_webview_window("main") {
+                janela::mostrar(&w);
+            }
             // Without this whisper.cpp dumps its log onto the process output.
             whisper_rs::install_logging_hooks();
             montar_menu(app.handle())?;
             instalar_cli();
             Ok(())
+        })
+        .on_window_event(|w, ev| match ev {
+            tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => janela::anotar(w),
+            tauri::WindowEvent::CloseRequested { .. } => janela::gravar(w.app_handle()),
+            _ => {}
         })
         // The menu only knows the key was pressed; the webview owns the tabs.
         .on_menu_event(|app, ev| match ev.id().as_ref() {
@@ -1730,6 +1770,7 @@ pub fn run() {
             pasta_listar,
             arquivos_existem,
             abrir_no_editor,
+            mostrar_no_finder,
             pty_resize,
             pty_cwd,
             pty_close,
@@ -1778,6 +1819,7 @@ pub fn run() {
         .expect("error while building TermIAu")
         .run(|app, evento| {
             if let tauri::RunEvent::Exit = evento {
+                janela::gravar(app);
                 // The socket is a real file; without this one would be left per
                 // run in the temp directory.
                 let _ = std::fs::remove_file(&app.state::<Config>().socket);

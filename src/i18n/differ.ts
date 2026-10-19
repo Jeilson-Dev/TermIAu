@@ -73,6 +73,7 @@ const pt = {
     " vai sozinho quando o contexto chega no limite e o Claude está parado. O limite tem de passar do vermelho; abaixo dele, vale o vermelho mais um.",
   ] as Trecho[],
 
+
   // bookmarks
   trechoAlterado: "trecho alterado",
   trechoAlteradoDica: "Estas linhas mudaram desde a última revisão completa",
@@ -218,6 +219,21 @@ imperativo, em português, sem título. Responda só com o comentário.`,
   registrarDecisao: "Registrar decisão",
   pedirAlteracao: "Pedir alteração",
   perguntar: "Perguntar",
+  pedirNaSessao: "Pedir alterações a uma sessão",
+  pedirNaSessaoDica:
+    "Envia o pedido direto para uma sessão do Claude aberta num painel, como se você digitasse lá. Ela altera os arquivos com as permissões que já tem, e o diff acompanha conforme o disco muda.",
+  sessaoQueAltera: "Sessão que recebe o pedido",
+  nenhumaSessaoAberta: "Nenhuma sessão do Claude aberta neste repositório",
+  trabalhando: "trabalhando",
+  esperandoVoce: "esperando você",
+  oQueAlterarNaSessao: "O que a sessão deve alterar? Vai junto o arquivo e as linhas deste trecho.",
+  enviarParaSessao: "Enviar à sessão",
+  enviadoParaSessao: (nome: string) => `Enviado à sessão em ${nome} — a resposta e as alterações acontecem lá.`,
+  irAoPainel: "Ir ao painel",
+  soDentroDoTermiau: "Só dá para enviar a uma sessão de dentro do TermIAu.",
+  revisandoEm: (arquivo: string, linhas: string, versao: string) =>
+    `[Revisão no diff do TermIAu] ${arquivo}, ${linhas} (${versao}):`,
+  pedidoDoRevisor: (pedido: string) => `Pedido do revisor — pode alterar os arquivos para atender:\n${pedido}`,
 
   // sidebar
   abaArquivos: "Arquivos",
@@ -388,6 +404,7 @@ const en: typeof pt = {
     " is sent on its own when the context reaches the limit and Claude is idle. The limit must be above red; below it, red plus one is used.",
   ],
 
+
   // bookmarks
   trechoAlterado: "lines changed",
   trechoAlteradoDica: "These lines changed since the last complete review",
@@ -533,6 +550,20 @@ conversation. Short text, in the imperative, in English, no title. Reply with th
   registrarDecisao: "Record decision",
   pedirAlteracao: "Request change",
   perguntar: "Ask",
+  pedirNaSessao: "Ask changes to a session",
+  pedirNaSessaoDica:
+    "Sends the request straight to a Claude session open in a panel, as if you typed it there. It edits the files with the permissions it already has, and the diff follows as the disk changes.",
+  sessaoQueAltera: "Session that gets the request",
+  nenhumaSessaoAberta: "No Claude session open in this repository",
+  trabalhando: "working",
+  esperandoVoce: "waiting for you",
+  oQueAlterarNaSessao: "What should the session change? The file and lines of this passage go along.",
+  enviarParaSessao: "Send to session",
+  enviadoParaSessao: (nome) => `Sent to the session in ${nome} — the answer and the edits happen there.`,
+  irAoPainel: "Go to panel",
+  soDentroDoTermiau: "Sending to a session only works inside TermIAu.",
+  revisandoEm: (arquivo, linhas, versao) => `[Review in TermIAu's diff] ${arquivo}, ${linhas} (${versao}):`,
+  pedidoDoRevisor: (pedido) => `Reviewer's request — you may edit the files to address it:\n${pedido}`,
 
   // sidebar
   abaArquivos: "Files",

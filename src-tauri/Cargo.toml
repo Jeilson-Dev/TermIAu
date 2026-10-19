@@ -34,12 +34,12 @@ tauri-plugin-store = "2"
 # Watcher for .git, so the diff tab redoes itself on every commit.
 notify = "8"
 
-# Clipboard (⌘⇧V). Tauri doesn't expose the files on the clipboard,
+# Clipboard (⌘⇧V) and the window's frame (janela.rs). Tauri doesn't expose the files on the clipboard,
 # only text — and Finder puts no text there at all when you copy a
 # file. These two already come with wry, so they cost no build time.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSPasteboardItem"] }
-objc2-foundation = { version = "0.3", features = ["NSURL", "NSLocale", "NSArray", "NSString"] }
+objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSPasteboardItem", "NSWindow", "NSScreen", "NSResponder"] }
+objc2-foundation = { version = "0.3", features = ["NSURL", "NSLocale", "NSArray", "NSString", "NSGeometry", "NSThread"] }
 
 # The differ's tests build real git repositories in a temporary folder.
 [dev-dependencies]

@@ -5,6 +5,7 @@ import { claudeSessions, type AskChange } from "../api";
 import * as asks from "../lib/asks";
 import type { AskState } from "../lib/asks";
 import { rangeLabel } from "../lib/bookmarks";
+import { goToPanel, useLiveSessions, type LiveSession } from "../lib/liveSessions";
 import type { ClaudeSession, FileDiff } from "../types";
 import { Icon } from "./Icons";
 
@@ -27,6 +28,9 @@ function sessionsOf(root: string): Promise<ClaudeSession[]> {
   sessionsCache.set(root, { at: Date.now(), list });
   return list;
 }
+
+const liveLabel = (s: LiveSession) =>
+  `${s.titulo && s.titulo !== s.nome ? `${s.nome} · ${s.titulo}` : s.nome}${s.estado === "trabalhando" ? ` · ${T.trabalhando}` : s.estado === "esperando" ? ` · ${T.esperandoVoce}` : ""}`;
 
 function ago(ms: number): string {
   const min = Math.round((Date.now() - ms) / 60_000);
@@ -175,7 +179,10 @@ export function AskBox({
   onDecide(note: string): void | Promise<void>;
 }) {
   const [sessions, setSessions] = useState<ClaudeSession[] | null>(null);
-  const { id, turns, input, model, session, allowEdits, running, decision, draft, noteError } = ask;
+  const { id, turns, input, model, session, allowEdits, toSession, panel, running, decision, draft, noteError } = ask;
+  const live = useLiveSessions(root);
+  // The chosen panel may have closed; then the first open one in the repository takes its place.
+  const target = live.find((s) => s.painel === panel) ?? live[0];
   const set = (patch: Partial<AskState>) => asks.update(id, patch);
 
   useEffect(() => {
@@ -188,7 +195,12 @@ export function AskBox({
     };
   }, [root]);
 
-  const send = () => asks.send(id, root, file);
+  const send = () => {
+    if (!toSession) return asks.send(id, root, file);
+    if (!target) return;
+    set({ panel: target.painel });
+    return asks.sendToPanel(id, root, file, target.nome);
+  };
   const draftNote = () => asks.draftNote(id, root, file);
   const sessionTitle = sessions?.find((s) => s.id === session)?.title;
   const answered = turns.some((t) => t.answer);
@@ -222,9 +234,17 @@ export function AskBox({
             {t.edits && <span className="badge warn">{T.alteracoesLiberadas}</span>}
           </div>
           {t.answer !== undefined && <Answer text={t.answer} />}
+          {t.sentTo && (
+            <div className="ask-waiting">
+              {T.enviadoParaSessao(t.sentTo.nome)}
+              <button className="link-btn" onClick={() => goToPanel(t.sentTo!.painel)}>
+                {T.irAoPainel}
+              </button>
+            </div>
+          )}
           <Changes ask={ask} index={i} root={root} />
           {t.error && <div className="ask-error">{t.error}</div>}
-          {t.answer === undefined && !t.error && (
+          {t.answer === undefined && !t.error && !t.sentTo && (
             <div className="ask-waiting">
               {t.edits ? T.alterando : session ? T.perguntandoComSessao : T.perguntando}
               <button className="link-btn" onClick={() => asks.cancel(id)}>
@@ -311,7 +331,9 @@ export function AskBox({
             value={input}
             disabled={!!running}
             placeholder={
-              allowEdits
+              toSession
+                ? T.oQueAlterarNaSessao
+                : allowEdits
                 ? T.oQueAlterar
                 : turns.length
                   ? T.continuarConversa
@@ -329,53 +351,84 @@ export function AskBox({
             }}
           />
           <div className="bookmark-actions ask-actions">
-            <select
-              value={model}
-              disabled={!!running}
-              onChange={(e) => asks.setModel(id, e.target.value)}
-              title={T.modeloQueResponde}
-            >
-              {MODELS.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-            <select
-              value={session}
-              disabled={!!running}
-              onChange={(e) => set({ session: e.target.value })}
-              title={T.mencionarSessaoDica}
-            >
-              <option value="">{T.semSessao}</option>
-              {sessions === null && <option disabled>{T.carregandoSessoes}</option>}
-              {sessions?.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.title} · {ago(s.modified)}
-                </option>
-              ))}
-            </select>
-            <label
-              className={allowEdits ? "ask-edits on" : "ask-edits"}
-              title={T.permitirAlteracoesDica}
-            >
+            <label className={toSession ? "ask-edits on" : "ask-edits"} title={T.pedirNaSessaoDica}>
               <input
                 type="checkbox"
-                checked={allowEdits}
+                checked={toSession}
                 disabled={!!running}
-                onChange={(e) => set({ allowEdits: e.target.checked })}
+                onChange={(e) => set({ toSession: e.target.checked })}
               />
-              {T.permitirAlteracoes}
+              {T.pedirNaSessao}
             </label>
-            <span className="hint">{allowEdits ? T.enviaAtalho : T.perguntaAtalho}</span>
+            {toSession ? (
+              <select
+                value={target?.painel ?? ""}
+                disabled={!!running || !live.length}
+                onChange={(e) => set({ panel: Number(e.target.value) })}
+                title={T.sessaoQueAltera}
+              >
+                {!live.length && <option value="">{T.nenhumaSessaoAberta}</option>}
+                {live.map((s) => (
+                  <option key={s.painel} value={s.painel}>
+                    {liveLabel(s)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <>
+                <select
+                  value={model}
+                  disabled={!!running}
+                  onChange={(e) => asks.setModel(id, e.target.value)}
+                  title={T.modeloQueResponde}
+                >
+                  {MODELS.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={session}
+                  disabled={!!running}
+                  onChange={(e) => set({ session: e.target.value })}
+                  title={T.mencionarSessaoDica}
+                >
+                  <option value="">{T.semSessao}</option>
+                  {sessions === null && <option disabled>{T.carregandoSessoes}</option>}
+                  {sessions?.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.title} · {ago(s.modified)}
+                    </option>
+                  ))}
+                </select>
+                <label
+                  className={allowEdits ? "ask-edits on" : "ask-edits"}
+                  title={T.permitirAlteracoesDica}
+                >
+                  <input
+                    type="checkbox"
+                    checked={allowEdits}
+                    disabled={!!running}
+                    onChange={(e) => set({ allowEdits: e.target.checked })}
+                  />
+                  {T.permitirAlteracoes}
+                </label>
+              </>
+            )}
+            <span className="hint">{allowEdits || toSession ? T.enviaAtalho : T.perguntaAtalho}</span>
             {answered && (
               <button className="btn" disabled={!!running} onClick={() => set({ decision: "" })}>
                 <Icon name="bookmark" size={13} />
                 {T.registrarDecisao}
               </button>
             )}
-            <button className="btn primary" disabled={!input.trim() || !!running} onClick={send}>
-              {allowEdits ? T.pedirAlteracao : T.perguntar}
+            <button
+              className="btn primary"
+              disabled={!input.trim() || !!running || (toSession && !target)}
+              onClick={send}
+            >
+              {toSession ? T.enviarParaSessao : allowEdits ? T.pedirAlteracao : T.perguntar}
             </button>
           </div>
         </>

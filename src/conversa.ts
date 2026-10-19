@@ -26,6 +26,7 @@ export type ArquivoDiff = {
 type Bloco = {
   type?: string;
   text?: string;
+  thinking?: string;
   name?: string;
   input?: Record<string, unknown>;
   source?: { type?: string; media_type?: string; data?: string };
@@ -34,12 +35,14 @@ type Linha = {
   type?: string;
   isMeta?: boolean;
   isSidechain?: boolean;
+  thinkingDisplay?: string;
   message?: { content?: string | Bloco[] };
 };
 
 /// What Claude Code writes in the user's place: the output of a local
-/// command, a system reminder, a task notice. It isn't you speaking.
-const NAO_E_VOCE = /^\s*<(local-command-|system-reminder|task-notification|user-prompt-submit-hook|bash-)/;
+/// command, a system reminder, a task notice, the notice of an interruption.
+/// It isn't you speaking.
+const NAO_E_VOCE = /^\s*(<(local-command-|system-reminder|task-notification|user-prompt-submit-hook|bash-)|\[Request interrupted)/;
 const COMANDO = /<command-name>([\s\S]*?)<\/command-name>/;
 const ARGUMENTOS = /<command-args>([\s\S]*?)<\/command-args>/;
 
@@ -134,6 +137,10 @@ export function lerFalas(jsonl: string): Fala[] {
     } else if (linha.type === "assistant") {
       for (const b of blocos) {
         if (b.type === "text" && b.text?.trim()) falas.push({ quem: "claude", texto: b.text });
+        // With `thinkingDisplay: "updates"`, what Claude says between tools comes
+        // as a thinking block with text; the actual reasoning comes empty.
+        else if (b.type === "thinking" && linha.thinkingDisplay === "updates" && b.thinking?.trim())
+          falas.push({ quem: "claude", texto: b.thinking });
         else if (b.type === "tool_use") {
           falas.push({ quem: "ferramenta", nome: b.name ?? "ferramenta", resumo: resumoDe(b.input) });
         }
@@ -272,11 +279,35 @@ const EMOJIS: Record<string, string> = {
   star: "⭐",
 };
 
+/// What ends a sentence and not the URL written in it: `see https://a.b/c.` links
+/// without the period. Already escaped, so a quote or `>` is its entity. A `)` only
+/// stays when it closes a `(` of the URL itself, as in Wikipedia's.
+const FIM_DE_FRASE = /(?:[.,:;!?'*\]]|&quot;|&gt;|&lt;)+$/;
+
+function linkSolto(url: string): string {
+  let fim = "";
+  for (;;) {
+    const pontuacao = FIM_DE_FRASE.exec(url)?.[0] ?? "";
+    // A `;` that closes `&amp;` is part of the URL.
+    const corte = /&amp$/.test(url.slice(0, url.length - pontuacao.length)) ? pontuacao.slice(1) : pontuacao;
+    if (corte) {
+      fim = corte + fim;
+      url = url.slice(0, -corte.length);
+    } else if (url.endsWith(")") && url.split(")").length > url.split("(").length) {
+      fim = ")" + fim;
+      url = url.slice(0, -1);
+    } else break;
+  }
+  return `<a href="${url}">${url}</a>${fim}`;
+}
+
 /// Bold, italic, links and emoji shortcodes in a snippet that no longer has code in it.
+/// A bare URL is a link too: Claude often writes them without `[text](url)`.
 function enfase(s: string): string {
   return escapar(s)
     .replace(/:([a-z_]+):/g, (todo, nome: string) => EMOJIS[nome] ?? todo)
     .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/(<a [^>]*>[\s\S]*?<\/a>)|https?:\/\/[^\s<]+/g, (todo, pronto?: string) => pronto ?? linkSolto(todo))
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*\w])\*([^*\s][^*]*)\*(?!\w)/g, "$1<em>$2</em>");
 }
@@ -320,12 +351,16 @@ export function jsonLegivel(codigo: string): string {
 /// `caixas`: what a `- [ ]` / `- [x]` item becomes. Without it, text, as in the chat;
 /// with "ver", a checkbox you can't click (a file from git); with "marcar", a
 /// checkbox carrying the item's line in `data-linha`, for the viewer to write the click to disk.
-export function markdown(texto: string, rebaixar = 2, caixas?: "ver" | "marcar"): string {
+/// `origem`: each block (and each list item and table row) carries the source lines it
+/// came from, 1-based, in `data-de` / `data-ate` — for the viewer to light up a requested line.
+export function markdown(texto: string, rebaixar = 2, caixas?: "ver" | "marcar", origem = false): string {
   const linhas = texto.replace(/\r/g, "").split("\n");
   const html: string[] = [];
+  const onde = (de: number, ate = de) => (origem ? ` data-de="${de + 1}" data-ate="${ate + 1}"` : "");
   let paragrafo: string[] = [];
+  let inicio = 0;
   const fecharParagrafo = () => {
-    if (paragrafo.length) html.push(`<p>${paragrafo.map(emLinha).join("<br>")}</p>`);
+    if (paragrafo.length) html.push(`<p${onde(inicio, inicio + paragrafo.length - 1)}>${paragrafo.map(emLinha).join("<br>")}</p>`);
     paragrafo = [];
   };
 
@@ -335,11 +370,13 @@ export function markdown(texto: string, rebaixar = 2, caixas?: "ver" | "marcar")
     const cerca = /^\s*```(.*)$/.exec(linha);
     if (cerca) {
       fecharParagrafo();
+      const de = i;
       const codigo: string[] = [];
       for (i++; i < linhas.length && !/^\s*```\s*$/.test(linhas[i]); i++) codigo.push(linhas[i]);
+      const lugar = onde(de, Math.min(i, linhas.length - 1));
       // A mermaid diagram stays code here; the viewer swaps it for the drawing.
-      if (cerca[1].trim() === "mermaid") html.push(`<pre class="mermaid"><code>${escapar(codigo.join("\n"))}</code></pre>`);
-      else html.push(`<pre><code>${escapar(jsonLegivel(codigo.join("\n")))}</code></pre>`);
+      if (cerca[1].trim() === "mermaid") html.push(`<pre class="mermaid"${lugar}><code>${escapar(codigo.join("\n"))}</code></pre>`);
+      else html.push(`<pre${lugar}><code>${escapar(jsonLegivel(codigo.join("\n")))}</code></pre>`);
       continue;
     }
 
@@ -347,20 +384,22 @@ export function markdown(texto: string, rebaixar = 2, caixas?: "ver" | "marcar")
     if (titulo) {
       fecharParagrafo();
       const nivel = Math.min(titulo[1].length + rebaixar, 6);
-      html.push(`<h${nivel}>${emLinha(titulo[2])}</h${nivel}>`);
+      html.push(`<h${nivel}${onde(i)}>${emLinha(titulo[2])}</h${nivel}>`);
       continue;
     }
 
     // Table: the header line and, right below, the dashes line.
     if (linha.includes("|") && /^\s*\|?\s*:?-{2,}/.test(linhas[i + 1] ?? "")) {
       fecharParagrafo();
+      const de = i;
       const cabeca = celulas(linha).map((c) => `<th>${emLinha(c)}</th>`).join("");
       const corpo: string[] = [];
       for (i += 2; i < linhas.length && linhas[i].includes("|"); i++) {
-        corpo.push(`<tr>${celulas(linhas[i]).map((c) => `<td>${emLinha(c)}</td>`).join("")}</tr>`);
+        const n = i;
+        corpo.push(`<tr${onde(n)}>${celulas(linhas[i]).map((c, k) => `<td>${caixas ? celulaComCaixa(c, n, k, caixas) : emLinha(c)}</td>`).join("")}</tr>`);
       }
       i--;
-      html.push(`<table><thead><tr>${cabeca}</tr></thead><tbody>${corpo.join("")}</tbody></table>`);
+      html.push(`<table${onde(de, i)}><thead><tr${onde(de, de + 1)}>${cabeca}</tr></thead><tbody>${corpo.join("")}</tbody></table>`);
       continue;
     }
 
@@ -369,23 +408,31 @@ export function markdown(texto: string, rebaixar = 2, caixas?: "ver" | "marcar")
       fecharParagrafo();
       const tag = /\d/.test(item[2]) ? "ol" : "ul";
       const itens: string[] = [];
+      const faixas: [number, number][] = [];
+      const de = i;
       for (; i < linhas.length; i++) {
         const m = /^(\s*)([-*]|\d+[.)])\s+(.*)$/.exec(linhas[i]);
         const cercaNoItem = /^(\s+)```/.exec(linhas[i]);
-        if (m) itens.push(caixas ? itemComCaixa(m[3], i, caixas) : emLinha(m[3]));
+        if (m) {
+          itens.push(caixas ? itemComCaixa(m[3], i, caixas) : emLinha(m[3]));
+          faixas.push([i, i]);
+        }
         // An indented fence below an item is a code block inside it.
         else if (itens.length && cercaNoItem) {
           const recuo = cercaNoItem[1].length;
           const codigo: string[] = [];
           for (i++; i < linhas.length && !/^\s*```\s*$/.test(linhas[i]); i++) codigo.push(linhas[i].replace(new RegExp(`^ {0,${recuo}}`), ""));
           itens[itens.length - 1] += `<pre><code>${escapar(jsonLegivel(codigo.join("\n")))}</code></pre>`;
+          faixas[faixas.length - 1][1] = Math.min(i, linhas.length - 1);
         }
         // An indented line right below an item is its continuation.
-        else if (itens.length && /^\s+\S/.test(linhas[i])) itens[itens.length - 1] += `<br>${emLinha(linhas[i].trim())}`;
-        else break;
+        else if (itens.length && /^\s+\S/.test(linhas[i])) {
+          itens[itens.length - 1] += `<br>${emLinha(linhas[i].trim())}`;
+          faixas[faixas.length - 1][1] = i;
+        } else break;
       }
       i--;
-      html.push(`<${tag}>${itens.map((t) => `<li>${t}</li>`).join("")}</${tag}>`);
+      html.push(`<${tag}${onde(de, i)}>${itens.map((t, k) => `<li${onde(...faixas[k])}>${t}</li>`).join("")}</${tag}>`);
       continue;
     }
 
@@ -393,6 +440,7 @@ export function markdown(texto: string, rebaixar = 2, caixas?: "ver" | "marcar")
       fecharParagrafo();
       continue;
     }
+    if (!paragrafo.length) inicio = i;
     paragrafo.push(linha);
   }
   fecharParagrafo();
@@ -402,9 +450,31 @@ export function markdown(texto: string, rebaixar = 2, caixas?: "ver" | "marcar")
 function itemComCaixa(texto: string, linha: number, caixas: "ver" | "marcar"): string {
   const m = /^\[([ xX])\]\s+(.*)$/.exec(texto);
   if (!m) return emLinha(texto);
-  const marcada = m[1] === " " ? "" : " checked";
-  const clique = caixas === "marcar" ? ` data-linha="${linha}"` : " disabled";
-  return `<input type="checkbox" class="tarefa"${marcada}${clique}>${emLinha(m[2])}`;
+  return caixa(m[1] !== " ", caixas === "marcar" ? ` data-linha="${linha}"` : undefined) + emLinha(m[2]);
+}
+
+/// A table cell that starts with `[ ]` / `[x]`: the checkbox also carries the column,
+/// since a row may have more than one.
+function celulaComCaixa(texto: string, linha: number, coluna: number, caixas: "ver" | "marcar"): string {
+  const m = /^\[([ xX])\](?:\s+(.*))?$/.exec(texto);
+  if (!m) return emLinha(texto);
+  const onde = caixas === "marcar" ? ` data-linha="${linha}" data-coluna="${coluna}"` : undefined;
+  return caixa(m[1] !== " ", onde) + emLinha(m[2] ?? "");
+}
+
+const caixa = (marcada: boolean, onde?: string) =>
+  `<input type="checkbox" class="tarefa"${marcada ? " checked" : ""}${onde ?? " disabled"}>`;
+
+/// The source line with the checkbox flipped: the list item's, or, with `coluna`,
+/// the one at the start of that table cell.
+export function marcarNaLinha(linha: string, marcada: boolean, coluna?: number): string {
+  const x = `[${marcada ? "x" : " "}]`;
+  if (coluna === undefined) return linha.replace(/^(\s*(?:[-*]|\d+[.)])\s+)\[[ xX]\]/, `$1${x}`);
+  const partes = linha.split("|");
+  const k = coluna + (/^\s*\|/.test(linha) ? 1 : 0);
+  if (k >= partes.length) return linha;
+  partes[k] = partes[k].replace(/^(\s*)\[[ xX]\]/, `$1${x}`);
+  return partes.join("|");
 }
 
 // ---------- what you wrote, on the terminal screen ----------

@@ -17,6 +17,7 @@
         "height": 640,
         "backgroundColor": "#282a36",
         "theme": "Dark",
+        "visible": false,
         "label": "main"
       }
     ],

@@ -9,6 +9,7 @@ import { askClaude, cancelAsk, undoAsk, type AskChange } from "../api";
 import type { FileDiff, Side } from "../types";
 import { getBlob } from "./blobs";
 import { rangeLabel } from "./bookmarks";
+import { sendToSession } from "./liveSessions";
 
 /** Where the question is pinned and where it came from. */
 export interface Ask {
@@ -35,6 +36,8 @@ export interface Turn {
   undone?: boolean;
   /** Files that couldn't be undone (someone changed them again afterwards). */
   undoKept?: string[];
+  /** Sent to a session open in a panel: the answer and the edits happen there, not here. */
+  sentTo?: { painel: number; nome: string };
 }
 
 export interface AskState extends Ask {
@@ -43,6 +46,10 @@ export interface AskState extends Ask {
   model: string;
   session: string;
   allowEdits: boolean;
+  /** Asks a session open in a panel instead of a `claude -p` of its own. */
+  toSession: boolean;
+  /** The panel of that session. */
+  panel: number | null;
   /** Id of the process in progress (question or bookmark drafting). */
   running: string | null;
   /** What the reviewer says they decided, in a few words. */
@@ -125,6 +132,8 @@ export function open(ask: Omit<Ask, "id">, question = "") {
       session: "",
       // Never remembered across boxes: every question starts as conversation only.
       allowEdits: false,
+      toSession: false,
+      panel: null,
       running: null,
       decision: null,
       draft: null,
@@ -221,6 +230,47 @@ export async function send(id: string, root: string, file: FileDiff) {
   // Closed or cancelled while running: the answer has nowhere to go anymore.
   if (get(id)?.running !== run) return;
   update(id, { running: null, turns: [...history, result] });
+}
+
+/** How many lines of the snippet go into a request to a session; beyond that, only where it is. */
+const SNIPPET_MAX_LINES = 80;
+
+/**
+ * The request as the session reads it. Short: the session already knows the code, and what
+ * it needs is where the reviewer is looking and what they want done.
+ */
+async function sessionRequest(root: string, file: FileDiff, ask: AskState, request: string): Promise<string> {
+  const path = ask.side === "old" && file.oldPath ? file.oldPath : file.path;
+  const version = ask.side === "old" ? T.versaoAnteriorAntes : T.versaoNova;
+  const parts = [T.revisandoEm(path, rangeLabel({ side: ask.side, startLine: ask.start, endLine: ask.end }), version)];
+  let snippet = ask.quote;
+  const oid = ask.side === "new" ? file.newOid : file.oldOid;
+  if (!snippet && oid && ask.end - ask.start < SNIPPET_MAX_LINES) {
+    try {
+      snippet = (await getBlob(root, oid)).slice(ask.start - 1, ask.end).join("\n");
+    } catch {
+      // The path and the lines are enough for the session to read it on its own.
+    }
+  }
+  if (snippet) parts.push("```\n" + snippet + "\n```");
+  if (ask.note) parts.push(`${T.comentarioJaFeito}\n${ask.note}`);
+  parts.push(T.pedidoDoRevisor(request));
+  return parts.join("\n\n");
+}
+
+/** Sends the typed request to the session of the chosen panel, which edits the files there. */
+export async function sendToPanel(id: string, root: string, file: FileDiff, nome: string) {
+  const a = get(id);
+  const request = a?.input.trim();
+  if (!a || !request || a.running || a.panel === null) return;
+  const painel = a.panel;
+  const run = `${id}:${a.turns.length}`;
+  const history = a.turns;
+  update(id, { turns: [...history, { question: request, edits: true }], input: "", running: run });
+  const erro = await sendToSession(painel, await sessionRequest(root, file, a, request));
+  if (get(id)?.running !== run) return;
+  const turn: Turn = erro ? { question: request, error: erro } : { question: request, edits: true, sentTo: { painel, nome } };
+  update(id, { running: null, turns: [...history, turn], input: erro ? request : "" });
 }
 
 export function cancel(id: string) {

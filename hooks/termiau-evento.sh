@@ -143,15 +143,15 @@ case "$PAYLOAD" in
     ;;
 esac
 
-# ---------- the viewer, taught to Claude ----------
+# ---------- the viewer and the progress footer, taught to Claude ----------
 #
 # At the start of the session, what the hook writes to its output goes into Claude's
-# context: that is how it learns about `termiau ver` — and only inside
-# TermIAu, because outside it the hook exited at the very start.
+# context: that is how it learns about `termiau ver` and `termiau progresso` — and only
+# inside TermIAu, because outside it the hook exited at the very start.
 case "$PAYLOAD" in
   *'"hook_event_name":"SessionStart"'*)
     if [ -x "$HOME/.termiau/bin/termiau" ]; then
-      printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"This terminal is TermIAu, which has a file viewer inside the panel itself. When the user asks to see, open or show a file or snippet, or when you point them to a specific line to check, run `~/.termiau/bin/termiau ver <file>[:line[-line]]` (path relative to the current folder or absolute). With `--ref <branch|commit>` it shows the file as it is at that point in git, for example `--ref main`. .md files open rendered. Prefer this over opening external editors (code, open -a, vim, nano). After opening it, cite the line in your answer as usual."}}'
+      printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"This terminal is TermIAu, which has a file viewer inside the panel itself. When the user asks to see, open or show a file or snippet, or when you point them to a specific line to check, run `~/.termiau/bin/termiau ver <file>[:line[-line]]` (path relative to the current folder or absolute). With `--ref <branch|commit>` it shows the file as it is at that point in git, for example `--ref main`. .md files open rendered. Prefer this over opening external editors (code, open -a, vim, nano). After opening it, cite the line in your answer as usual.\n\nTermIAu also shows a long task'\''s progress in its footer. When you start a task with several steps (roughly four or more, or one that will take a while), publish a plan and keep it current: run it right after planning, and again every time a block or item starts or finishes. Send the whole plan each time, on stdin; it replaces the previous one:\n~/.termiau/bin/termiau progresso <<'\''EOF'\''\n{\"title\":\"FMN-123 rules editor\",\"blocks\":[{\"name\":\"A. DTOs and repository\",\"status\":\"done\"},{\"name\":\"B. Rules editor\",\"status\":\"doing\",\"percent\":30,\"items\":[{\"name\":\"Condition card\",\"status\":\"done\"},{\"name\":\"Group row\",\"status\":\"doing\"},{\"name\":\"Empty state\",\"status\":\"todo\"}]},{\"name\":\"C. Save and discard\",\"status\":\"todo\",\"weight\":2}]}\nEOF\n`status` is done, doing or todo. Blocks are the big steps and `items` (optional) the pieces of the one in progress. Give `percent` (0-100) only to a block in progress and only when you have a real basis for it; without it the block counts by its items. `weight` (default 1) is for blocks much bigger or smaller than the others. Keep names short. When everything is done, send the plan with every block done. If the command answers with an error, fix the plan and send it again. No need to mention these updates in your answer."}}'
     fi
     ;;
 esac

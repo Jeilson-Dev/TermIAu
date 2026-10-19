@@ -21,6 +21,7 @@ import {
   ladoALado,
   linhasDoDiff,
   markdown,
+  marcarNaLinha,
   partesDoSeu,
   provisoriosResolvidos,
   questoesDe,
@@ -47,6 +48,7 @@ import {
   type Referencia,
 } from "./visor";
 import { SEMANA_MIN, SESSAO_MIN, faltaPara, janelaAgora, usoDaStatusLine, type LimitesDaStatusLine, fracaoRestante, limiteDoAutoCompact, nivelDoContexto, nivelDoRitmo, nivelDoUso, type Janela, type LimitesDoContexto, type Nivel, type Uso } from "./uso";
+import { andamentoDoBloco, andamentoDoPlano, type PlanoDaTarefa } from "./progresso";
 import { loadSettings, onSettings, saveViewMode, type Settings } from "./differ/lib/persist";
 import type { ViewMode } from "./differ/types";
 import "@xterm/xterm/css/xterm.css";
@@ -156,6 +158,9 @@ type Folha = {
   visor?: Visor;
   /// The file explorer, a drawer over the panel. It exists after the first time it opens.
   explorador?: Explorador;
+  /// The plan of the long task Claude is doing here, as it published it with
+  /// `termiau progresso`. It shows in the footer, beside the usage.
+  progresso?: PlanoDaTarefa;
 };
 
 type SessaoClaude = {
@@ -803,6 +808,49 @@ function recado(msg: unknown) {
   else presa.fila.push(msg);
 }
 
+/// A Claude session running in a panel, as the diff tab sees it: where to send a review request.
+type SessaoViva = { painel: number; sessao: string; nome: string; titulo: string; pasta: string; estado: SessaoClaude["estado"] };
+
+function sessoesVivas(): SessaoViva[] {
+  const lista: SessaoViva[] = [];
+  for (const a of abas) {
+    for (const f of folhas(a.raiz)) {
+      const c = f.claude;
+      if (!c?.sessao || f.morta) continue;
+      // Claude Code puts a spinner in front of the title while it works.
+      const titulo = f.titulo.replace(/^[^\p{L}\p{N}]+/u, "");
+      lista.push({ painel: f.id, sessao: c.sessao, nome: c.nome, titulo, pasta: c.pasta ?? "", estado: c.estado });
+    }
+  }
+  return lista;
+}
+
+/// The diff tab keeps the list in its session menu; it only goes out when something in it changed.
+let sessoesAvisadas = "";
+function avisarSessoes(forcar = false) {
+  const lista = sessoesVivas();
+  const chave = JSON.stringify(lista);
+  if (!forcar && chave === sessoesAvisadas) return;
+  sessoesAvisadas = chave;
+  recado({ termiauSessoesVivas: lista });
+}
+
+/// A change asked from the diff tab goes to the session as if typed in its panel: the paste
+/// way (several lines as one block), and Enter after, on its own. A session waiting for a yes or no
+/// would take the paste as the answer — that one is refused.
+function pedirNaSessao(painel: number, texto: string): string | null {
+  const folha = folhaPorPainel(painel);
+  if (!folha?.claude?.sessao || folha.morta) return T.sessaoNaoEstaMaisAberta;
+  if (folha.claude.estado === "esperando") return T.sessaoEsperandoVoce(folha.claude.nome);
+  colar(folha, texto);
+  setTimeout(() => {
+    invoke("pty_write", { id: folha.id, data: "\r" }).catch((err) => jlog(`review send: ${err}`));
+  }, 80);
+  folha.claude.estado = "trabalhando";
+  pintar();
+  return null;
+}
+
 /// Takes the panel's repository to the diff tab and brings it to the front.
 async function abrirDiff(folha: Folha) {
   // Forced: this click is what will give it a repository.
@@ -993,6 +1041,8 @@ function destruirFolha(folha: Folha, jaMorto: boolean) {
   if (!jaMorto) invoke("pty_close", { id: folha.id }).catch((e) => jlog(`pty_close: ${e}`));
   folha.term.dispose();
   folha.el.remove();
+  // The panel's plan leaves the footer with it.
+  if (folha.progresso) desenharProgresso();
 }
 
 function fecharFolha(folha: Folha, opts: { jaMorto?: boolean } = {}) {
@@ -1006,6 +1056,8 @@ function fecharFolha(folha: Folha, opts: { jaMorto?: boolean } = {}) {
 
   const pai = folha.pai;
   const irmao = pai.filhos[pai.filhos[0] === folha ? 1 : 0];
+  // Before destroying: ⌘⇧T brings the panel back too, beside the one with the keyboard.
+  guardarFechada({ painel: fotografar(folha) as Extract<NoSalvo, { tipo: "folha" }>, eixo: pai.eixo, fracao: pai.fracao });
   // The animation walks the tree's splits, and the tree is about to change.
   terminarAnimacao();
   // Closed the maximized one: there is nothing left to keep full screen.
@@ -1041,8 +1093,7 @@ function fecharAba(aba: Aba) {
   if (i < 0) return;
 
   // Before destroying: this snapshot is what ⌘⇧T brings the tab back from.
-  fechadas.push(fotografarAba(aba));
-  if (fechadas.length > MAX_FECHADAS) fechadas.shift();
+  guardarFechada({ aba: fotografarAba(aba) });
 
   abas.splice(i, 1);
   for (const f of folhas(aba.raiz)) destruirFolha(f, false);
@@ -1347,6 +1398,7 @@ function pintar() {
   janela.setBadgeCount(esperando || undefined).catch(() => {});
   // Everything that changes the tabs, the panels or the Claude sessions goes through here.
   agendarSalvar();
+  avisarSessoes();
 }
 
 function receber(
@@ -1931,6 +1983,8 @@ function criarChat(folha: Folha): Chat {
   mais.hidden = true;
   const campo = elemento("textarea", "chat-campo");
   campo.rows = 1;
+  campo.spellcheck = false;
+  campo.setAttribute("autocorrect", "off");
   campo.placeholder = T.mensagemParaOClaude;
   const menu = elemento("div", "chat-comandos");
   menu.hidden = true;
@@ -2846,7 +2900,7 @@ function abrirArquivo(folha: Folha, pedido: PedidoVer) {
   if (dono.morta) return;
   const v = (dono.visor ??= criarVisor(dono));
   // Already open: its tab comes to the front, as it was left. A requested line moves it
-  // there — and a .md goes to source, which is where the line exists.
+  // there — in a rendered .md, to the block that line became.
   const i = v.historico.findIndex((p) => p.caminho === pedido.caminho && p.ref === pedido.ref);
   if (i >= 0) {
     const ja = v.historico[i];
@@ -2859,7 +2913,6 @@ function abrirArquivo(folha: Folha, pedido: PedidoVer) {
       guardarAba(v);
       guardada = ativarAba(v, i);
     }
-    if (pedido.linha && !v.edicao) v.renderizado = false;
     if (!v.aberto) alternarVisor(dono, !!pedido.linha || !guardada);
     else mostrarAba(dono, !!pedido.linha || !guardada);
     return;
@@ -2870,7 +2923,7 @@ function abrirArquivo(folha: Folha, pedido: PedidoVer) {
   v.pos = Math.min(v.pos + 1, v.historico.length - 1);
   v.linhas = v.imagem = v.carimbo = v.edicao = undefined;
   v.rolagem = 0;
-  v.renderizado = temRenderizado(pedido.caminho) && !pedido.linha;
+  v.renderizado = temRenderizado(pedido.caminho);
   podarAbas(v);
   if (v.aberto) void carregarVisor(dono, true);
   else alternarVisor(dono, true);
@@ -2905,7 +2958,7 @@ function ativarAba(v: Visor, i: number): boolean {
   v.imagem = e?.imagem;
   v.carimbo = e?.carimbo;
   v.edicao = e?.edicao;
-  v.renderizado = e?.renderizado ?? (temRenderizado(p.caminho) && !p.linha);
+  v.renderizado = e?.renderizado ?? temRenderizado(p.caminho);
   v.rolagem = e?.rolagem ?? 0;
   return !!e;
 }
@@ -3085,6 +3138,7 @@ function criarExplorador(folha: Folha): Explorador {
     if (ex.fixo) teclado(folha);
     else alternarExplorador(folha);
   });
+  ligarArrastoDoExplorador(arvore);
   arvore.addEventListener("click", (e) => {
     const item = (e.target as HTMLElement).closest<HTMLElement>(".explorador-item");
     const caminho = item?.dataset.caminho;
@@ -3100,6 +3154,55 @@ function criarExplorador(folha: Folha): Explorador {
     if (ex.fixo) void desenharExplorador(folha);
   });
   return ex;
+}
+
+/// Dragging a file or folder out of the tree drops its path on a panel — in its chat's
+/// field or on its terminal's line, like a drag from Finder. Followed by hand, with
+/// pointer events: Tauri keeps the window's native drags for itself, and the page's own
+/// HTML5 drag-and-drop doesn't come through.
+function ligarArrastoDoExplorador(arvore: HTMLElement) {
+  arvore.addEventListener("pointerdown", (e) => {
+    const item = (e.target as HTMLElement).closest<HTMLElement>(".explorador-item");
+    const caminho = item?.dataset.caminho;
+    if (!item || !caminho || e.button !== 0) return;
+    const [x0, y0] = [e.clientX, e.clientY];
+    let fantasma: HTMLElement | undefined;
+    const alvo = (ev: PointerEvent) => {
+      // Over the explorer itself there is nowhere to drop.
+      const sob = document.elementFromPoint(ev.clientX, ev.clientY);
+      return sob?.closest(".explorador") ? undefined : folhaNoPonto(ev.clientX, ev.clientY);
+    };
+    const mover = (ev: PointerEvent) => {
+      if (!fantasma) {
+        // A few pixels before it counts as a drag: a click stays a click.
+        if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
+        fantasma = elemento("div", "arrasto-fantasma");
+        fantasma.textContent = caminho.slice(caminho.lastIndexOf("/") + 1);
+        document.body.append(fantasma);
+        document.body.classList.add("arrastando");
+      }
+      fantasma.style.transform = `translate(${ev.clientX + 12}px, ${ev.clientY + 8}px)`;
+      marcarRecebendo(alvo(ev));
+    };
+    const soltar = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", mover);
+      window.removeEventListener("pointerup", soltar);
+      window.removeEventListener("pointercancel", soltar);
+      if (!fantasma) return;
+      fantasma.remove();
+      document.body.classList.remove("arrastando");
+      marcarRecebendo(undefined);
+      // The click that follows the release is not a choice in the tree.
+      arvore.addEventListener("click", (c) => c.stopImmediatePropagation(), { capture: true, once: true });
+      const folha = ev.type === "pointerup" ? alvo(ev) : undefined;
+      if (folha) soltarCaminhos(folha, [caminho]);
+    };
+    // On the window, not with pointer capture: captured, the click that follows goes to
+    // the tree instead of the item, and a plain click no longer opens anything.
+    window.addEventListener("pointermove", mover);
+    window.addEventListener("pointerup", soltar);
+    window.addEventListener("pointercancel", soltar);
+  });
 }
 
 /// Pinned, the drawer becomes part of the panel: the terminal and the viewer step aside
@@ -3350,10 +3453,20 @@ function criarVisor(folha: Folha): Visor {
   const editor = elemento("button", "visor-btn visor-btn-texto");
   editor.textContent = T.abrirNoEditor;
   editor.title = T.editorNasPreferencias;
+  const copiar = elemento("button", "visor-btn visor-btn-icone");
+  const voltarCopiar = () => {
+    copiar.innerHTML = ICONE_COPIAR;
+    copiar.title = T.copiarCaminho;
+    copiar.classList.remove("copiado");
+  };
+  voltarCopiar();
+  const finder = elemento("button", "visor-btn visor-btn-icone");
+  finder.innerHTML = ICONE_PASTA;
+  finder.title = T.mostrarNoFinder;
   const fechar = elemento("button", "visor-btn visor-btn-icone");
   fechar.innerHTML = ICONE_FECHAR;
   fechar.title = T.voltarAoTerminal;
-  cabeca.append(voltar, avancar, caminho, ref, modo, arranjo, salvar, modos, editor, fechar);
+  cabeca.append(voltar, avancar, caminho, ref, modo, arranjo, salvar, modos, copiar, finder, editor, fechar);
   const abas = elemento("div", "visor-abas");
   const corpo = elemento("div", "visor-corpo");
   corpo.tabIndex = 0;
@@ -3394,7 +3507,7 @@ function criarVisor(folha: Folha): Visor {
     if (!v.segurando) v.rolagem = corpo.scrollTop;
   });
   // The buttons don't take the keyboard from the body: esc keeps closing.
-  for (const b of [voltar, avancar, modo, arranjo, ler, editar, salvar, editor, fechar]) {
+  for (const b of [voltar, avancar, modo, arranjo, ler, editar, salvar, copiar, finder, editor, fechar]) {
     b.addEventListener("mousedown", (e) => e.preventDefault());
   }
   arranjo.addEventListener("click", () => {
@@ -3430,6 +3543,21 @@ function criarVisor(folha: Folha): Visor {
       const comando = (await loadSettings().catch(() => undefined))?.editor.trim() || null;
       await invoke("abrir_no_editor", { caminho: p.caminho, linha: p.linha ?? null, comando });
     })().catch((e) => avisar(folha, T.editorErro(String(e))));
+  });
+  // The absolute path, as the header's tooltip shows it: ready to paste anywhere.
+  copiar.addEventListener("click", () => {
+    navigator.clipboard
+      .writeText(v.historico[v.pos].caminho)
+      .then(() => {
+        copiar.innerHTML = ICONE_COPIADO;
+        copiar.title = T.caminhoCopiado;
+        copiar.classList.add("copiado");
+        setTimeout(voltarCopiar, 1500);
+      })
+      .catch((err) => jlog(`copy: ${err}`));
+  });
+  finder.addEventListener("click", () => {
+    invoke("mostrar_no_finder", { caminho: v.historico[v.pos].caminho }).catch((e) => avisar(folha, T.finderErro(String(e))));
   });
   ler.addEventListener("click", () => void sairEdicao(folha));
   editar.addEventListener("click", () => entrarEdicao(folha));
@@ -3468,7 +3596,8 @@ async function marcarTarefa(folha: Folha, caixa: HTMLInputElement) {
   const n = Number(caixa.dataset.linha);
   const antes = linhas?.[n];
   if (!v || !linhas || antes === undefined) return;
-  const depois = antes.replace(/^(\s*(?:[-*]|\d+[.)])\s+)\[[ xX]\]/, `$1[${caixa.checked ? "x" : " "}]`);
+  const coluna = caixa.dataset.coluna === undefined ? undefined : Number(caixa.dataset.coluna);
+  const depois = marcarNaLinha(antes, caixa.checked, coluna);
   linhas[n] = depois;
   try {
     v.carimbo = await invoke<string>("arquivo_marcar", { caminho: v.historico[v.pos].caminho, linha: n, antes, depois });
@@ -3574,11 +3703,17 @@ function desenharVisor(folha: Folha, rolar: boolean) {
 
   if (md && v.renderizado) {
     const html = elemento("div", "visor-md chat-claude");
-    html.innerHTML = markdown(linhas.join("\n"), 0, p.ref ? "ver" : "marcar");
+    html.innerHTML = markdown(linhas.join("\n"), 0, p.ref ? "ver" : "marcar", true);
+    const marcados = marcarBlocos(html, p.linha, p.ate);
     botoesDeCopiar(html);
     v.corpo.replaceChildren(html);
     void desenharMermaid(v, html);
-    if (v.fracao !== undefined) {
+    if (rolar && marcados[0]) {
+      // As in the source: a third below the top.
+      const topoDoBloco = marcados[0].getBoundingClientRect().top - v.corpo.getBoundingClientRect().top + v.corpo.scrollTop;
+      v.corpo.scrollTop = topoDoBloco - v.corpo.clientHeight / 3;
+      v.fracao = undefined;
+    } else if (v.fracao !== undefined) {
       v.corpo.scrollTop = v.fracao * (v.corpo.scrollHeight - v.corpo.clientHeight);
       v.rolagem = v.corpo.scrollTop;
       v.fracao = undefined;
@@ -3608,6 +3743,19 @@ function desenharVisor(folha: Folha, rolar: boolean) {
   }
   if (rolar) v.rolagem = v.corpo.scrollTop;
   void colorirVisor(v, codigo, p.caminho, linhas);
+}
+
+/// In a rendered .md, the blocks the lines `de`–`ate` became, lit like the source's
+/// lines. The innermost ones: a list item or a table row, not the whole list or table.
+function marcarBlocos(html: HTMLElement, de?: number, ate?: number): HTMLElement[] {
+  if (!de) return [];
+  const fim = Math.max(de, ate ?? de);
+  const tocados = [...html.querySelectorAll<HTMLElement>("[data-de]")].filter(
+    (b) => Number(b.dataset.de) <= fim && Number(b.dataset.ate) >= de,
+  );
+  const marcados = tocados.filter((b) => !tocados.some((o) => o !== b && b.contains(o)));
+  for (const b of marcados) b.classList.add("marcada");
+  return marcados;
 }
 
 /// The edit mode: the file in a text box over its own colored copy. The box's text
@@ -4315,22 +4463,46 @@ function colar(folha: Folha, texto: string) {
 /// scale is up to us. `devicePixelRatio` and not the `scaleFactor` stored at
 /// startup: the window may have moved to a monitor with another density in between.
 function folhaEm(p: { x: number; y: number }): Folha | undefined {
+  return folhaNoPonto(p.x / devicePixelRatio, p.y / devicePixelRatio);
+}
+
+/// The same, in the page's own pixels (a drag the page itself follows).
+function folhaNoPonto(x: number, y: number): Folha | undefined {
   if (!ativa) return;
-  const alvo = document.elementFromPoint(p.x / devicePixelRatio, p.y / devicePixelRatio);
+  const alvo = document.elementFromPoint(x, y);
   if (!alvo) return;
   for (const f of visiveis(ativa)) if (f.el.contains(alvo)) return f;
+}
+
+/// The panel lit as the destination of a drag (Finder's or the explorer's).
+let recebendo: Folha | undefined;
+function marcarRecebendo(f?: Folha) {
+  if (recebendo === f) return;
+  recebendo?.el.classList.remove("recebendo");
+  recebendo = f;
+  recebendo?.el.classList.add("recebendo");
+}
+
+/// Dropped paths go where you would type next: in the chat's field when the chat is
+/// on screen — the terminal is hidden behind it —, otherwise on the terminal's line.
+/// Dropping on a panel also picks it.
+function soltarCaminhos(folha: Folha, caminhos: string[]) {
+  if (!caminhos.length) return;
+  focar(folha);
+  const campo = folha.chat?.aberto ? folha.chat.campo : undefined;
+  if (!campo) return colar(folha, linhaDe(caminhos));
+  const antes = campo.value.slice(0, campo.selectionStart);
+  const espaco = antes && !/\s$/.test(antes) ? " " : "";
+  campo.setRangeText(espaco + linhaDe(caminhos), campo.selectionStart, campo.selectionEnd, "end");
+  // The field grows and the `/` menu follows what was typed, as with the keyboard.
+  campo.dispatchEvent(new Event("input"));
+  campo.focus();
 }
 
 /// Dragging a file from Finder and dropping it here writes its path on the line,
 /// in the panel under the pointer — not the one with the keyboard.
 async function ligarArrastar() {
-  let marcada: Folha | undefined;
-  const marcar = (f?: Folha) => {
-    if (marcada === f) return;
-    marcada?.el.classList.remove("recebendo");
-    marcada = f;
-    marcada?.el.classList.add("recebendo");
-  };
+  const marcar = marcarRecebendo;
 
   await getCurrentWebview().onDragDropEvent(({ payload }) => {
     // With the diff in front there is no panel under the pointer, and the panel with the
@@ -4343,11 +4515,7 @@ async function ligarArrastar() {
     // obvious destination: the panel with the keyboard.
     const folha = folhaEm(payload.position) ?? ativa?.foco;
     marcar(undefined);
-    if (!folha) return;
-    // Dropping on a panel also picks it — the path shows up where the cursor
-    // is, and that is where the rest of the command will be typed.
-    focar(folha);
-    colar(folha, linhaDe(payload.paths));
+    if (folha) soltarCaminhos(folha, payload.paths);
   });
 }
 
@@ -4780,6 +4948,8 @@ async function carregarProjeto(folha: Folha) {
   const aba = abaDe(folha);
   if (aba) mostrarRamos(aba);
   desenharBarra(folha);
+  // The footer's progress says which branch the task is on.
+  if (folha.progresso) desenharProgresso();
   // A `cd` changes the folder the panel comes back in.
   agendarSalvar();
 }
@@ -5454,6 +5624,198 @@ atualizarUso();
 // Between one piece of news and the next, time keeps passing: the "time left" and the
 // circle move on their own.
 setInterval(atualizarUso, 30_000);
+
+// ---------- a long task's progress, in the footer ----------
+
+/// Beside the usage, one pill per panel whose Claude published a plan (`termiau progresso`):
+/// a ring with how much is done, the number, and the folder and branch it is in —
+/// with several sessions working, that is what says which task is which. Clicking opens the
+/// blocks and items above the footer.
+const progressoEl = document.getElementById("progresso") as HTMLDivElement;
+let progressoAberto: Folha | undefined;
+let progressoPainel: HTMLDivElement | undefined;
+/// What is on screen. `pintar` runs on every status line; redrawing the same thing would
+/// throw away the open list's scroll every few seconds.
+let progressoChave = "";
+
+type PlanoDoSocket = { painel: number; progresso: PlanoDaTarefa | null };
+
+function receberProgresso(bruto: PlanoDoSocket) {
+  const folha = folhaPorPainel(bruto.painel);
+  if (!folha) return;
+  folha.progresso = bruto.progresso ?? undefined;
+  desenharProgresso();
+}
+
+/// Where the task is: the session's folder, the panel's branch and its tab's number.
+function ondeEsta(folha: Folha) {
+  const dono = folha.dono ?? folha;
+  const pasta = folha.claude?.nome ?? dono.barra?.pasta?.split("/").filter(Boolean).pop() ?? T.painelN(folha.id);
+  const aba = abaDe(folha);
+  return { pasta, branch: dono.barra?.branch ?? null, aba: aba ? abas.indexOf(aba) + 1 : 0 };
+}
+
+const rotuloDoLugar = (o: ReturnType<typeof ondeEsta>) => (o.branch ? `${o.pasta} ⎇ ${o.branch}` : o.pasta);
+const textoDoAndamento = (a: { pct: number; estimado: boolean }) => `${a.estimado ? "~" : ""}${Math.round(a.pct)}%`;
+
+function anelDeProgresso(pct: number): string {
+  const c = 2 * Math.PI * 5.5;
+  return `<svg viewBox="0 0 16 16" width="18" height="18" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.8" opacity=".26"/><circle class="progresso-arco" cx="8" cy="8" r="5.5" stroke-width="1.8" stroke-linecap="round" transform="rotate(-90 8 8)" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - pct / 100)}"/></svg>`;
+}
+
+function comProgresso(): Folha[] {
+  const lista: Folha[] = [];
+  for (const a of abas) for (const f of folhas(a.raiz)) if (f.progresso && !f.morta) lista.push(f);
+  return lista;
+}
+
+function desenharProgresso() {
+  const lista = comProgresso();
+  if (progressoAberto && !lista.includes(progressoAberto)) progressoAberto = undefined;
+  const chave = JSON.stringify([lista.map((f) => [f.id, f.progresso, ondeEsta(f)]), progressoAberto?.id]);
+  if (chave === progressoChave) return;
+  progressoChave = chave;
+
+  progressoEl.hidden = !lista.length;
+  progressoEl.replaceChildren(
+    ...lista.map((f) => {
+      const plano = f.progresso as PlanoDaTarefa;
+      const a = andamentoDoPlano(plano);
+      const onde = ondeEsta(f);
+      const pilula = elemento("button", "progresso-pilula");
+      pilula.classList.toggle("aberta", f === progressoAberto);
+      pilula.classList.toggle("completo", a.feitos === a.total);
+      pilula.innerHTML = anelDeProgresso(a.pct);
+      const pct = elemento("span", "progresso-pct");
+      pct.textContent = textoDoAndamento(a);
+      const lugar = elemento("span", "progresso-onde");
+      lugar.textContent = rotuloDoLugar(onde);
+      pilula.append(pct, lugar);
+      pilula.title = T.progressoDica(plano.title ?? onde.pasta, a.feitos, a.total);
+      pilula.addEventListener("click", (e) => {
+        e.stopPropagation();
+        progressoAberto = progressoAberto === f ? undefined : f;
+        desenharProgresso();
+      });
+      return pilula;
+    }),
+  );
+  desenharPainelDeProgresso(lista);
+}
+
+const SINAL_DO_STATUS = { done: "✓", doing: "◐", todo: "○" } as const;
+
+/// The open list: the plan's title, where it is, the total and each block with its bar —
+/// and, under the blocks that have them, the items.
+function desenharPainelDeProgresso(lista: Folha[]) {
+  const folha = progressoAberto;
+  const plano = folha?.progresso;
+  if (!folha || !plano) {
+    progressoPainel?.remove();
+    progressoPainel = undefined;
+    return;
+  }
+  const painel = (progressoPainel ??= elemento("div", "progresso-painel"));
+  if (!painel.isConnected) document.body.append(painel);
+  const onde = ondeEsta(folha);
+  const a = andamentoDoPlano(plano);
+
+  const cabeca = elemento("div", "progresso-cabeca");
+  const textos = elemento("div", "progresso-textos");
+  const titulo = elemento("div", "progresso-titulo");
+  titulo.textContent = plano.title ?? onde.pasta;
+  const sub = elemento("div", "progresso-sub");
+  sub.textContent = `${rotuloDoLugar(onde)} · ${T.abaN(onde.aba)}`;
+  textos.append(titulo, sub);
+  const ir = elemento("button", "progresso-btn");
+  ir.textContent = T.irAoPainel;
+  ir.addEventListener("click", () => {
+    const aba = abaDe(folha);
+    progressoAberto = undefined;
+    desenharProgresso();
+    if (!aba) return;
+    ativar(aba);
+    focar(folha);
+  });
+  const tirar = elemento("button", "progresso-btn progresso-tirar");
+  tirar.innerHTML = ICONE_FECHAR;
+  tirar.title = T.tirarDoRodape;
+  tirar.addEventListener("click", () => {
+    folha.progresso = undefined;
+    desenharProgresso();
+  });
+  cabeca.append(textos, ir, tirar);
+
+  const barra = (pct: number) => {
+    const trilho = elemento("span", "progresso-trilho");
+    const cheio = elemento("span", "progresso-cheio");
+    cheio.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+    trilho.append(cheio);
+    return trilho;
+  };
+  const total = elemento("div", "progresso-total");
+  const resumo = elemento("span", "progresso-resumo");
+  resumo.textContent = `${textoDoAndamento(a)} · ${T.blocosFeitos(a.feitos, a.total)}`;
+  total.append(barra(a.pct), resumo);
+
+  const blocos = elemento("ol", "progresso-blocos");
+  for (const b of plano.blocks) {
+    const ab = andamentoDoBloco(b);
+    const li = elemento("li", "progresso-bloco");
+    li.dataset.status = b.status;
+    const linha = elemento("div", "progresso-linha");
+    const sinal = elemento("span", "progresso-sinal");
+    sinal.textContent = SINAL_DO_STATUS[b.status];
+    const nome = elemento("span", "progresso-nome");
+    nome.textContent = b.name;
+    const pct = elemento("span", "progresso-num");
+    pct.textContent = textoDoAndamento(ab);
+    linha.append(sinal, nome, barra(ab.pct), pct);
+    li.append(linha);
+    if (b.items?.length) {
+      const itens = elemento("ul", "progresso-itens");
+      for (const i of b.items) {
+        const item = elemento("li", "progresso-item");
+        item.dataset.status = i.status;
+        const s = elemento("span", "progresso-sinal");
+        s.textContent = SINAL_DO_STATUS[i.status];
+        const n = elemento("span", "progresso-nome");
+        n.textContent = i.name;
+        item.append(s, n);
+        itens.append(item);
+      }
+      li.append(itens);
+    }
+    blocos.append(li);
+  }
+  painel.replaceChildren(cabeca, total, blocos);
+
+  // Above its pill, without leaving the window on the right.
+  const pilula = progressoEl.children[lista.indexOf(folha)] as HTMLElement | undefined;
+  const x = pilula?.getBoundingClientRect().left ?? 10;
+  painel.style.left = `${Math.max(8, Math.min(x, window.innerWidth - painel.offsetWidth - 8))}px`;
+}
+
+function fecharProgresso() {
+  if (!progressoAberto) return;
+  progressoAberto = undefined;
+  desenharProgresso();
+}
+
+window.addEventListener("mousedown", (e) => {
+  if (progressoPainel?.contains(e.target as Node) || progressoEl.contains(e.target as Node)) return;
+  fecharProgresso();
+});
+window.addEventListener(
+  "keydown",
+  (e) => {
+    if (e.key !== "Escape" || !progressoAberto) return;
+    e.stopPropagation();
+    fecharProgresso();
+  },
+  true,
+);
+progressoEl.hidden = true;
 
 // ---------- radio: the footer one ----------
 
@@ -6428,10 +6790,35 @@ type AbaSalva = {
   foco: number;
 };
 
-/// The last closed tabs, the most recent at the end. Only from this run: quitting the
-/// app saves the open ones, not the ones you had already sent away.
-const fechadas: AbaSalva[] = [];
+/// Something ⌘⇧T brings back: a whole tab, or a single panel — with the split it was in
+/// (axis and share), to reopen beside the panel with the keyboard.
+type Fechada =
+  | { aba: AbaSalva }
+  | { painel: Extract<NoSalvo, { tipo: "folha" }>; eixo: Eixo; fracao: number };
+
+/// The last closed tabs and panels, the most recent at the end. They go to disk with the
+/// session: after a crash or a `kill`, ⌘⇧T still brings them back.
+const fechadas: Fechada[] = [];
 const MAX_FECHADAS = 10;
+
+function guardarFechada(f: Fechada) {
+  fechadas.push(f);
+  if (fechadas.length > MAX_FECHADAS) fechadas.shift();
+  agendarSalvar();
+}
+
+function fechadaSalva(x: unknown): Fechada | undefined {
+  const f = x as { aba?: { raiz?: unknown; foco?: unknown }; painel?: unknown; eixo?: unknown; fracao?: unknown } | null;
+  if (!f || typeof f !== "object") return;
+  if (f.aba) {
+    const raiz = noSalvo(f.aba.raiz);
+    return raiz && { aba: { raiz, foco: typeof f.aba.foco === "number" ? f.aba.foco : 0 } };
+  }
+  const painel = noSalvo(f.painel);
+  if (painel?.tipo !== "folha") return;
+  const fracao = typeof f.fracao === "number" && Number.isFinite(f.fracao) ? Math.min(0.9, Math.max(0.1, f.fracao)) : 0.5;
+  return { painel, eixo: f.eixo === "abaixo" ? "abaixo" : "lado", fracao };
+}
 
 /// The id ends up on a command line typed into the shell, and came from a socket
 /// any of the user's processes can write to: only what looks like an id gets through.
@@ -6482,17 +6869,18 @@ function noSalvo(x: unknown): NoSalvo | undefined {
   };
 }
 
-function lerSessao(texto: string | null): { abas: AbaSalva[]; ativa: number } {
-  const vazia = { abas: [], ativa: 0 };
+function lerSessao(texto: string | null): { abas: AbaSalva[]; ativa: number; fechadas: Fechada[] } {
+  const vazia = { abas: [], ativa: 0, fechadas: [] };
   if (!texto) return vazia;
   try {
-    const dado = JSON.parse(texto) as { abas?: unknown; ativa?: unknown } | null;
+    const dado = JSON.parse(texto) as { abas?: unknown; ativa?: unknown; fechadas?: unknown } | null;
     if (!dado || !Array.isArray(dado.abas)) return vazia;
+    const fechadas = Array.isArray(dado.fechadas) ? dado.fechadas.flatMap((f) => fechadaSalva(f) ?? []) : [];
     const salvas = dado.abas.flatMap((a: { raiz?: unknown; foco?: unknown } | null): AbaSalva[] => {
       const raiz = noSalvo(a?.raiz);
       return raiz ? [{ raiz, foco: typeof a?.foco === "number" ? a.foco : 0 }] : [];
     });
-    return { abas: salvas, ativa: typeof dado.ativa === "number" ? dado.ativa : 0 };
+    return { abas: salvas, ativa: typeof dado.ativa === "number" ? dado.ativa : 0, fechadas: fechadas.slice(-MAX_FECHADAS) };
   } catch (e) {
     jlog(`unreadable saved session: ${e}`);
     return vazia;
@@ -6513,6 +6901,7 @@ function salvarSessao(): Promise<void> {
     versao: 1,
     abas: abas.map(fotografarAba),
     ativa: ativa ? abas.indexOf(ativa) : 0,
+    fechadas,
   });
   return invoke<void>("sessao_salvar", { dados }).catch((e) => {
     void jlog(`sessao_salvar: ${e}`);
@@ -6582,18 +6971,39 @@ async function reabrir(salva: AbaSalva): Promise<Aba | undefined> {
   return aba;
 }
 
-/// ⌘⇧T: the last closed tab comes back, like in the browser.
+/// ⌘⇧T: the last closed tab or panel comes back, like in the browser. A panel
+/// reopens beside the one with the keyboard, split the way it was, its Claude resumed.
 async function reabrirFechada() {
   const salva = fechadas.pop();
   if (!salva) return;
+  const voltou = "aba" in salva ? !!(await reabrir(salva.aba)) : await reabrirPainel(salva);
   // It didn't open (another shortcut in the meantime): the snapshot goes back on the stack.
-  if (!(await reabrir(salva))) fechadas.push(salva);
+  if (!voltou) fechadas.push(salva);
+  agendarSalvar();
+}
+
+async function reabrirPainel(salvo: Extract<Fechada, { painel: unknown }>): Promise<boolean> {
+  // With the diff in front, or no tab at all, it comes back as a tab of its own.
+  if (!ativa || noDiff || ocupado) return !ativa && !!(await reabrir({ raiz: salvo.painel, foco: 0 }));
+  const aba = ativa;
+  const alvo = aba.foco.dono ?? aba.foco;
+  ocupado = true;
+  try {
+    const nova = await dividirFolha(aba, alvo, salvo.eixo, salvo.painel.cwd, salvo.fracao);
+    if (!nova) return false;
+    retomar(nova, salvo.painel);
+    focar(nova);
+    return true;
+  } finally {
+    ocupado = false;
+  }
 }
 
 /// The last run's tabs, at app launch. With none to bring back — the
 /// first time, or the last tab was closed by hand —, opens a new one.
 async function restaurarSessao() {
   const salva = lerSessao(await invoke<string | null>("sessao_ler").catch(() => null));
+  fechadas.push(...salva.fechadas);
   try {
     for (const a of salva.abas) await reabrir(a);
     if (!abas.length) await novaAba();
@@ -6870,7 +7280,26 @@ window.addEventListener("message", (e) => {
     termiau?: Atalho;
     termiauPronto?: boolean;
     termiauRepoAberto?: string | null;
+    termiauQuerSessoes?: boolean;
+    termiauPedirNaSessao?: { id: string; painel: number; texto: string };
+    termiauIrAoPainel?: number;
   } | null;
+
+  if (dado?.termiauQuerSessoes) return avisarSessoes(true);
+  if (dado?.termiauPedirNaSessao) {
+    const { id, painel, texto } = dado.termiauPedirNaSessao;
+    recado({ termiauPedidoFeito: { id, erro: pedirNaSessao(painel, texto) } });
+    return;
+  }
+  if (typeof dado?.termiauIrAoPainel === "number") {
+    const folha = folhaPorPainel(dado.termiauIrAoPainel);
+    const aba = folha && abaDe(folha);
+    if (folha && aba) {
+      ativar(aba);
+      focar(folha);
+    }
+    return;
+  }
 
   // A repository was opened or closed in there: it is what lights up and dims the chip.
   if (dado && "termiauRepoAberto" in dado) {
@@ -6925,6 +7354,8 @@ async function ligarEventos() {
       // `termiau ver` uses the same socket as the hooks (see hooks/termiau).
       if (bruto && typeof bruto === "object" && "ver" in bruto) receberVer(bruto as PedidoDoSocket);
       else if (bruto && typeof bruto === "object" && "status" in bruto) receberStatus(bruto as StatusDoSocket);
+      // `termiau progresso`, already checked by Rust (see progresso.rs).
+      else if (bruto && typeof bruto === "object" && "progresso" in bruto) receberProgresso(bruto as PlanoDoSocket);
       else receber(bruto as EventoClaude);
     } catch (err) {
       jlog(`unreadable claude event: ${err}`);

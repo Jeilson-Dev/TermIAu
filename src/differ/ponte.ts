@@ -44,6 +44,8 @@ window.addEventListener("message", (e) => {
     termiauRepo?: string;
     termiauMudou?: string;
     termiauVisivel?: boolean;
+    termiauSessoesVivas?: unknown[];
+    termiauPedidoFeito?: { id: string; erro: string | null };
   } | null;
   if (typeof dado?.termiauRepo === "string") {
     window.dispatchEvent(new CustomEvent("termiau:repo", { detail: dado.termiauRepo }));
@@ -51,6 +53,13 @@ window.addEventListener("message", (e) => {
   // Hidden behind a terminal, the tab doesn't need to watch anything.
   if (typeof dado?.termiauVisivel === "boolean") {
     window.dispatchEvent(new CustomEvent("termiau:visivel", { detail: dado.termiauVisivel }));
+  }
+  // The Claude sessions open in TermIAu's panels, and the answer to a request sent to one of them.
+  if (Array.isArray(dado?.termiauSessoesVivas)) {
+    window.dispatchEvent(new CustomEvent("termiau:sessoes", { detail: dado.termiauSessoesVivas }));
+  }
+  if (dado?.termiauPedidoFeito) {
+    window.dispatchEvent(new CustomEvent("termiau:pedido", { detail: dado.termiauPedidoFeito }));
   }
   if (typeof dado?.termiauMudou === "string") {
     window.dispatchEvent(new CustomEvent("termiau:mudou", { detail: dado.termiauMudou }));

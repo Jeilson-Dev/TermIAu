@@ -133,8 +133,12 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
       // Keep the header in place while the body closes under it, instead of the page jumping past it.
       const section = sectionRef.current;
       const scroller = scrollRoot.current;
-      if (section && scroller && section.getBoundingClientRect().top < scroller.getBoundingClientRect().top) {
-        section.scrollIntoView({ block: "start" });
+      // Written to the scroller itself: `scrollIntoView` from inside the iframe may scroll
+      // TermIAu's page around it too.
+      if (section && scroller) {
+        const gap = parseFloat(getComputedStyle(scroller).getPropertyValue("--sticky-gap")) || 0;
+        const d = section.getBoundingClientRect().top - scroller.getBoundingClientRect().top - gap;
+        if (d < 0) scroller.scrollTop += d;
       }
       const timer = setTimeout(() => finishCloseRef.current(), COLLAPSE_MS + 150);
       return () => clearTimeout(timer);

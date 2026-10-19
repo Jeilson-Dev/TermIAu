@@ -45,70 +45,92 @@ function omit<T>(record: Record<string, T>, key: string): Record<string, T> {
   return copy;
 }
 
-/** Pause between the steps of the "V" sequence (close → scroll → highlight). */
+/** Pause between the steps of the "V" sequence (close → scroll). */
 const STEP_PAUSE_MS = 150;
 
-/** How long, after arriving, the scroll follows the file while what is above it settles. */
+/** How long, after arriving, the file is held at the top while what is above it settles. */
 const SETTLE_MS = 900;
 
-/**
- * Scrolls with the same duration as the file open/close animation, then calls `done`.
- *
- * The destination is measured again on every frame, not once at the start: the files
- * the scroll passes are only drawn when they get near the screen, and until
- * then they take an estimated height. Measured at the start, the target moves along the way
- * — and the scroll stops before the file or overshoots it, hiding the ones above.
- */
-function animateScroll(
-  scroller: HTMLElement,
-  target: () => number,
-  duration: number,
-  done: () => void,
-  cancelada: () => boolean,
-) {
-  const start = scroller.scrollTop;
-  if (Math.abs(target() - start) < 1 || matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    scroller.scrollTop = target();
-    done();
-    return;
-  }
-  const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
-  const startedAt = performance.now();
-  const step = (now: number) => {
-    // Another scroll started on top of this one: this one stops where it is, without
-    // going on to a destination that is no longer the destination.
-    if (cancelada()) return;
-    const t = Math.min(1, (now - startedAt) / duration);
-    scroller.scrollTop = start + (target() - start) * easeInOut(t);
-    if (t < 1) requestAnimationFrame(step);
-    else done();
-  };
-  requestAnimationFrame(step);
+/** How far the file's top is from where it should be: the top of the scroller, below the sticky gap. */
+function distanciaDoTopo(scroller: HTMLElement, el: HTMLElement): number {
+  const gap = parseFloat(getComputedStyle(scroller).getPropertyValue("--sticky-gap")) || 0;
+  return el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - gap;
 }
 
+/** How long the glide to the next file takes. */
+const DESLIZE_MS = 450;
+
 /**
- * After arriving, holds the file at the top while what is above it finishes
- * being drawn (WebKit has no scroll anchoring to do this on its own). Lets go on the
- * user's first gesture, on a new scroll or when time runs out.
+ * Glides the file's header to the top, fast at first and slowing down to a stop, then keeps
+ * it there for a moment while what is above it finishes changing size (WebKit has no scroll
+ * anchoring to do this on its own). The destination is measured again on every frame — a
+ * diff reloading or a file above being drawn moves it along the way —, and so is the file:
+ * the reload may remount it. The anchor is measured by the section's top, where the header
+ * sits in its natural place: the header itself is sticky, and stuck at the top it would
+ * read as "arrived" even with the scroll in the middle of the diff. Lets go on your first
+ * gesture anywhere in the page, on a new trip or when time runs out.
  */
-function settleOn(scroller: HTMLElement, target: () => number, cancelada: () => boolean) {
-  const content = scroller.firstElementChild;
-  if (!content || typeof ResizeObserver === "undefined") return;
-  const align = () => {
-    if (cancelada()) return stop();
-    const top = target();
-    if (Math.abs(scroller.scrollTop - top) >= 1) scroller.scrollTop = top;
+function pousar(scroller: HTMLElement, arquivo: () => HTMLElement | undefined, cancelada: () => boolean) {
+  /** How far the header still is, or undefined while the file isn't on the page (remounting). */
+  const falta = () => {
+    const el = arquivo();
+    return el?.isConnected ? distanciaDoTopo(scroller, el) : undefined;
   };
-  const observer = new ResizeObserver(align);
-  const gestures = ["wheel", "touchstart", "mousedown", "keydown"] as const;
-  const timer = setTimeout(() => stop(), SETTLE_MS);
-  function stop() {
-    observer.disconnect();
-    clearTimeout(timer);
-    for (const g of gestures) scroller.removeEventListener(g, stop);
-  }
-  observer.observe(content);
-  for (const g of gestures) scroller.addEventListener(g, stop, { passive: true });
+  const gestos = ["wheel", "touchstart", "mousedown", "keydown"] as const;
+  let parado = false;
+  const parar = () => {
+    parado = true;
+    for (const g of gestos) window.removeEventListener(g, parar, true);
+  };
+  for (const g of gestos) window.addEventListener(g, parar, { capture: true, passive: true });
+
+  const suave = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const desacelera = (t: number) => 1 - (1 - t) ** 3;
+  const inicio = performance.now();
+  const de = scroller.scrollTop;
+  const passo = (agora: number) => {
+    if (parado) return;
+    if (cancelada() || agora - inicio > DESLIZE_MS + SETTLE_MS) return parar();
+    const t = suave ? Math.min(1, (agora - inicio) / DESLIZE_MS) : 1;
+    const d = falta();
+    if (d !== undefined) {
+      // Where the destination is now, in absolute scroll terms.
+      const alvo = scroller.scrollTop + d;
+      const pos = t < 1 ? de + (alvo - de) * desacelera(t) : alvo;
+      if (Math.abs(scroller.scrollTop - pos) >= 1) scroller.scrollTop = pos;
+    }
+    requestAnimationFrame(passo);
+  };
+  requestAnimationFrame(passo);
+}
+
+/** The keys that scroll the page by themselves. */
+const TECLAS_DE_ROLAGEM = new Set([" ", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
+
+/**
+ * Holds the scroll still while a reviewed file closes: the wheel, the trackpad, the keys and
+ * the scrollbar don't move it, and whatever moves it anyway goes back. Moving during the
+ * close is what made the trip to the next file start from the wrong place. Returns what lets go.
+ */
+function travarRolagem(scroller: HTMLElement): () => void {
+  const topo = scroller.scrollTop;
+  const segurar = () => {
+    if (Math.abs(scroller.scrollTop - topo) >= 1) scroller.scrollTop = topo;
+  };
+  const barrar = (e: Event) => e.preventDefault();
+  const teclas = (e: KeyboardEvent) => {
+    if (TECLAS_DE_ROLAGEM.has(e.key) && !isTyping(e.target)) e.preventDefault();
+  };
+  scroller.addEventListener("scroll", segurar);
+  scroller.addEventListener("wheel", barrar, { passive: false });
+  scroller.addEventListener("touchmove", barrar, { passive: false });
+  window.addEventListener("keydown", teclas, true);
+  return () => {
+    scroller.removeEventListener("scroll", segurar);
+    scroller.removeEventListener("wheel", barrar);
+    scroller.removeEventListener("touchmove", barrar);
+    window.removeEventListener("keydown", teclas, true);
+  };
 }
 
 /** Single-key shortcuts must not fire while the user types (bookmark notes, file filter). */
@@ -179,15 +201,17 @@ export default function App() {
   const scrollerRef = useRef<HTMLElement>(null);
   const fileEls = useRef(new Map<string, HTMLElement>());
   const scrollFrame = useRef(0);
-  // The "v" moves right away; the scroll follows behind. While it is on the way, the
-  // scroll position doesn't move the cursor — the events the scroll itself
-  // fires would pull it back to the file at the top of the screen.
+  // The "v" moves the cursor right away; the scroll follows behind, and until it arrives
+  // "v" waits. While it is on the way, the scroll position doesn't move the cursor — the
+  // events the scroll itself fires would pull it back to the file at the top of the screen.
   const scrollLock = useRef(false);
-  /** Where the scroll has to go. A new "v" only changes the destination. */
+  /** Where the scroll has to go. A new mark (the header's checkbox) only changes the destination. */
   const jumpTarget = useRef<string | null>(null);
   /** Qual arquivo fechando destrava a rolagem: fechar e andar junto se atropelam. */
   const jumpFrom = useRef<string | null>(null);
   const jumpTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /** Lets go of the scroll held still while the reviewed file closes (see `travarRolagem`). */
+  const destravar = useRef<(() => void) | undefined>(undefined);
   /** Scroll in progress. Changing the number cancels the previous one midway. */
   const scrollAnim = useRef(0);
   /** The cursor as it is now, even before the render happens. */
@@ -249,11 +273,19 @@ export default function App() {
       setOutdated(lost);
       setPlacements(placed);
       setSinceBase(base);
-      // New diff, an old trip doesn't matter: the destination may not even be in the list anymore.
-      clearTimeout(jumpTimer.current);
-      jumpTarget.current = null;
-      jumpFrom.current = null;
-      scrollLock.current = false;
+      // A trip under way goes on as long as its destination is still in the new diff. In the
+      // to-be-committed tab, marking is a `git add`, and the diff reloads right after it:
+      // cancelling here left the screen still, and with the lock gone the scroll pulled the
+      // cursor back to whatever was at the top — so the next "v" marked the wrong file.
+      const destino = jumpTarget.current;
+      if (!destino || !result.files.some((f) => f.path === destino)) {
+        clearTimeout(jumpTimer.current);
+        destravar.current?.();
+        destravar.current = undefined;
+        jumpTarget.current = null;
+        jumpFrom.current = null;
+        scrollLock.current = false;
+      }
       marcados.current = new Set();
     } catch (err) {
       if (id !== requestId.current) return;
@@ -648,55 +680,38 @@ export default function App() {
     [placements, oldPaths],
   );
 
-  /**
-   * `smooth` glides there and only then highlights the file, so the move is easy to follow.
-   * `moveCursor` is false when the caller is "v": there the cursor already moved, and
-   * putting it back at the end of the scroll would bring it back if another "v" already moved it ahead.
-   */
-  const selectFile = useCallback((path: string, smooth = false, moveCursor = true) => {
+  /** A file chosen in the sidebar or through a note: its header at the top. */
+  const selectFile = useCallback((path: string) => {
     const el = fileEls.current.get(path);
-    const scroller = scrollerRef.current;
-    const id = ++scrollAnim.current;
-    const arrive = () => {
-      if (id !== scrollAnim.current) return;
-      if (moveCursor) {
-        cursor.current = path;
-        setActivePath(path);
-      }
-      scrollLock.current = false;
-    };
-    if (!el || !scroller) {
-      arrive();
-    } else if (smooth) {
-      const gap = parseFloat(getComputedStyle(scroller).getPropertyValue("--sticky-gap")) || 0;
-      const target = () =>
-        scroller.scrollTop + el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - gap;
-      const cancelada = () => id !== scrollAnim.current;
-      animateScroll(scroller, target, COLLAPSE_MS, () => {
-        arrive();
-        settleOn(scroller, target, cancelada);
-      }, cancelada);
-    } else {
-      el.scrollIntoView({ block: "start" });
-      arrive();
-    }
+    if (el) el.scrollIntoView({ block: "start" });
+    cursor.current = path;
+    setActivePath(path);
+    scrollLock.current = false;
   }, []);
 
   /** Goes to where the cursor is now — which may no longer be where it was when the trip started. */
   const alcancarCursor = useCallback(() => {
     clearTimeout(jumpTimer.current);
+    destravar.current?.();
+    destravar.current = undefined;
     jumpFrom.current = null;
     const alvo = jumpTarget.current;
     jumpTarget.current = null;
-    if (alvo) selectFile(alvo, true, false);
-    else scrollLock.current = false;
-  }, [selectFile]);
+    const scroller = scrollerRef.current;
+    if (alvo && scroller) {
+      const id = ++scrollAnim.current;
+      pousar(scroller, () => fileEls.current.get(alvo), () => id !== scrollAnim.current);
+    }
+    // Arrived: "v" works again, and the scroll moves the cursor again.
+    scrollLock.current = false;
+  }, []);
 
   /**
-   * Marks the destination and leaves the scroll for later. Measuring the next file with the
-   * previous one still shrinking misses the target — the rest of the collapse pulls everything
-   * up —, so it waits for the collapse; the clock is the safety net for
-   * when there is no collapse (file already closed) or when it doesn't notify.
+   * Three steps. Marks the destination; holds the scroll still, with the closing file's
+   * header at the top, while its body closes; and only once it has closed scrolls to the
+   * destination's header. Measuring the next file with the previous one still shrinking
+   * misses the target — the rest of the collapse pulls everything up. The clock is the
+   * safety net for when the collapse doesn't notify; with nothing closing, it goes right away.
    */
   const agendarRolagem = useCallback(
     (destino: string, fechando: string | null) => {
@@ -704,7 +719,20 @@ export default function App() {
       jumpFrom.current = fechando;
       scrollLock.current = true;
       clearTimeout(jumpTimer.current);
-      jumpTimer.current = setTimeout(alcancarCursor, COLLAPSE_MS + STEP_PAUSE_MS);
+      // Whatever was still holding the previous file at the top lets go: left running, it
+      // would pull the scroll back to it during this close.
+      ++scrollAnim.current;
+      destravar.current?.();
+      destravar.current = undefined;
+      const scroller = scrollerRef.current;
+      const secao = fechando ? fileEls.current.get(fechando) : undefined;
+      if (scroller && secao) {
+        // The header of the one closing at the top first, then nothing moves until it closes.
+        const d = distanciaDoTopo(scroller, secao);
+        if (d < 0) scroller.scrollTop += d;
+        destravar.current = travarRolagem(scroller);
+      }
+      jumpTimer.current = setTimeout(alcancarCursor, fechando ? COLLAPSE_MS + STEP_PAUSE_MS : 0);
     },
     [alcancarCursor],
   );
@@ -734,33 +762,46 @@ export default function App() {
     marcados.current = new Set();
   }, [viewedPaths]);
 
-  // "V" toggles the current file; once reviewed, the cursor moves to the next one still to
-  // review — right away, without waiting for the scroll: fast typists must not be slowed down by it.
+  /**
+   * Marks or unmarks a file. Once reviewed, the cursor moves to the next one still to
+   * review and the scroll takes that one's top to the top of the screen. Until it gets
+   * there, "v" does nothing (see the key handler): the next one can't be marked unseen. Whether
+   * from "v" or from the header's checkbox: left where it was, the scroll would show
+   * whatever slid up under it, which in a long diff is its middle.
+   */
+  const definirVisto = useCallback(
+    (file: FileDiff, value: boolean) => {
+      // The screen's state plus what this burst already marked and it doesn't show yet.
+      const vistos = marcados.current.size
+        ? new Set([...viewedPaths, ...marcados.current])
+        : viewedPaths;
+      // Unviewed files are open unless the user closed them or they're generated.
+      const alreadyClosed = collapsedOverrides[fileKey(file)] ?? isGenerated(file.path);
+      markViewed(file, value);
+      if (!value) {
+        marcados.current.delete(file.path);
+        return;
+      }
+      marcados.current.add(file.path);
+      const next = nextToReview(files, file.path, vistos);
+      if (!next) return;
+      // The cursor is the list's, not the scroll's: the next one to review, wherever
+      // it is on screen.
+      cursor.current = next.path;
+      setActivePath(next.path);
+      agendarRolagem(next.path, alreadyClosed ? null : file.path);
+    },
+    [files, viewedPaths, collapsedOverrides, markViewed, agendarRolagem],
+  );
+
+  // "V" toggles the current file.
   const toggleCurrentViewed = useCallback(() => {
     const atual = cursor.current ?? currentPath;
     const file = files.find((f) => f.path === atual);
     if (!file) return;
-    // The screen's state plus what this burst already marked and it doesn't show yet.
-    const vistos = marcados.current.size
-      ? new Set([...viewedPaths, ...marcados.current])
-      : viewedPaths;
-    const value = !vistos.has(file.path);
-    // Unviewed files are open unless the user closed them or they're generated.
-    const alreadyClosed = collapsedOverrides[fileKey(file)] ?? isGenerated(file.path);
-    markViewed(file, value);
-    if (!value) {
-      marcados.current.delete(file.path);
-      return;
-    }
-    marcados.current.add(file.path);
-    const next = nextToReview(files, file.path, vistos);
-    if (!next) return;
-    // The cursor is the list's, not the scroll's: the next one to review, wherever
-    // it is on screen.
-    cursor.current = next.path;
-    setActivePath(next.path);
-    agendarRolagem(next.path, alreadyClosed ? null : file.path);
-  }, [files, currentPath, viewedPaths, collapsedOverrides, markViewed, agendarRolagem]);
+    const vistos = marcados.current.size ? new Set([...viewedPaths, ...marcados.current]) : viewedPaths;
+    definirVisto(file, !vistos.has(file.path));
+  }, [files, currentPath, viewedPaths, definirVisto]);
 
   /** Is everything within this target already in the index? It decides whether the key stages or unstages. */
   const tudoNoIndice = useCallback(
@@ -789,6 +830,10 @@ export default function App() {
       const tecla = e.key.toLowerCase();
       if (tecla === "v") {
         e.preventDefault();
+        // Only the file already on screen can be marked. Held down, the key repeats and
+        // would mark the next ones unseen; pressed again during the trip, it would mark
+        // the destination before it arrives — and both skip a file you never looked at.
+        if (e.repeat || scrollLock.current) return;
         toggleCurrentViewed();
         return;
       }
@@ -984,7 +1029,7 @@ export default function App() {
                       registerElement={registerElement}
                       onCollapse={setCollapsed}
                       onCollapseEnd={handleCollapseEnd}
-                      onSetViewed={markViewed}
+                      onSetViewed={definirVisto}
                       onAddBookmark={addBookmark}
                       onUpdateBookmark={updateBookmark}
                       onRemoveBookmark={removeBookmark}

@@ -7,6 +7,7 @@ import {
   linhasDoDiff,
   linhasDePrompt,
   markdown,
+  marcarNaLinha,
   partesDoSeu,
   provisoriosResolvidos,
   questoesDe,
@@ -46,6 +47,29 @@ describe("lerFalas", () => {
     expect(lerFalas(jsonl)).toEqual([]);
   });
 
+  it("shows what Claude says between tools, which comes as thinking", () => {
+    const pensou = (thinking: string, thinkingDisplay?: string) =>
+      linha({ type: "assistant", thinkingDisplay, message: { content: [{ type: "thinking", thinking }] } });
+    const jsonl = [
+      pensou("", "updates"),
+      pensou("Confirmei a versão.", "updates"),
+      pensou("raciocínio por extenso"),
+      linha({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "ls" } }] } }),
+    ].join("\n");
+    expect(lerFalas(jsonl)).toEqual([
+      { quem: "claude", texto: "Confirmei a versão." },
+      { quem: "ferramenta", nome: "Bash", resumo: "ls" },
+    ]);
+  });
+
+  it("doesn't take the interruption notice for you", () => {
+    const jsonl = [
+      linha({ type: "user", message: { content: [{ type: "text", text: "[Request interrupted by user for tool use]" }] } }),
+      linha({ type: "user", message: { content: "[Request interrupted by user]" } }),
+    ].join("\n");
+    expect(lerFalas(jsonl)).toEqual([]);
+  });
+
   it("returns the /command as typed", () => {
     const jsonl = linha({
       type: "user",
@@ -68,6 +92,16 @@ describe("lerFalas", () => {
 });
 
 describe("markdown", () => {
+  it("with origem, each block carries the source lines it came from", () => {
+    const md = "# T\n\nlinha um\nlinha dois\n\n- a\n  cont\n- b\n\n```\nx\n```\n\n| a |\n|---|\n| 1 |";
+    expect(markdown(md, 0, undefined, true)).toBe(
+      '<h1 data-de="1" data-ate="1">T</h1>' +
+        '<p data-de="3" data-ate="4">linha um<br>linha dois</p>' +
+        '<ul data-de="6" data-ate="8"><li data-de="6" data-ate="7">a<br>cont</li><li data-de="8" data-ate="8">b</li></ul>' +
+        '<pre data-de="10" data-ate="12"><code>x</code></pre>' +
+        '<table data-de="14" data-ate="16"><thead><tr data-de="14" data-ate="15"><th>a</th></tr></thead><tbody><tr data-de="16" data-ate="16"><td>1</td></tr></tbody></table>',
+    );
+  });
   it("escapes what comes in", () => {
     expect(markdown("<b>oi</b>")).toBe("<p>&lt;b&gt;oi&lt;/b&gt;</p>");
   });
@@ -101,9 +135,40 @@ describe("markdown", () => {
     expect(markdown("- [X] a", 0, "ver")).toBe('<ul><li><input type="checkbox" class="tarefa" checked disabled>a</li></ul>');
   });
 
+  it("checkboxes in table cells, with line and column", () => {
+    const md = "| feito | item |\n|---|---|\n| [x] | a |\n| [ ] b | [x] |";
+    expect(markdown(md, 0)).toContain("<td>[x]</td>");
+    expect(markdown(md, 0, "marcar")).toBe(
+      "<table><thead><tr><th>feito</th><th>item</th></tr></thead><tbody>" +
+        '<tr><td><input type="checkbox" class="tarefa" checked data-linha="2" data-coluna="0"></td><td>a</td></tr>' +
+        '<tr><td><input type="checkbox" class="tarefa" data-linha="3" data-coluna="0">b</td>' +
+        '<td><input type="checkbox" class="tarefa" checked data-linha="3" data-coluna="1"></td></tr></tbody></table>',
+    );
+    expect(markdown(md, 0, "ver")).toContain('<td><input type="checkbox" class="tarefa" checked disabled></td>');
+  });
+
+  it("flips the right checkbox on the source line", () => {
+    expect(marcarNaLinha("  - [ ] a", true)).toBe("  - [x] a");
+    expect(marcarNaLinha("| [ ] b | [x] |", true, 0)).toBe("| [x] b | [x] |");
+    expect(marcarNaLinha("| [ ] b | [x] |", false, 1)).toBe("| [ ] b | [ ] |");
+    expect(marcarNaLinha("[ ] b | [x]", false, 1)).toBe("[ ] b | [ ]");
+  });
+
   it("only links http", () => {
     expect(markdown("[x](javascript:alert(1))")).not.toContain("<a");
     expect(markdown("[x](https://a.b/c)")).toBe('<p><a href="https://a.b/c">x</a></p>');
+  });
+
+  it("links a bare URL, without the sentence's punctuation", () => {
+    expect(markdown("open https://a.b/c?x=1&y=2.")).toBe(
+      '<p>open <a href="https://a.b/c?x=1&amp;y=2">https://a.b/c?x=1&amp;y=2</a>.</p>',
+    );
+    expect(markdown("(see https://a.b/c)")).toBe('<p>(see <a href="https://a.b/c">https://a.b/c</a>)</p>');
+    expect(markdown("https://w.org/Foo_(bar), ok")).toBe('<p><a href="https://w.org/Foo_(bar)">https://w.org/Foo_(bar)</a>, ok</p>');
+    expect(markdown("[x](https://a.b/c) https://d.e")).toBe(
+      '<p><a href="https://a.b/c">x</a> <a href="https://d.e">https://d.e</a></p>',
+    );
+    expect(markdown("`https://a.b/c`")).toBe("<p><code>https://a.b/c</code></p>");
   });
 });
 
