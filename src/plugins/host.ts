@@ -11,17 +11,22 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createDialog, footerButton, marquee, stopMarquee } from "../ui";
 import type {
+  ClaudeChannel,
   Dialog,
   Disposable,
   Language,
   Manifest,
+  MenuItem,
   Panel,
+  PanelHeaderRender,
   PluginContext,
   PluginModule,
   PluginProcess,
+  RegionContribution,
 } from "./api";
 import {
   ACTIVATION_ERRORS_KEY,
+  activationOrder,
   displayKeybinding,
   localize,
   pluginFileUrl,
@@ -38,7 +43,20 @@ import {
 /// is the app itself.
 export type CoreServices = {
   language: Language;
-  focusedPanel(): Panel | undefined;
+  /// The panels, as `owner` (a plugin id) sees them: `setAlert` is per owner, so two
+  /// plugins don't turn each other's alert off.
+  focusedPanel(owner: string): Panel | undefined;
+  panel(id: number, owner: string): Panel | undefined;
+  /// The open panels that have a header bar (the drawer's terminal has none).
+  panelIds(): number[];
+  /// Where a panel's `panelHeader` slots go.
+  panelHeader(id: number): HTMLElement | undefined;
+  onPanelOpened(listener: (id: number) => void): void;
+  onPanelClosed(listener: (id: number) => void): void;
+  /// Turns off every alert `owner` left on.
+  clearAlerts(owner: string): void;
+  menu(anchor: HTMLElement, items: MenuItem[]): void;
+  claude: ClaudeChannel;
   onUserInput(listener: () => void): Disposable;
   log(message: string): void;
   restoreFocus(): void;
@@ -57,8 +75,17 @@ export type CoreServices = {
     installed(name: string): string;
     notInstalledTitle: string;
     notInstalled(file: string, error: string): string;
+    dependencyMissing(name: string): string;
+    dependencyOff(name: string): string;
+    dependencyBroken(name: string): string;
+    dependencyCycle: string;
   };
 };
+
+/// The plugin that may hear Claude Code directly. Signed by TermIAu too: an unsigned
+/// package claiming the id gets nothing.
+const CLAUDE_PLUGIN = "termiau.claude";
+const CLAUDE_PUBLISHER = "TermIAu";
 
 /// What `plugins_take_opened` returns: a .termiau macOS handed to the app.
 type OpenedPackage = { path: string; manifest?: Manifest; error?: string };
@@ -69,6 +96,8 @@ const fileUrl = (id: string, file: string, version: string) => pluginFileUrl(id,
 type Active = {
   manifest: Manifest;
   module?: PluginModule;
+  /// What `activate` returned, for the plugins that depend on this one.
+  api?: unknown;
   subscriptions: Disposable[];
   commands: Map<string, () => void>;
   slots: HTMLElement[];
@@ -78,6 +107,7 @@ type Active = {
 export function createPluginHost(core: CoreServices) {
   const statusBar = document.getElementById("status-bar-plugins") as HTMLDivElement;
   const statusBarLeft = document.getElementById("status-bar-left") as HTMLDivElement;
+  const statusBarStart = document.getElementById("status-bar-start") as HTMLDivElement;
 
   /// The plugins' native processes, by the handle Rust gave them. One listener each
   /// for messages and exits, set up in `start`, routes to them.
@@ -87,6 +117,63 @@ export function createPluginHost(core: CoreServices) {
   >();
   const active = new Map<string, Active>();
   const errors: Record<string, string> = {};
+  /// Each installed plugin's name, for the messages about dependencies.
+  const names = new Map<string, string>();
+
+  /// Every plugin's `panelHeader` slot, with what it drew in each panel.
+  type HeaderSlot = {
+    plugin: string;
+    region: RegionContribution;
+    render: PanelHeaderRender;
+    mounted: Map<number, { el: HTMLElement; drawn?: Disposable }>;
+  };
+  const headerSlots = new Set<HeaderSlot>();
+
+  function mount(slot: HeaderSlot, id: number) {
+    const panel = core.panel(id, slot.plugin);
+    if (!panel || !core.panelHeader(id) || slot.mounted.has(id)) return;
+    const el = document.createElement("div");
+    el.className = "panel-header-slot";
+    el.dataset.plugin = slot.plugin;
+    el.dataset.slot = slot.region.id;
+    let drawn: Disposable | undefined;
+    try {
+      drawn = slot.render(panel, el) || undefined;
+    } catch (e) {
+      core.log(`plugin ${slot.plugin}: panelHeader ${slot.region.id} failed: ${e}`);
+    }
+    slot.mounted.set(id, { el, drawn });
+    layoutPanelHeader(id);
+  }
+
+  function unmount(slot: HeaderSlot, id: number) {
+    const m = slot.mounted.get(id);
+    if (!m) return;
+    slot.mounted.delete(id);
+    try {
+      m.drawn?.dispose();
+    } catch (e) {
+      core.log(`plugin ${slot.plugin}: dispose failed: ${e}`);
+    }
+    m.el.remove();
+  }
+
+  /// A panel's slots in priority order, the same rule as the footer's.
+  function layoutPanelHeader(id: number) {
+    const container = core.panelHeader(id);
+    if (!container) return;
+    const entries = [...headerSlots]
+      .filter((s) => s.mounted.has(id))
+      .map((s) => ({ plugin: s.plugin, region: s.region, el: s.mounted.get(id)!.el }));
+    container.replaceChildren(...(sortStatusBar(entries) as typeof entries).map((e) => e.el));
+  }
+
+  core.onPanelOpened((id) => {
+    for (const s of headerSlots) mount(s, id);
+  });
+  core.onPanelClosed((id) => {
+    for (const s of headerSlots) unmount(s, id);
+  });
   /// A reload asked for while one is running waits for it, then runs once.
   let running: Promise<void> = Promise.resolve();
 
@@ -113,7 +200,7 @@ export function createPluginHost(core: CoreServices) {
     core.setShortcuts(rows);
   }
 
-  function context(manifest: Manifest, entry: Active): PluginContext {
+  function context(manifest: Manifest, entry: Active, verified?: string): PluginContext {
     const prefix = `termiau:plugin:${manifest.id}:`;
     const slots = new Map<string, HTMLElement>();
     for (const r of manifest.contributes?.regions ?? []) {
@@ -158,9 +245,25 @@ export function createPluginHost(core: CoreServices) {
           if (!slot) throw new Error(`no statusBar region "${id}" in the manifest`);
           return slot;
         },
+        panelHeader(id, render) {
+          const region = manifest.contributes?.regions?.find((r) => r.region === "panelHeader" && r.id === id);
+          if (!region) throw new Error(`no panelHeader region "${id}" in the manifest`);
+          const slot: HeaderSlot = { plugin: manifest.id, region, render, mounted: new Map() };
+          headerSlots.add(slot);
+          for (const panel of core.panelIds()) mount(slot, panel);
+          const d = {
+            dispose() {
+              headerSlots.delete(slot);
+              for (const panel of [...slot.mounted.keys()]) unmount(slot, panel);
+            },
+          };
+          entry.subscriptions.push(d);
+          return d;
+        },
       },
       terminal: {
-        focusedPanel: core.focusedPanel,
+        focusedPanel: () => core.focusedPanel(manifest.id),
+        panel: (id) => core.panel(id, manifest.id),
         onUserInput(handler) {
           const d = core.onUserInput(handler);
           entry.subscriptions.push(d);
@@ -196,6 +299,15 @@ export function createPluginHost(core: CoreServices) {
           return proc;
         },
       },
+      plugins: {
+        api<T>(id: string): T {
+          if (!manifest.dependencies?.includes(id)) throw new Error(`"${id}" isn't in this plugin's dependencies`);
+          const dep = active.get(id);
+          if (!dep) throw new Error(`"${id}" isn't active`);
+          return dep.api as T;
+        },
+      },
+      claude: manifest.id === CLAUDE_PLUGIN && verified === CLAUDE_PUBLISHER ? core.claude : undefined,
       commands: {
         register(id, handler) {
           entry.commands.set(id, handler);
@@ -233,6 +345,8 @@ export function createPluginHost(core: CoreServices) {
         },
         marquee,
         restoreFocus: core.restoreFocus,
+        menu: core.menu,
+        ask: core.ask,
       },
       subscriptions: entry.subscriptions,
     };
@@ -248,14 +362,19 @@ export function createPluginHost(core: CoreServices) {
       }
     }
     const sorted = sortStatusBar(entries) as typeof entries;
-    statusBarLeft.replaceChildren(...sorted.filter((e) => e.region.alignment === "left").map((e) => e.el));
-    statusBar.replaceChildren(...sorted.filter((e) => e.region.alignment !== "left").map((e) => e.el));
+    const at = (where: string) => sorted.filter((e) => (e.region.alignment ?? "right") === where).map((e) => e.el);
+    statusBarStart.replaceChildren(...at("start"));
+    statusBarLeft.replaceChildren(...at("left"));
+    statusBar.replaceChildren(...at("right"));
   }
 
   async function activate(p: InstalledPlugin) {
     const m = p.manifest!;
     const problems = [...regionProblems(m), ...settingProblems(m)];
     if (problems.length) return fail(m.id, problems.join("; "));
+    // In order, a dependency was tried just before; if it failed, this one can't run.
+    const down = m.dependencies?.find((d) => !active.has(d));
+    if (down) return fail(m.id, core.texts.dependencyBroken(names.get(down) ?? down));
 
     const entry: Active = { manifest: m, subscriptions: [], commands: new Map(), slots: [] };
     if (m.style) {
@@ -270,11 +389,11 @@ export function createPluginHost(core: CoreServices) {
       const mod = (await import(/* @vite-ignore */ fileUrl(m.id, m.main, m.version))) as Partial<PluginModule>;
       if (typeof mod.activate !== "function") throw new Error("main exports no activate()");
       entry.module = mod as PluginModule;
-      const ctx = context(m, entry);
+      const ctx = context(m, entry, p.verified);
       active.set(m.id, entry);
       // The slots go in before activate, so the plugin can measure what it draws.
       layoutStatusBar();
-      await entry.module.activate(ctx);
+      entry.api = await entry.module.activate(ctx);
     } catch (e) {
       fail(m.id, `activation failed: ${e instanceof Error ? e.message : String(e)}`);
       await deactivate(m.id);
@@ -302,10 +421,12 @@ export function createPluginHost(core: CoreServices) {
       slot.remove();
     }
     a.style?.remove();
+    core.clearAlerts(id);
   }
 
   async function reloadNow() {
-    for (const id of [...active.keys()]) await deactivate(id);
+    // Dependents first: their `deactivate` may still call a dependency's API.
+    for (const id of [...active.keys()].reverse()) await deactivate(id);
     for (const k of Object.keys(errors)) delete errors[k];
 
     let installed: InstalledPlugin[] = [];
@@ -314,10 +435,17 @@ export function createPluginHost(core: CoreServices) {
     } catch (e) {
       core.log(`plugins: couldn't list: ${e}`);
     }
-    for (const p of installed) {
-      if (!p.enabled || !p.manifest) continue;
-      await activate(p);
-    }
+    names.clear();
+    for (const p of installed) if (p.manifest) names.set(p.id, p.manifest.name);
+    const t = core.texts;
+    const { order, blocked } = activationOrder(installed, {
+      missing: t.dependencyMissing,
+      off: t.dependencyOff,
+      broken: t.dependencyBroken,
+      cycle: t.dependencyCycle,
+    });
+    for (const [id, why] of Object.entries(blocked)) fail(id, why);
+    for (const p of order) await activate(p);
     layoutStatusBar();
     publishShortcuts();
     publishErrors();

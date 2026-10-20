@@ -19,6 +19,8 @@ type Entry = {
   sha256: string;
   /// Set by the app after checking the package's signature (see marketplace.rs).
   verified?: string;
+  /// Installed along with it, when missing.
+  dependencies?: string[];
 };
 
 type State = "install" | "update" | "installed";
@@ -149,6 +151,11 @@ export function Marketplace({
                     </div>
                   </div>
                   {e.description && <p className="market-description">{e.description}</p>}
+                  {!!e.dependencies?.length && (
+                    <p className="market-requires">
+                      {T.marketplaceRequires(e.dependencies.map((d) => entries?.find((x) => x.id === d)?.name ?? d).join(", "))}
+                    </p>
+                  )}
                   {failures[e.id] && <p className="market-failure">{failures[e.id]}</p>}
                   <div className="market-card-actions">
                     <button

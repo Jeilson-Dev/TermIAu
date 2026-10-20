@@ -6,30 +6,23 @@ import { PluginsTab } from "./PluginsTab";
 import { Snippets } from "./Snippets";
 import { Icon } from "./Icons";
 
-type Limits = { attention: number; danger: number; autoCompact: boolean; autoCompactAt: number };
-
 /// TermIAu's preferences, opened by the menu's ⌘,.
 ///
 /// The target branch guess is here because it is the only thing that doesn't belong
 /// to a repository: each one's target is stored with it, and picking by hand in the
 /// bar's selector still outweighs this. The editor is the one for the "Open in
-/// editor" button in the terminal's file viewer. The context limits are the
-/// ones for the pill on each terminal panel's bar.
+/// editor" button in the terminal's file viewer.
 export function Prefs({
   defaultTarget,
   onDefaultTarget,
   editor,
   onEditor,
-  context,
-  onContext,
   onClose,
 }: {
   defaultTarget: string;
   onDefaultTarget(branch: string): void;
   editor: string;
   onEditor(command: string): void;
-  context: Limits;
-  onContext(limits: Limits): void;
   onClose(): void;
 }) {
   const campo = useRef<HTMLInputElement>(null);
@@ -113,65 +106,6 @@ export function Prefs({
               <span className="prefs-help"><Snippets from={T.editorHelp} /></span>
             </label>
 
-            <div className="prefs-field">
-              <span className="prefs-name">{T.contextOfSession}</span>
-              <div className="prefs-limits">
-                <label className="prefs-limit">
-                  <span className="prefs-dot attention" />
-                  {T.yellowFrom}
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={context.attention}
-                    onChange={(e) => {
-                      const n = e.target.valueAsNumber;
-                      if (Number.isFinite(n)) onContext({ ...context, attention: n });
-                    }}
-                    onKeyDown={(e) => e.key === "Enter" && onClose()}
-                  />
-                  %
-                </label>
-                <label className="prefs-limit">
-                  <span className="prefs-dot danger" />
-                  {T.redFrom}
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={context.danger}
-                    onChange={(e) => {
-                      const n = e.target.valueAsNumber;
-                      if (Number.isFinite(n)) onContext({ ...context, danger: n });
-                    }}
-                    onKeyDown={(e) => e.key === "Enter" && onClose()}
-                  />
-                  %
-                </label>
-                <label className="prefs-limit">
-                  <input
-                    type="checkbox"
-                    checked={context.autoCompact}
-                    onChange={(e) => onContext({ ...context, autoCompact: e.target.checked })}
-                  />
-                  {T.autoCompactFrom}
-                  <input
-                    type="number"
-                    min={context.danger + 1}
-                    max={100}
-                    value={context.autoCompactAt}
-                    disabled={!context.autoCompact}
-                    onChange={(e) => {
-                      const n = e.target.valueAsNumber;
-                      if (Number.isFinite(n)) onContext({ ...context, autoCompactAt: n });
-                    }}
-                    onKeyDown={(e) => e.key === "Enter" && onClose()}
-                  />
-                  %
-                </label>
-              </div>
-              <span className="prefs-help"><Snippets from={T.contextHelp} /></span>
-            </div>
           </div>
         )}
       </div>
@@ -212,15 +146,6 @@ export function PrefsFloating() {
       onDefaultTarget={(defaultTarget) => mudar({ defaultTarget })}
       editor={s.editor}
       onEditor={(editor) => mudar({ editor })}
-      context={{
-        attention: s.contextAttention,
-        danger: s.contextDanger,
-        autoCompact: s.autoCompact,
-        autoCompactAt: s.autoCompactAt,
-      }}
-      onContext={({ attention, danger, autoCompact, autoCompactAt }) =>
-        mudar({ contextAttention: attention, contextDanger: danger, autoCompact, autoCompactAt })
-      }
       onClose={() => window.parent.postMessage({ termiauPrefsClosed: true }, "*")}
     />
   );

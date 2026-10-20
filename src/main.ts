@@ -12,6 +12,7 @@ import { language } from "./i18n";
 import { configsOf, playList, taskBefore, tasksOf, type ConfigLaunch, type Task } from "./run/launch";
 import { commandLine, runnerFor, type Plan } from "./run/runners";
 import { quote, word } from "./run/shell";
+import type { Disposable, MenuItem, Panel } from "./plugins/api";
 import { createPluginHost } from "./plugins/host";
 import { CLOSE_DIALOG_ICON, footerButton, isMarqueeRunning, marquee } from "./ui";
 import {
@@ -48,9 +49,8 @@ import {
   type ScreenLine,
   type Reference,
 } from "./viewer";
-import { WEEK_MIN, SESSION_MIN, missingFor, windowNow, statusLineUsage, type StatusLineLimits, remainingFraction, autoCompactLimit, contextLevel, paceLevel, usageLevel, type UsageWindow, type ContextLimits, type Level, type Usage } from "./usage";
 import { blockProgress, planProgress, type TaskPlan } from "./progress";
-import { loadSettings, onSettings, saveViewMode, type Settings } from "./differ/lib/persist";
+import { loadSettings, onSettings, saveViewMode } from "./differ/lib/persist";
 import type { ViewMode } from "./differ/types";
 import "@xterm/xterm/css/xterm.css";
 import "./style.css";
@@ -162,6 +162,8 @@ type Leaf = {
   /// The plan of the long task Claude is doing here, as it published it with
   /// `termiau progress`. It shows in the footer, beside the usage.
   progress?: TaskPlan;
+  /// The plugins that turned the panel's alert border on (`Panel.setAlert`).
+  alerts?: Set<string>;
 };
 
 type ClaudeSession = {
@@ -188,15 +190,6 @@ type ClaudeSession = {
   /// terminal shows the same question at the same time, and whoever answers first
   /// wins.
   question?: { id: string; questions: QuestionItem[] };
-  /// How much of the context the session has used (0 to 100), from the status line.
-  context?: number;
-  /// The session's model (`display_name`, "Opus 5.5") and effort level
-  /// ("high"), also from the status line. A model without effort doesn't send the level.
-  model?: string;
-  effort?: string;
-  /// Auto-compact already sent `/compact` this time. It only re-arms when the
-  /// context drops below the limit — otherwise every status line would send another.
-  compacted?: boolean;
 };
 
 /// The tools whose wait is a menu of options, not a yes or no: the
@@ -533,6 +526,10 @@ async function createLeaf(
   drawBar(leaf);
   drawMaximize(leaf);
   scheduleProject(leaf);
+  if (leaf.bar) {
+    pluginPanels.set(leaf.id, leaf);
+    for (const fn of panelOpened) fn(leaf.id);
+  }
   return leaf;
 }
 
@@ -1044,6 +1041,8 @@ function destroyLeaf(leaf: Leaf, alreadyDead: boolean) {
   leaf.el.remove();
   // The panel's plan leaves the footer with it.
   if (leaf.progress) drawProgress();
+  lastStatus.delete(leaf.id);
+  if (pluginPanels.delete(leaf.id)) for (const fn of panelClosed) fn(leaf.id);
 }
 
 function closeLeaf(leaf: Leaf, opts: { alreadyDead?: boolean } = {}) {
@@ -1320,53 +1319,13 @@ type ClaudeEvent = {
 };
 
 /// What Claude Code's status line sends, through the hook (`termiau-event.sh
-/// status`). Only the fields the app uses.
-type SocketStatus = {
-  panel: number;
-  status: {
-    context_window?: { used_percentage?: number | null } | null;
-    rate_limits?: StatusLineLimits | null;
-    model?: { display_name?: string | null } | null;
-    effort?: { level?: string | null } | null;
-  };
-};
+/// status`). The app only passes it on: the Claude Code plugin reads it.
+type SocketStatus = { panel: number; status: Record<string, unknown> };
 
-/// Context, model and effort go to the session panel's bar; usage,
-/// to the footer.
 function receiveStatus(raw: SocketStatus) {
   const st = raw.status ?? {};
-  const u = statusLineUsage(st.rate_limits);
-  if (u) receiveUsage(u);
-  const leaf = leafByPanel(raw.panel);
-  const c = leaf?.claude;
-  if (!leaf || !c) return;
-  const used = st.context_window?.used_percentage;
-  const context = typeof used === "number" ? used : c.context;
-  const model = st.model?.display_name ?? c.model;
-  // The level really goes away when the new model has no effort.
-  const effort = st.model ? (st.effort?.level ?? undefined) : c.effort;
-  const changed = c.context !== context || c.model !== model || c.effort !== effort;
-  Object.assign(c, { context, model, effort });
-  if (changed) drawBar(leaf);
-  autoCompact(leaf);
-}
-
-/// `/compact` on its own, when the context reaches the limit in Preferences.
-/// Only with Claude idle: while working, the command would go into the queue; while waiting,
-/// it would answer its question. `Stop` calls it again, in case the limit
-/// was crossed mid-turn.
-function autoCompact(leaf: Leaf) {
-  const c = leaf.claude;
-  const limit = autoCompactLimit(contextLimits);
-  if (!c || c.context === undefined || limit === null) return;
-  if (c.context < limit) {
-    c.compacted = false;
-    return;
-  }
-  if (c.compacted || c.state !== "idle") return;
-  c.compacted = true;
-  notify(leaf, T.compactingAlone(Math.round(c.context)));
-  compact(leaf);
+  lastStatus.set(raw.panel, st);
+  for (const fn of claudeStatusListeners) fn(raw.panel, st);
 }
 
 function leafByPanel(id: number): Leaf | undefined {
@@ -1432,13 +1391,7 @@ function receive(
   const transcript = ev.transcript_path ?? (before?.session === session ? before?.transcript : undefined);
   // The pending question carries across events until it is answered.
   const question = before?.session === session ? before?.question : undefined;
-  // The context too: it only arrives through the status line, and a hook event that
-  // forgot it would clear the pill until Claude ran again.
-  const context = before?.session === session ? before?.context : undefined;
-  const compacted = before?.session === session ? before?.compacted : undefined;
-  // Model and effort carry across a `/clear`: they belong to the running Claude.
-  const { model, effort } = before ?? {};
-  leaf.claude = { name, state: before?.state ?? "idle", session, folder, transcript, question, context, model, effort, compacted };
+  leaf.claude = { name, state: before?.state ?? "idle", session, folder, transcript, question };
 
   switch (ev.hook_event_name) {
     case "UserPromptSubmit":
@@ -1451,7 +1404,6 @@ function receive(
       // The turn ended. A wait that arrived earlier (a question, a
       // permission) still stands.
       if (leaf.claude.state === "working") leaf.claude.state = "idle";
-      autoCompact(leaf);
       break;
     case "PostToolUse":
     case "PostToolUseFailure":
@@ -1505,6 +1457,7 @@ function receive(
   // The session may have changed under an open chat (`/clear`, `/resume`),
   // and a new prompt is already in the transcript: read now, without waiting for the pulse.
   if (leaf.chat?.isOpen) void readChat(leaf);
+  for (const fn of claudeEventListeners) fn(ev.panel, ev);
 }
 
 /// Gives up on the panel's pending question: its hook exits without an answer, and if
@@ -2420,31 +2373,6 @@ const diffFileOf = new WeakMap<HTMLElement, FileDiff>();
 
 const ICON_UNIFIED = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M4.5 6h7M4.5 10h7"/></svg>`;
 const ICON_SIDE_SIDE = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M8 2.5v11"/></svg>`;
-
-/// The context pill's limits, from Preferences (⌘,).
-let contextLimits: Partial<ContextLimits> = {};
-
-async function wireContextLimits() {
-  const apply = (s: Pick<Settings, "contextAttention" | "contextDanger" | "autoCompact" | "autoCompactAt">) => {
-    contextLimits = {
-      attention: s.contextAttention,
-      danger: s.contextDanger,
-      autoCompact: s.autoCompact,
-      autoCompactAt: s.autoCompactAt,
-    };
-    for (const a of tabs)
-      for (const f of leaves(a.root)) {
-        drawBar(f);
-        autoCompact(f);
-      }
-  };
-  try {
-    apply(await loadSettings());
-    await onSettings(apply);
-  } catch (e) {
-    jlog(`context limits: ${e}`);
-  }
-}
 
 async function wireDiffMode() {
   try {
@@ -4335,15 +4263,8 @@ type Run = {
 type Bar = {
   el: HTMLDivElement;
   title: HTMLSpanElement;
-  /// The Claude session's context: a single pill, the bar filling with what
-  /// has been used and the number over it. Clicking compacts the conversation.
-  context: HTMLButtonElement;
-  contextFill: HTMLSpanElement;
-  contextNum: HTMLSpanElement;
-  /// The session's model and effort, beside the context. Clicking opens the
-  /// list to change them.
-  model: HTMLButtonElement;
-  effort: HTMLButtonElement;
+  /// The plugins' `panelHeader` slots, after the branch.
+  plugins: HTMLDivElement;
   notice: HTMLSpanElement;
   actions: HTMLSpanElement;
   drawer: HTMLButtonElement;
@@ -4463,25 +4384,14 @@ function createBar(): Bar {
   close.hidden = true;
   controls.append(actions, drawer, stop, groupPlay, diff, chat, viewer, maximize, close);
   const branchChip = createBranchChip("task-branch");
-  const context = buttonTask("task-context", "");
-  context.hidden = true;
-  const contextFill = element("span", "task-context-full");
-  const contextNum = element("span", "task-context-num");
-  context.append(contextFill, contextNum);
-  const model = buttonTask("task-claude-option task-model", "");
-  const effort = buttonTask("task-claude-option task-effort", "");
-  model.hidden = effort.hidden = true;
   // On the left, like the drawer it opens.
   const explore = buttonTask("task-explore", ICON_FOLDER);
-  el.append(explore, title, branchChip.el, context, model, effort, notice, controls);
+  const plugins = element("div", "panel-plugins");
+  el.append(explore, title, branchChip.el, plugins, notice, controls);
   return {
     el,
     title,
-    context,
-    contextFill,
-    contextNum,
-    model,
-    effort,
+    plugins,
     folder: null,
     branch: null,
     branchChip,
@@ -4509,10 +4419,7 @@ function createBar(): Bar {
 function wireBar(leaf: Leaf) {
   const b = leaf.bar;
   if (!b) return;
-  b.context.addEventListener("click", () => compact(leaf));
   b.explore.addEventListener("click", () => toggleExplorer(leaf));
-  b.model.addEventListener("click", () => toggleClaudeOptions(leaf, "model"));
-  b.effort.addEventListener("click", () => toggleClaudeOptions(leaf, "effort"));
   b.play.addEventListener("click", () => {
     const cfg = chosenConfig(b.project);
     if (cfg) void execute(leaf, cfg);
@@ -4556,39 +4463,6 @@ function drawBar(leaf: Leaf) {
   if (!b) return;
   b.title.textContent = leaf.title;
   b.title.title = leaf.title;
-
-  // The context fills as the conversation grows: yellow and red by the
-  // limits in Preferences. The pill stays while there is a session, idle or
-  // not — it is with Claude idle that you can compact. Before the first
-  // status line it exists, just without a number.
-  const used = leaf.claude?.context;
-  b.context.hidden = !leaf.claude;
-  let level: Level = "";
-  if (used === undefined) {
-    b.contextFill.style.width = "0%";
-    b.contextNum.textContent = T.emptyContext;
-    b.context.title = T.emptyContextHint;
-  } else {
-    const pct = Math.round(Math.min(100, Math.max(0, used)));
-    level = contextLevel(pct, contextLimits);
-    b.contextFill.style.width = `${pct}%`;
-    b.contextNum.textContent = T.context(pct);
-    b.context.title = T.contextHint(pct);
-  }
-  b.context.dataset.level = level;
-  // In the red, the whole panel warns: the pill alone gets lost in the corner of the eye.
-  leaf.el.classList.toggle("context-full", level === "danger");
-
-  // The model arrives with the first status line; effort only exists on models
-  // that have it.
-  const c = leaf.claude;
-  b.model.hidden = !c;
-  b.model.textContent = c?.model ?? T.emptyModel;
-  b.model.title = c?.model ? T.modelHint(c.model) : T.emptyModelHint;
-  b.effort.hidden = !c?.effort;
-  const effort = EFFORTS.find((e) => e.level === c?.effort);
-  b.effort.textContent = T.effort(effort?.label ?? c?.effort ?? "");
-  b.effort.title = T.effortHint;
 
   const g = leaf.drawer;
   b.drawer.hidden = !g;
@@ -4836,67 +4710,6 @@ function openMenu(leaf: Leaf, ancora: HTMLElement) {
   menuAncora = ancora;
 }
 
-/// The models `/model` accepts by alias. "Default" is the account's.
-const MODELS = [
-  { alias: "fable", label: "Fable" },
-  { alias: "opus", label: "Opus" },
-  { alias: "sonnet", label: "Sonnet" },
-  { alias: "haiku", label: "Haiku" },
-  { alias: "default", label: T.accountDefault },
-];
-
-/// The `/effort` levels. Not every model has all of them: Claude refuses what
-/// doesn't exist, and the message shows in the terminal.
-const EFFORTS = [
-  { level: "low", label: T.effortLow },
-  { level: "medium", label: T.effortMedium },
-  { level: "high", label: T.effortHigh },
-  { level: "xhigh", label: T.effortExtraHigh },
-  { level: "max", label: T.effortMax },
-  { level: "auto", label: T.effortAuto },
-];
-
-function toggleClaudeOptions(leaf: Leaf, which: "model" | "effort") {
-  const b = leaf.bar;
-  const c = leaf.claude;
-  if (!b || !c) return;
-  const ancora = b[which];
-  if (!menuEl.hidden && menuAncora === ancora) return closeMenu();
-  const options =
-    which === "model"
-      ? MODELS.map((m) => ({
-          label: m.label,
-          hint: m.alias,
-          command: `/model ${m.alias}`,
-          current: m.alias !== "default" && c.model?.toLowerCase().startsWith(m.alias) === true,
-        }))
-      : EFFORTS.map((e) => ({ label: e.label, hint: e.level, command: `/effort ${e.level}`, current: e.level === c.effort }));
-  menuEl.replaceChildren(
-    ...options.map((o) => {
-      const item = element("button", o.current ? "chosen" : "");
-      item.textContent = o.label;
-      const hint = element("span", "task-menu-kind");
-      hint.textContent = o.hint;
-      item.append(hint);
-      item.addEventListener("mousedown", (e) => e.preventDefault());
-      item.addEventListener("click", () => {
-        closeMenu();
-        sendToClaude(leaf, o.command, T.claudeWorkingSwap);
-      });
-      return item;
-    }),
-  );
-  openMenu(leaf, ancora);
-}
-
-/// A short message on the bar, beside the title: a play that couldn't run says why.
-/// Sends `/compact` to the panel's Claude, as if you typed it — the
-/// same path as the chat field. With it working the command would go into the
-/// queue, or into the middle of what you are typing: it only compacts when idle.
-function compact(leaf: Leaf) {
-  sendToClaude(leaf, "/compact", T.claudeWorkingCompact);
-}
-
 /// Types a command into the panel's Claude and presses Enter. `busy` is the notice for
 /// when it is working.
 function sendToClaude(leaf: Leaf, command: string, busy: string) {
@@ -4912,6 +4725,7 @@ function sendToClaude(leaf: Leaf, command: string, busy: string) {
   }, 80);
 }
 
+/// A short message on the bar, beside the title: a play that couldn't run says why.
 function notify(leaf: Leaf, text: string) {
   const b = leaf.bar;
   if (!b) return;
@@ -5146,249 +4960,6 @@ async function stop(ex: Run) {
     drawBar(ex.owner);
   }
 }
-
-// ---------- Claude usage in the footer ----------
-
-/// Claude Usage Monitor's circle, in the footer's left corner: the circle is
-/// the time left in the 5h session, and the number, how much of its usage still
-/// remains. Everything counts down. The color is the pace's — it lights up when you spend
-/// faster than time passes. With the mouse over it, two columns open to the
-/// right, session and week, each with the time and the usage.
-const usageEl = document.getElementById("usage") as HTMLDivElement;
-
-/// The same radius as the volume (5.5 in the 16 viewBox): the perimeter is the whole stroke.
-const USAGE_CIRCLE = 2 * Math.PI * 5.5;
-/// The shine running along the circle and the bars, in the direction they empty.
-const USAGE_GLOW = 2.2;
-/// One pass of the shine on the circle and the little bars, from tip to start.
-const USAGE_DRAIN_MS = 2400;
-
-type UsageBar = { line: HTMLSpanElement; full: HTMLSpanElement; pointer: HTMLSpanElement; num: HTMLSpanElement };
-
-function usageBar(label: string, cls: string): UsageBar {
-  const line = element("span", `usage-line ${cls}`);
-  const name = element("span", "usage-label");
-  name.textContent = label;
-  const track = element("span", "usage-track");
-  const full = element("span", "usage-full");
-  const pointer = element("span", "usage-pointer");
-  full.append(pointer);
-  track.append(full);
-  const num = element("span", "usage-num");
-  line.append(name, track, num);
-  return { line, full, pointer, num };
-}
-
-/// A column: the name and, to its right, the two lines — the time left and
-/// the usage remaining.
-function usageColumn(name: string) {
-  const column = element("span", "usage-column");
-  const title = element("span", "usage-title");
-  title.textContent = name;
-  const lines = element("span", "usage-lines");
-  const time = usageBar(T.timeLeft, "usage-time");
-  const usage = usageBar(T.availableTokens, "usage-tokens");
-  lines.append(time.line, usage.line);
-  column.append(title, lines);
-  return { column, time, usage };
-}
-
-const usageSession = usageColumn(T.session);
-const usageWeek = usageColumn(T.week);
-/// `vertical`: the tokens bar beside the clock, which empties from top
-/// to bottom; the hover ones empty from right to left.
-const usageBars: { full: HTMLSpanElement; pointer: HTMLSpanElement; vertical?: boolean }[] = [
-  usageSession.time,
-  usageSession.usage,
-  usageWeek.time,
-  usageWeek.usage,
-];
-const usageDetail = element("span", "usage-detail");
-usageDetail.append(usageSession.column, usageWeek.column);
-const usageIcon = element("span", "usage-icon");
-usageIcon.innerHTML = `<svg viewBox="0 0 16 16" width="26" height="26" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.6" opacity=".26"/><circle class="circle" cx="8" cy="8" r="5.5" stroke-width="1.6" stroke-linecap="round" transform="rotate(-90 8 8)" stroke-dasharray="${USAGE_CIRCLE}" stroke-dashoffset="0"/><circle class="circle-glow" cx="8" cy="8" r="5.5" stroke-width="1.6" stroke-linecap="round" transform="rotate(-90 8 8)" stroke-dasharray="${USAGE_GLOW} ${USAGE_CIRCLE}" stroke-dashoffset="0"/><g class="pointers" stroke="currentColor" stroke-linecap="round"><line class="pointer-hour" x1="8" y1="8" x2="8" y2="5.6" stroke-width="1.2"/><line class="pointer-minute" x1="8" y1="8" x2="8" y2="4.4" stroke-width="0.9"/><circle cx="8" cy="8" r="0.7" fill="currentColor" stroke="none"/></g></svg>`;
-const usageCircle = usageIcon.querySelector(".circle") as SVGCircleElement;
-const usageGlow = usageIcon.querySelector(".circle-glow") as SVGCircleElement;
-/// The hands inside the circle: the small one points to the tip of the lit
-/// segment (how much of the session is left), and the big one makes a turn on hover.
-const usageHour = usageIcon.querySelector(".pointer-hour") as SVGLineElement;
-const usageMinute = usageIcon.querySelector(".pointer-minute") as SVGLineElement;
-/// Beside the clock: the session's available tokens, an upright bar that
-/// empties from top to bottom, like a battery, and the number beside it.
-const usageSummary = element("span", "usage-summary");
-const usagePct = element("span", "usage-pct");
-const usageMiniTrack = element("span", "usage-track usage-mini");
-const usageMini = { full: element("span", "usage-full"), pointer: element("span", "usage-pointer"), vertical: true };
-usageMini.full.append(usageMini.pointer);
-usageMiniTrack.append(usageMini.full);
-usageSummary.append(usageMiniTrack, usagePct);
-usageBars.push(usageMini);
-usageEl.append(usageIcon, usageSummary, usageDetail);
-
-/// The last good reading: a 429 or the network dropping don't erase what was already known.
-let currentUsage: Usage | undefined;
-/// The piece of the circle lit now, in stroke length.
-let usageArc = USAGE_CIRCLE;
-/// The shine animations of the circle and the little bars, created together.
-let usageDrain: Animation[] = [];
-
-const clamp = (n: number) => Math.round(Math.min(100, Math.max(0, n)));
-
-function paintBar(b: UsageBar, remains: number | null, text: string, level: Level) {
-  b.full.style.width = `${remains ?? 0}%`;
-  b.num.textContent = remains === null ? "—" : text;
-  b.line.dataset.level = level;
-}
-
-/// A window's tooltip: the name and, one per line, what remains of it.
-function usageHint(name: string, j: UsageWindow | null): string {
-  if (!j) return T.noWindow(name);
-  return T.usageHint(name, clamp(100 - j.usage), missingFor(j.renews));
-}
-
-/// A column: the two bars count what remains, time and usage.
-function paintColumn(c: ReturnType<typeof usageColumn>, j: UsageWindow | null, windowMin: number, level: Level) {
-  if (!j) {
-    paintBar(c.time, null, "", "");
-    paintBar(c.usage, null, "", "");
-    return;
-  }
-  const time = clamp(remainingFraction(j.renews, windowMin) * 100);
-  const remains = clamp(100 - j.usage);
-  const missing = missingFor(j.renews);
-  paintBar(c.time, time, missing, "");
-  paintBar(c.usage, remains, `${remains}%`, level);
-}
-
-/// The circle's shine and the bars' little segments run from the tip back to the
-/// start, in the direction everything decreases, and the minute hand makes a turn.
-/// They are all created in the same call, and so they move together: same period,
-/// same step, and they fade at the end. Only once, on hover — still the rest of the time.
-function drainUsage() {
-  for (const a of usageDrain) a.cancel();
-  usageDrain = [];
-  if (reducedMotion.matches) {
-    usageGlow.style.display = "none";
-    return;
-  }
-  const time: KeyframeAnimationOptions = { duration: USAGE_DRAIN_MS, easing: "linear" };
-  usageDrain.push(
-    usageMinute.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], {
-      duration: USAGE_DRAIN_MS,
-      easing: "cubic-bezier(0.22, 0.61, 0.36, 1)",
-    }),
-  );
-  const tip = usageArc - USAGE_GLOW;
-  usageGlow.style.display = tip <= 0 ? "none" : "";
-  if (tip > 0) {
-    usageDrain.push(
-      usageGlow.animate(
-        [
-          { strokeDashoffset: -tip, opacity: 0.9 },
-          { strokeDashoffset: -tip * 0.3, opacity: 0.9, offset: 0.7 },
-          { strokeDashoffset: 0, opacity: 0 },
-        ],
-        time,
-      ),
-    );
-  }
-  for (const b of usageBars) {
-    usageDrain.push(
-      b.pointer.animate(
-        b.vertical
-          ? [
-              { bottom: "calc(100% - 6px)", height: "6px", opacity: 0.9 },
-              { bottom: "calc(30% - 4px)", height: "4px", opacity: 0.9, offset: 0.7 },
-              { bottom: "0px", height: "2px", opacity: 0 },
-            ]
-          : [
-              { left: "calc(100% - 10px)", width: "10px", opacity: 0.9 },
-              { left: "calc(30% - 5px)", width: "5px", opacity: 0.9, offset: 0.7 },
-              { left: "0px", width: "3px", opacity: 0 },
-            ],
-        time,
-      ),
-    );
-  }
-}
-
-function drawUsage() {
-  const u = currentUsage;
-  usageEl.hidden = !u;
-  if (!u) return;
-  const s = u.session;
-  const remaining = s ? remainingFraction(s.renews, SESSION_MIN) : 1;
-  const sessionLevel = s ? paceLevel(s.usage, remaining) : "";
-  paintColumn(usageSession, s, SESSION_MIN, sessionLevel);
-  paintColumn(usageWeek, u.week, WEEK_MIN, u.week ? usageLevel(u.week.usage) : "");
-  usageEl.dataset.level = sessionLevel;
-  usagePct.textContent = s ? `${clamp(100 - s.usage)}%` : "—";
-  usageMini.full.style.height = `${s ? clamp(100 - s.usage) : 0}%`;
-  usageCircle.style.strokeDashoffset = String(USAGE_CIRCLE * (1 - remaining));
-  usageHour.style.transform = `rotate(${remaining * 360}deg)`;
-  usageEl.title = `${usageHint(T.session, s)}\n\n${usageHint(T.week, u.week)}`;
-  usageArc = USAGE_CIRCLE * remaining;
-}
-
-/// On mouse over, the circle and the bars start from full and go down to where
-/// they are: every time you look, you see they are decreasing.
-function replayUsage() {
-  if (reducedMotion.matches || !currentUsage) return;
-  const filled = usageBars.map((b) => b.full);
-  const targets: (HTMLElement | SVGElement)[] = [usageCircle, usageHour, ...filled];
-  const side = (i: number) => (usageBars[i].vertical ? "height" : "width");
-  for (const el of targets) el.style.transition = "none";
-  const widths = filled.map((el, i) => el.style[side(i)]);
-  const offset = usageCircle.style.strokeDashoffset;
-  const hour = usageHour.style.transform;
-  filled.forEach((el, i) => (el.style[side(i)] = "100%"));
-  usageCircle.style.strokeDashoffset = "0";
-  usageHour.style.transform = "rotate(360deg)";
-  void usageEl.offsetWidth;
-  for (const el of targets) el.style.transition = "";
-  filled.forEach((el, i) => (el.style[side(i)] = widths[i]));
-  drainUsage();
-  usageCircle.style.strokeDashoffset = offset;
-  usageHour.style.transform = hour;
-}
-usageEl.addEventListener("mouseenter", replayUsage);
-
-/// The last usage news is kept: the status line only speaks with Claude
-/// running, and opening the app must not leave the footer empty until then.
-const USAGE_KEY = "termiau:usage";
-
-/// Usage arrived through some panel's status line: it applies to all, there is
-/// only one account.
-function receiveUsage(u: Usage) {
-  usageNews = u;
-  try {
-    localStorage.setItem(USAGE_KEY, JSON.stringify(u));
-  } catch {
-    // Just a convenience.
-  }
-  updateUsage();
-}
-
-/// The news, as it is now: a window that renewed since then comes back at zero.
-let usageNews: Usage | undefined;
-function updateUsage() {
-  currentUsage = usageNews && {
-    session: windowNow(usageNews.session),
-    week: windowNow(usageNews.week),
-  };
-  drawUsage();
-}
-
-try {
-  usageNews = (JSON.parse(localStorage.getItem(USAGE_KEY) ?? "null") as Usage | null) ?? undefined;
-} catch {
-  usageNews = undefined;
-}
-usageEl.hidden = true;
-updateUsage();
-// Between one piece of news and the next, time keeps passing: the "time left" and the
-// circle move on their own.
-setInterval(updateUsage, 30_000);
 
 // ---------- a long task's progress, in the footer ----------
 
@@ -5652,7 +5223,6 @@ const SHORTCUTS: { group: string; items: [string | string[], string][] }[] = [
       ["⌘⇧A", T.scPanelWaiting],
       ["⌘⇧↩", T.scMaximizePanel],
       ["⌘⇧C", T.scToggleChat],
-      ["⌘⇧K", T.scCompact],
       [["⌘⇧↑", "⌘⇧↓"], T.scPreviousNextMessage],
       // ⌃D is end of input: the shell exits, and the panel goes along with it.
       [["⌘W", "⌃D"], T.scClosePanel],
@@ -5747,15 +5317,100 @@ function setPluginShortcuts(rows: [string, string][]) {
 /// `ctx.terminal.onUserInput` (dictation cancels its auto-Enter on it).
 const userInputListeners = new Set<() => void>();
 
+/// The panels plugins can see — every one with a header bar — and who wants to know
+/// when one opens or closes (the host, for the `panelHeader` slots).
+const pluginPanels = new Map<number, Leaf>();
+const panelOpened = new Set<(id: number) => void>();
+const panelClosed = new Set<(id: number) => void>();
+
+/// Claude Code's events and status lines, for the Claude Code plugin. The last status
+/// of each panel is kept: a plugin turned on later draws at once, without waiting
+/// for Claude to speak again.
+const claudeEventListeners = new Set<(panel: number, event: Record<string, unknown>) => void>();
+const claudeStatusListeners = new Set<(panel: number, status: Record<string, unknown>) => void>();
+const lastStatus = new Map<number, Record<string, unknown>>();
+
+/// A panel as plugin `owner` sees it.
+function pluginPanel(leaf: Leaf, owner: string): Panel {
+  return {
+    id: leaf.id,
+    write: (text) => void invoke("pty_write", { id: leaf.id, data: text }).catch((e) => jlog(`plugin pty_write: ${e}`)),
+    isAlive: () => !leaf.dead,
+    notify: (text) => notify(leaf, text),
+    setAlert: (on) => setAlert(leaf, owner, on),
+  };
+}
+
+function setAlert(leaf: Leaf, owner: string, on: boolean) {
+  leaf.alerts ??= new Set();
+  if (on) leaf.alerts.add(owner);
+  else leaf.alerts.delete(owner);
+  leaf.el.classList.toggle("alert", leaf.alerts.size > 0);
+}
+
+/// The app's dropdown with a plugin's items, beside the button that asked for it.
+function pluginMenu(anchor: HTMLElement, items: MenuItem[]) {
+  if (!menuEl.hidden && menuAncora === anchor) return closeMenu();
+  const leaf = [...pluginPanels.values()].find((l) => l.el.contains(anchor)) ?? active?.focus;
+  if (!leaf) return;
+  menuEl.replaceChildren(
+    ...items.map((o) => {
+      const item = element("button", o.chosen ? "chosen" : "");
+      item.textContent = o.label;
+      if (o.hint) {
+        const hint = element("span", "task-menu-kind");
+        hint.textContent = o.hint;
+        item.append(hint);
+      }
+      item.addEventListener("mousedown", (e) => e.preventDefault());
+      item.addEventListener("click", () => {
+        closeMenu();
+        o.onSelect();
+      });
+      return item;
+    }),
+  );
+  openMenu(leaf, anchor);
+}
+
+const listenerSet = <T>(set: Set<T>, fn: T): Disposable => {
+  set.add(fn);
+  return { dispose: () => void set.delete(fn) };
+};
+
 const plugins = createPluginHost({
   language: language(),
-  focusedPanel: () => {
-    const leaf = active?.focus;
-    if (!leaf) return undefined;
-    return {
-      write: (text) => void invoke("pty_write", { id: leaf.id, data: text }).catch((e) => jlog(`plugin pty_write: ${e}`)),
-      isAlive: () => !leaf.dead,
-    };
+  focusedPanel: (owner) => (active?.focus ? pluginPanel(active.focus, owner) : undefined),
+  panel: (id, owner) => {
+    const leaf = pluginPanels.get(id);
+    return leaf && !leaf.dead ? pluginPanel(leaf, owner) : undefined;
+  },
+  panelIds: () => [...pluginPanels.keys()],
+  panelHeader: (id) => pluginPanels.get(id)?.bar?.plugins,
+  onPanelOpened: (fn) => void panelOpened.add(fn),
+  onPanelClosed: (fn) => void panelClosed.add(fn),
+  clearAlerts: (owner) => {
+    for (const leaf of pluginPanels.values()) setAlert(leaf, owner, false);
+  },
+  menu: pluginMenu,
+  claude: {
+    onEvent: (fn) => listenerSet(claudeEventListeners, fn),
+    onStatus(fn) {
+      for (const [panel, status] of lastStatus) fn(panel, status);
+      return listenerSet(claudeStatusListeners, fn);
+    },
+    session(panel) {
+      const c = pluginPanels.get(panel)?.claude;
+      return c && { state: c.state, session: c.session, folder: c.folder };
+    },
+    send(panel, command, busy) {
+      const leaf = pluginPanels.get(panel);
+      if (leaf) sendToClaude(leaf, command, busy);
+    },
+    hooks: {
+      state: () => invoke<"no-claude" | "missing" | "outdated" | "installed">("hooks_state"),
+      install: () => invoke<void>("hooks_install"),
+    },
   },
   onUserInput: (listener) => {
     userInputListeners.add(listener);
@@ -5779,6 +5434,10 @@ const plugins = createPluginHost({
     installed: T.pluginInstalled,
     notInstalledTitle: T.pluginNotInstalledTitle,
     notInstalled: T.pluginNotInstalled,
+    dependencyMissing: T.pluginDependencyMissing,
+    dependencyOff: T.pluginDependencyOff,
+    dependencyBroken: T.pluginDependencyBroken,
+    dependencyCycle: T.pluginDependencyCycle,
   },
 });
 
@@ -6191,49 +5850,6 @@ async function installHooks(): Promise<boolean> {
   }
 }
 
-/// The hooks are how TermIAu knows what each Claude is doing and which
-/// session it is. `request`: it came from the menu, and then every answer shows; at app
-/// launch only what needs a decision shows.
-async function checkHooks(request: boolean) {
-  const state = await invoke<string>("hooks_state").catch(() => "no-claude");
-
-  if (state === "no-claude") {
-    if (request) {
-      await ask("hooks", {
-        title: T.claudeNotFound,
-        text: T.claudeNotFoundText,
-        confirm: T.ok,
-      });
-    }
-    return;
-  }
-  if (state === "installed") {
-    if (request) {
-      await ask("hooks", {
-        title: T.alreadyOn,
-        text: T.alreadyOnText,
-        confirm: T.ok,
-      });
-    }
-    return;
-  }
-  // At launch only what was already installed is updated: whoever installed it already
-  // consented, and what changes is the hook that came with the new app. Installing
-  // for the first time is always a gesture of yours, in the menu.
-  if (!request) {
-    if (state === "outdated") await invoke("hooks_install").catch((e) => jlog(`hooks_install: ${e}`));
-    return;
-  }
-
-  if (await installHooks()) {
-    await ask("hooks", {
-      title: T.on,
-      text: T.onText,
-      confirm: T.ok,
-    });
-  }
-}
-
 /// TermIAu ▸ Restore Tabs on Open was just turned on or off. Turning it on
 /// brings the hooks along: without them the tabs come back, but without knowing which Claude
 /// session was in each panel.
@@ -6403,7 +6019,6 @@ async function wireEvents() {
   await listen("menu://new-tab", () => newTab());
   await listen("menu://reopen-tab", () => reopenClosed());
   await listen("menu://quit", () => askQuit());
-  await listen("menu://hooks", () => checkHooks(true));
   await listen<boolean>("menu://restore", (e) => restoreChanged(e.payload));
   // The red button and "Close Window" also quit the app: they go through the
   // same question. What really quits is `quit`, which doesn't ask to close the
@@ -6425,9 +6040,6 @@ async function wireEvents() {
   });
   await listen("menu://viewer", () => {
     if (active && !inDiff) toggleViewer(active.focus.owner ?? active.focus);
-  });
-  await listen("menu://compact", () => {
-    if (active && !inDiff) compact(active.focus);
   });
   await listen<number>("menu://message", (e) => {
     if (active && !inDiff) goToMessage(active.focus.owner ?? active.focus, e.payload);
@@ -6457,7 +6069,6 @@ async function openTabs() {
 }
 
 function afterTabs() {
-  void checkHooks(false);
 
   // Window resize: only the visible tab has a size to measure; the
   // others adjust when they show up again (see `activate`).
@@ -6479,4 +6090,3 @@ start({
   activatePlugins: () => void plugins.start(),
 });
 void wireDiffMode();
-void wireContextLimits();

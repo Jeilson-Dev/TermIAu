@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Manifest, SettingContribution } from "./api";
+import type { InstalledPlugin } from "./manifest";
 import {
+  activationOrder,
   compareVersions,
   displayKeybinding,
   localize,
@@ -86,22 +88,26 @@ describe("settings", () => {
     default: "pt",
   };
   const sound: SettingContribution = { key: "sound", title: "Sound", type: "boolean", default: true };
+  const limit: SettingContribution = { key: "limit", title: "Limit", type: "number", default: 60, min: 1, max: 100 };
 
   it("accepts enums and booleans", () => {
-    expect(settingProblems({ ...base, contributes: { configuration: [language, sound] } })).toEqual([]);
+    expect(settingProblems({ ...base, contributes: { configuration: [language, sound, limit] } })).toEqual([]);
+    expect(settingProblems({ ...base, contributes: { configuration: [{ ...limit, default: 200 }] } })).toEqual([
+      'setting "limit": the default isn\'t a number within min and max',
+    ]);
   });
 
   it("refuses a default that isn't an option, duplicates and unknown types", () => {
     const m = {
       ...base,
       contributes: {
-        configuration: [{ ...language, default: "fr" }, sound, sound, { key: "n", title: "N", type: "number", default: 1 }],
+        configuration: [{ ...language, default: "fr" }, sound, sound, { key: "n", title: "N", type: "color", default: "red" }],
       },
     } as unknown as Manifest;
     expect(settingProblems(m)).toEqual([
       'setting "language": the default isn\'t an option',
       'setting "sound" declared twice',
-      'setting "n": type "number" is not supported',
+      'setting "n": type "color" is not supported',
     ]);
   });
 
@@ -113,5 +119,47 @@ describe("settings", () => {
     expect(settingValue(language, "{")).toBe("pt");
     expect(settingValue(sound, "false")).toBe(false);
     expect(settingValue(sound, '"no"')).toBe(true);
+    // A number is kept whole and within its bounds.
+    expect(settingValue(limit, "75.4")).toBe(75);
+    expect(settingValue(limit, "500")).toBe(100);
+    expect(settingValue(limit, '"x"')).toBe(60);
+  });
+});
+
+describe("activationOrder", () => {
+  const texts = {
+    missing: (d: string) => `missing ${d}`,
+    off: (d: string) => `off ${d}`,
+    broken: (d: string) => `broken ${d}`,
+    cycle: "cycle",
+  };
+  const plugin = (id: string, dependencies: string[] = [], enabled = true): InstalledPlugin => ({
+    id,
+    enabled,
+    manifest: { ...base, id, name: id.toUpperCase(), dependencies },
+  });
+
+  it("puts each plugin after what it depends on", () => {
+    const { order, blocked } = activationOrder(
+      [plugin("a.usage", ["z.core"]), plugin("z.core"), plugin("b.context", ["z.core"])],
+      texts,
+    );
+    expect(order.map((p) => p.id)).toEqual(["z.core", "a.usage", "b.context"]);
+    expect(blocked).toEqual({});
+  });
+
+  it("blocks what depends on a plugin that is missing, off or blocked itself", () => {
+    const { order, blocked } = activationOrder(
+      [plugin("core", [], false), plugin("usage", ["core"]), plugin("extra", ["usage"]), plugin("lonely", ["nobody"])],
+      texts,
+    );
+    expect(order).toEqual([]);
+    expect(blocked).toEqual({ usage: "off CORE", extra: "broken USAGE", lonely: "missing nobody" });
+  });
+
+  it("refuses a cycle", () => {
+    const { order, blocked } = activationOrder([plugin("a", ["b"]), plugin("b", ["a"])], texts);
+    expect(order).toEqual([]);
+    expect(Object.keys(blocked).sort()).toEqual(["a", "b"]);
   });
 });

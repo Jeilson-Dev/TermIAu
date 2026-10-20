@@ -34,6 +34,9 @@ pub struct Entry {
     pub package: String,
     pub size: u64,
     pub sha256: String,
+    /// The plugins it needs, installed before it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<String>,
     /// Filled by the app from the package's signature, never read from the catalog:
     /// a catalog saying "verified" proves nothing.
     #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
@@ -91,9 +94,34 @@ pub fn read_package(dir: &Path, entry: &Entry) -> Result<Vec<u8>, String> {
     Ok(data)
 }
 
+/// Installs a catalog entry, and before it each dependency it lacks. A dependency
+/// already installed but turned off is turned on: installing what needs it says the
+/// user wants it.
 pub fn install_from(dir: &Path, base: &Path, id: &str) -> Result<Manifest, String> {
     let catalog = read_catalog(dir)?;
+    install_with_dependencies(dir, &catalog, base, id, &mut Vec::new())
+}
+
+fn install_with_dependencies(
+    dir: &Path,
+    catalog: &Catalog,
+    base: &Path,
+    id: &str,
+    seen: &mut Vec<String>,
+) -> Result<Manifest, String> {
+    seen.push(id.to_string());
     let entry = catalog.plugins.iter().find(|e| e.id == id).ok_or_else(|| format!("\"{id}\" isn't in the catalog"))?;
+    for dep in &entry.dependencies {
+        // A cycle in the catalog stops here instead of recursing forever.
+        if seen.contains(dep) {
+            continue;
+        }
+        if base.join(dep).join(plugins::MANIFEST).is_file() {
+            plugins::set_enabled_in(base, dep, true)?;
+            continue;
+        }
+        install_with_dependencies(dir, catalog, base, dep, seen).map_err(|e| format!("{dep}: {e}"))?;
+    }
     let data = read_package(dir, entry)?;
     let m = plugins::install_into(base, &data)?;
     if m.id != entry.id || m.version != entry.version {
@@ -180,6 +208,34 @@ mod tests {
         let m = install_from(cat.path(), home.path(), "termiau.radio").unwrap();
         assert_eq!(m.id, "termiau.radio");
         assert!(home.path().join("termiau.radio/main.js").is_file());
+    }
+
+    #[test]
+    fn installs_the_dependencies_first() {
+        let cat = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(cat.path().join("packages")).unwrap();
+        let mut entries = Vec::new();
+        for (id, deps) in [("termiau.claude-usage", vec!["termiau.claude"]), ("termiau.claude", vec![])] {
+            let m = serde_json::json!({ "id": id, "name": id, "version": "1.0.0", "main": "main.js", "dependencies": deps });
+            let data = package(&m.to_string());
+            std::fs::write(cat.path().join(format!("packages/{id}.termiau")), &data).unwrap();
+            entries.push(serde_json::json!({
+                "id": id, "name": id, "version": "1.0.0", "package": format!("packages/{id}.termiau"),
+                "size": data.len(), "sha256": Sha256::digest(&data).iter().map(|b| format!("{b:02x}")).collect::<String>(),
+                "dependencies": deps,
+            }));
+        }
+        std::fs::write(cat.path().join("index.json"), serde_json::json!({ "version": 1, "plugins": entries }).to_string()).unwrap();
+
+        install_from(cat.path(), home.path(), "termiau.claude-usage").unwrap();
+        assert!(home.path().join("termiau.claude/main.js").is_file(), "the dependency came along");
+        assert!(home.path().join("termiau.claude-usage/main.js").is_file());
+
+        // Already there but off: it is turned back on.
+        plugins::set_enabled_in(home.path(), "termiau.claude", false).unwrap();
+        install_from(cat.path(), home.path(), "termiau.claude-usage").unwrap();
+        assert!(plugins::list_in(home.path()).iter().all(|p| p.enabled));
     }
 
     #[test]

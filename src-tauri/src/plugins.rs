@@ -101,6 +101,10 @@ pub struct Manifest {
     /// Where its binaries run, e.g. `darwin-arm64`. Empty means anywhere.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub platforms: Vec<String>,
+    /// Plugins this one needs, by id: activated before it, and installed with it from
+    /// the marketplace (see marketplace.rs).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<String>,
 }
 
 /// One folder under `plugins/`. A broken one is still listed, with the reason,
@@ -182,6 +186,11 @@ fn validate(m: &Manifest) -> Result<(), String> {
         }
         if !safe_relative(path) {
             return Err(format!("invalid binary path \"{path}\""));
+        }
+    }
+    for d in &m.dependencies {
+        if !valid_id(d) || *d == m.id {
+            return Err(format!("invalid dependency \"{d}\""));
         }
     }
     for c in &m.contributes.commands {

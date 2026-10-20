@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { language } from "../../i18n";
 import type { SettingContribution, SettingValue } from "../../plugins/api";
-import { localize, settingStorageKey, settingValue } from "../../plugins/manifest";
+import { clampSetting, localize, settingStorageKey, settingValue } from "../../plugins/manifest";
 
 /// The settings a plugin declares (`contributes.configuration`), as fields under its
 /// row in the Plugins tab. The value goes to localStorage; the main window, where
@@ -41,6 +41,16 @@ export function PluginSettings({ plugin, settings }: { plugin: string; settings:
               <input type="checkbox" checked={values[s.key] === true} onChange={(e) => save(s.key, e.target.checked)} />
               {localize(s.title, lang)}
             </span>
+          ) : s.type === "number" ? (
+            <>
+              <span className="plugin-setting-name">{localize(s.title, lang)}</span>
+              <NumberField
+                value={Number(values[s.key])}
+                min={s.min}
+                max={s.max}
+                onCommit={(n) => save(s.key, n)}
+              />
+            </>
           ) : (
             <>
               <span className="plugin-setting-name">{localize(s.title, lang)}</span>
@@ -57,5 +67,32 @@ export function PluginSettings({ plugin, settings }: { plugin: string; settings:
         </label>
       ))}
     </div>
+  );
+}
+
+/// A number saved when you leave the field or press Enter, not on every key: typing
+/// "8" on the way to "80" in a field with a minimum of 50 would jump to 50.
+function NumberField({ value, min, max, onCommit }: { value: number; min?: number; max?: number; onCommit(n: number): void }) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+  const commit = () => {
+    const n = Number(draft);
+    if (draft.trim() === "" || !Number.isFinite(n)) return setDraft(String(value));
+    // Shown clamped right away: when the clamped value is the one already saved,
+    // nothing changes upstream to redraw the field.
+    const clamped = clampSetting({ min, max }, n);
+    setDraft(String(clamped));
+    onCommit(clamped);
+  };
+  return (
+    <input
+      type="number"
+      value={draft}
+      min={min}
+      max={max}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === "Enter" && commit()}
+    />
   );
 }

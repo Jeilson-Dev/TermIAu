@@ -1,0 +1,26 @@
+/* The Claude model plugin's chips, in each panel's header, after the context. `.task-btn`
+   and the colors are the app's own: the plugin's stylesheet loads into the main window. */
+
+/* Model and effort, right after the context: the same box, without the bar
+   filling. The click opens the list to change them. */
+.task-btn.task-claude-option {
+  flex: none;
+  height: 16px;
+  margin-left: 4px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--bg-lighter);
+  color: var(--fg);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.task-btn.task-claude-option:hover {
+  box-shadow: inset 0 0 0 1px var(--purple);
+}
+
+.task-claude-option[hidden] {
+  display: none;
+}

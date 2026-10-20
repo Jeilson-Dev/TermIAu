@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- The Claude context plugin's icon: the panel's context pill, filling from purple
+       through yellow to red, on the same dark tile as the other plugins. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#343746"/>
+      <stop offset="1" stop-color="#21222c"/>
+    </linearGradient>
+    <linearGradient id="fill" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#bd93f9"/>
+      <stop offset=".6" stop-color="#f1fa8c"/>
+      <stop offset="1" stop-color="#ff5555"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <rect x="18" y="48" width="92" height="32" rx="8" fill="#44475a"/>
+  <rect x="18" y="48" width="68" height="32" rx="8" fill="url(#fill)" opacity=".85"/>
+  <rect x="18" y="48" width="92" height="32" rx="8" fill="none" stroke="#6272a4" stroke-width="3"/>
+</svg>

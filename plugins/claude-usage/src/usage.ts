@@ -1,8 +1,7 @@
-/// The math for Claude's usage in the footer, without DOM — so it can be tested, like
-/// `viewer.ts`. The numbers come from Claude Code's status line, which the hook sends
-/// to the app (see the start of hooks/termiau-event.sh).
-
-import { T } from "./i18n/terminal";
+/// The math for Claude's usage in the footer, without DOM — so it can be tested. The
+/// numbers come from Claude Code's status line, through the Claude Code plugin
+/// (`ClaudeApi.onRateLimits`).
+import type { RateLimits } from "../../claude/src/api";
 
 export type UsageWindow = { usage: number; renews: string | null };
 export type Usage = { session: UsageWindow | null; week: UsageWindow | null };
@@ -41,11 +40,12 @@ export function usageLevel(usage: number): Level {
 }
 
 /// "1h53", "42min", "3d4h": how long until it renews, short enough to fit in the footer.
-export function missingFor(renews: string | null, now = Date.now()): string {
+/// `nowText` is what an already renewed window says.
+export function missingFor(renews: string | null, nowText: string, now = Date.now()): string {
   if (!renews) return "";
   const ms = new Date(renews).getTime() - now;
   if (Number.isNaN(ms)) return "";
-  if (ms <= 0) return T.now;
+  if (ms <= 0) return nowText;
   const min = Math.floor(ms / 60_000);
   const h = Math.floor(min / 60);
   if (h >= 24) return `${Math.floor(h / 24)}d${h % 24}h`;
@@ -55,10 +55,7 @@ export function missingFor(renews: string | null, now = Date.now()): string {
 
 /// The part of Claude Code's status line with the limits: the percentage used
 /// of each window and when it renews, in seconds since 1970.
-export type StatusLineLimits = {
-  five_hour?: { used_percentage?: number; resets_at?: number } | null;
-  seven_day?: { used_percentage?: number; resets_at?: number } | null;
-};
+export type StatusLineLimits = RateLimits;
 
 function statusLineWindow(j: { used_percentage?: number; resets_at?: number } | null | undefined): UsageWindow | null {
   if (!j || typeof j.used_percentage !== "number") return null;
@@ -82,32 +79,4 @@ export function statusLineUsage(l: StatusLineLimits | null | undefined): Usage |
 export function windowNow(j: UsageWindow | null, now = Date.now()): UsageWindow | null {
   if (!j?.renews) return j;
   return new Date(j.renews).getTime() <= now ? { usage: 0, renews: null } : j;
-}
-
-/// The session's context limits, in Preferences: yellow from the
-/// first, red (and the panel outlined, pulsing) from the second.
-export type ContextLimits = { attention: number; danger: number; autoCompact: boolean; autoCompactAt: number };
-export const CONTEXT_LIMITS: ContextLimits = { attention: 60, danger: 75, autoCompact: false, autoCompactAt: 76 };
-
-const validLimit = (n: number | undefined, fallback: number) =>
-  typeof n === "number" && n >= 1 && n <= 100 ? n : fallback;
-
-/// The level of context used. A limit outside 1 to 100 (the field cleared, a
-/// half-typed number) gets the default; red beats yellow
-/// when the two cross.
-export function contextLevel(pct: number, limits: Partial<ContextLimits> = {}): Level {
-  const danger = validLimit(limits.danger, CONTEXT_LIMITS.danger);
-  const attention = validLimit(limits.attention, CONTEXT_LIMITS.attention);
-  if (pct >= danger) return "danger";
-  if (pct >= attention) return "attention";
-  return "";
-}
-
-/// From how much auto-compact fires, or `null` when it is off. The
-/// limit must exceed red: one that doesn't gets red plus one.
-export function autoCompactLimit(limits: Partial<ContextLimits> = {}): number | null {
-  if (!limits.autoCompact) return null;
-  const danger = validLimit(limits.danger, CONTEXT_LIMITS.danger);
-  const at = validLimit(limits.autoCompactAt, CONTEXT_LIMITS.autoCompactAt);
-  return Math.min(100, Math.max(at, danger + 1));
 }

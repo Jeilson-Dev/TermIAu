@@ -14,6 +14,10 @@
     "app:install": "./scripts/install.sh prod",
     "plugin:radio": "./scripts/package-plugin.sh radio",
     "plugin:dictation": "./scripts/package-plugin.sh dictation",
+    "plugin:claude": "./scripts/package-plugin.sh claude",
+    "plugin:claude-context": "./scripts/package-plugin.sh claude-context",
+    "plugin:claude-usage": "./scripts/package-plugin.sh claude-usage",
+    "plugin:claude-model": "./scripts/package-plugin.sh claude-model",
     "marketplace": "node scripts/build-marketplace.mjs",
     "test": "vitest run"
   },

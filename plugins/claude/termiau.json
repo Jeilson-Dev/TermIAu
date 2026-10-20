@@ -1,0 +1,20 @@
+{
+  "id": "termiau.claude",
+  "name": "Claude Code",
+  "version": "1.0.0",
+  "author": "TermIAu",
+  "description": "Connects TermIAu to Claude Code: installs the hook and follows each panel's session, for the Claude plugins that show it.",
+  "engines": { "termiau": ">=0.1.0" },
+  "main": "main.js",
+  "icon": "icon.svg",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [
+      {
+        "id": "connect",
+        "title": { "en": "Connect to Claude Code…", "pt": "Ligar ao Claude Code…" },
+        "menu": { "en": "Claude Code", "pt": "Claude Code" }
+      }
+    ]
+  }
+}

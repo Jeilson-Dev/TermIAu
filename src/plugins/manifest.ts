@@ -35,7 +35,7 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-export const SUPPORTED_REGIONS: readonly RegionName[] = ["statusBar"];
+export const SUPPORTED_REGIONS: readonly RegionName[] = ["statusBar", "panelHeader"];
 
 export function localize(text: Localized, language: Language): string {
   if (typeof text === "string") return text;
@@ -68,6 +68,9 @@ export function settingProblems(m: Manifest): string[] {
       else if (!s.options.some((o) => o.value === s.default)) problems.push(`setting "${s.key}": the default isn't an option`);
     } else if (s.type === "boolean") {
       if (typeof (s.default as unknown) !== "boolean") problems.push(`setting "${s.key}": the default isn't true or false`);
+    } else if (s.type === "number") {
+      if (!Number.isFinite(s.default) || s.default !== clampSetting(s, s.default))
+        problems.push(`setting "${s.key}": the default isn't a number within min and max`);
     } else {
       const other = s as unknown as { key: string; type: string };
       problems.push(`setting "${other.key}": type "${other.type}" is not supported`);
@@ -88,10 +91,55 @@ export function settingValue(s: SettingContribution, stored: string | null): Set
   try {
     const v: unknown = JSON.parse(stored);
     if (s.type === "boolean") return typeof v === "boolean" ? v : s.default;
+    if (s.type === "number") return typeof v === "number" && Number.isFinite(v) ? clampSetting(s, v) : s.default;
     return typeof v === "string" && s.options.some((o) => o.value === v) ? v : s.default;
   } catch {
     return s.default;
   }
+}
+
+/// A number setting's value, whole and within its `min` and `max`.
+export function clampSetting(s: { min?: number; max?: number }, v: number): number {
+  return Math.min(s.max ?? Infinity, Math.max(s.min ?? -Infinity, Math.round(v)));
+}
+
+/// The order to activate the enabled plugins in — each after its dependencies — and,
+/// for the ones that can't run, why: a dependency that isn't installed, is off, or
+/// can't run itself, or a cycle. `names` turns an id into what the user reads.
+export function activationOrder(
+  plugins: InstalledPlugin[],
+  texts: { missing(dep: string): string; off(dep: string): string; broken(dep: string): string; cycle: string },
+): { order: InstalledPlugin[]; blocked: Record<string, string> } {
+  const byId = new Map(plugins.map((p) => [p.id, p]));
+  const name = (id: string) => byId.get(id)?.manifest?.name ?? id;
+  const order: InstalledPlugin[] = [];
+  const blocked: Record<string, string> = {};
+  const state = new Map<string, "visiting" | "done">();
+
+  /// True when `id` can run (and is then in `order`).
+  function visit(id: string): boolean {
+    const p = byId.get(id)!;
+    if (state.get(id) === "done") return !(id in blocked);
+    if (state.get(id) === "visiting") {
+      blocked[id] = texts.cycle;
+      return false;
+    }
+    state.set(id, "visiting");
+    for (const dep of p.manifest?.dependencies ?? []) {
+      const d = byId.get(dep);
+      const why = !d || !d.manifest ? texts.missing(name(dep)) : !d.enabled ? texts.off(name(dep)) : !visit(dep) ? texts.broken(name(dep)) : "";
+      if (why && !(id in blocked)) blocked[id] = why;
+    }
+    state.set(id, "done");
+    if (id in blocked) return false;
+    order.push(p);
+    return true;
+  }
+
+  for (const p of [...plugins].sort((a, b) => a.id.localeCompare(b.id))) {
+    if (p.enabled && p.manifest) visit(p.id);
+  }
+  return { order, blocked };
 }
 
 export type StatusBarEntry = { plugin: string; region: RegionContribution };

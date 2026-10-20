@@ -68,10 +68,12 @@ The artifacts land in `src-tauri/target/release/bundle/`.
 ## Turning on the Claude notices
 
 The tabs show where each Claude Code session stands — working, waiting for
-you —, the panel bar shows the session's context and the footer the usage of
-the 5h and 7-day limits. All of this only arrives through the app's socket, and
-what writes there is a hook, which has to be registered in Claude Code's
-`settings.json`. From the app, it's **TermIAu ▸ Connect to Claude Code…**; from the repo:
+you —, and the Claude plugins (below) show the session's context, model and
+effort on the panel bar and the usage of the 5h and 7-day limits in the footer.
+All of this only arrives through the app's socket, and what writes there is a
+hook, which has to be registered in Claude Code's `settings.json`. From the app,
+it's **Claude Code ▸ Connect to Claude Code…** (the Claude Code plugin's menu), or
+turning on **TermIAu ▸ Restore Tabs on Launch**; from the repo:
 
 ```bash
 ./hooks/install.sh
@@ -108,6 +110,26 @@ Code); inside it the line stays empty, because the app already shows everything.
 Without the hook installed the app starts normally, just silent: the tabs show
 no Claude state, the bar shows no context, the footer shows no usage and the
 Dock badge stays empty.
+
+### The Claude plugins
+
+What shows Claude's state beyond the tabs comes in small plugins, all in the
+marketplace, which depend on one core:
+
+- **Claude Code** (`termiau.claude`) — the link: installs and updates the hook,
+  follows each panel's session from the hook's events and status lines, and gives
+  that to the others through its API. It draws nothing; the app lends Claude's raw
+  events only to it, signed by TermIAu.
+- **Claude Context** (`termiau.claude-context`) — the pill with the session's
+  context on each panel's bar: yellow, then red with the panel's border pulsing;
+  click or `⌘⇧K` compacts, and auto-compact can do it on its own. The limits are its
+  settings (Preferences ▸ Plugins).
+- **Claude Usage** (`termiau.claude-usage`) — the 5-hour session and the week in
+  the footer's left corner, with the time left and the pace.
+- **Claude Model** (`termiau.claude-model`) — the session's model and effort on
+  each panel's bar, one click from `/model` and `/effort`.
+
+Installing any of the three brings Claude Code along.
 
 ## Plugins
 
@@ -146,9 +168,20 @@ serves the plugin's files over `termiau-plugin://`.
 
 A plugin can also declare **settings** (`contributes.configuration`, like VS Code's):
 each one a `key`, a localized `title` and `description`, and a `type` — `enum` (with
-`options`) or `boolean` — with a `default`. The Plugins tab draws them under the
+`options`), `boolean` or `number` (with `min` and `max`) — with a `default`. The Plugins tab draws them under the
 plugin, and the plugin reads them with `ctx.settings.get(key)` and hears changes with
 `ctx.settings.onChange`. Dictation uses one for the spoken language.
+
+The regions so far are the footer (`statusBar`, at the left corner with `"alignment":
+"start"`, after the task pills with `"left"`, or against the right end) and
+`panelHeader`, a slot on the bar of every terminal panel — the plugin's
+`ctx.regions.panelHeader(id, (panel, el) => …)` draws it in each one, the open ones
+and the ones opened later.
+
+A plugin can **depend** on others (`"dependencies": ["termiau.claude"]`): they are
+activated before it, what their `activate` returns is their API
+(`ctx.plugins.api(id)`), and the marketplace installs them along with it. When one
+is missing or off, the plugin doesn't load and the Plugins tab says why.
 
 A plugin runs inside the app's webview, with the app's access: installing one is
 trusting it. What the app does guarantee is that a broken one doesn't take it
@@ -214,6 +247,7 @@ builds the package, and the Plugins tab installs it.
 | `⌘⇧V` | Paste the **path** of the file on the clipboard |
 | `⌘E` | Turn listening on and off (with the Dictation plugin) |
 | `⌘⇧P` | Play or pause the radio (with the Radio plugin) |
+| `⌘⇧K` | Compact the Claude conversation (with the Claude Context plugin) |
 
 Everything else goes straight to the shell. `⌥` composes characters as in the rest
 of macOS — `⌥C` gives `ç`, `⌥E`+`E` gives `é` —, so it doesn't work as Meta: `⌥F`
@@ -300,16 +334,15 @@ Events in the other direction: `pty://data` (output in base64) and `pty://exit`.
 **Claude Code** (through the hook)
 - Each tab shows its Claude session's state — working, waiting for you —, the Dock
   badge counts the ones waiting, and `⌘⇧A` jumps to the panel that's waiting
-- Panel bar with the session's context, model and effort: click to compact
-  (`⌘⇧K`), switch model or switch effort
-- Context turns yellow, then red with a pulsing border, and auto-compact can kick in
-  on its own — thresholds in Preferences (`⌘,`)
-- Footer with the usage of the 5-hour and 7-day limits
+- With the Claude plugins: the session's context, model and effort on the panel bar —
+  click to compact (`⌘⇧K`), switch model or switch effort —, the context turning
+  yellow, then red with a pulsing border, auto-compact, and the usage of the 5-hour
+  and 7-day limits in the footer
 - Chat mode (`⌘⇧C`): the conversation read from the transcript, with Claude's
   questions and permission requests answered by click, `/` commands, pasted images,
   resuming earlier sessions and each edit's diff
 - Jump to your previous / next message in the terminal (`⌘⇧↑` / `⌘⇧↓`)
-- Set up from the menu: **TermIAu ▸ Connect to Claude Code…**
+- Set up from the menu: **Claude Code ▸ Connect to Claude Code…** (Claude Code plugin)
 
 **File viewer**
 - Opens a file beside, below or over the terminal (`⌘⇧O`), with Markdown rendered or
@@ -423,10 +456,12 @@ Os artefatos saem em `src-tauri/target/release/bundle/`.
 ## Ligando os avisos do Claude
 
 As abas mostram em que pé está cada sessão do Claude Code — trabalhando,
-esperando você —, a barra do painel mostra o contexto da sessão e o rodapé, o
-uso dos limites de 5h e de 7 dias. Tudo isso só chega pelo socket do app, e
-quem escreve ali é um hook, que precisa estar registrado no `settings.json` do
-Claude Code. Pelo app, é **TermIAu ▸ Ligar ao Claude Code…**; pelo repo:
+esperando você —, e os plugins do Claude (abaixo) mostram o contexto, o modelo e o
+esforço da sessão na barra do painel e o uso dos limites de 5h e de 7 dias no
+rodapé. Tudo isso só chega pelo socket do app, e quem escreve ali é um hook, que
+precisa estar registrado no `settings.json` do Claude Code. Pelo app, é
+**Claude Code ▸ Ligar ao Claude Code…** (o menu do plugin Claude Code), ou ligar
+**TermIAu ▸ Restaurar Abas ao Abrir**; pelo repo:
 
 ```bash
 ./hooks/install.sh
@@ -464,6 +499,26 @@ Sem o hook instalado o app sobe normal, só calado: as abas não mostram estado
 do Claude, a barra não mostra o contexto, o rodapé não mostra o uso e o badge
 do Dock fica vazio.
 
+### Os plugins do Claude
+
+O que mostra o estado do Claude além das abas vem em plugins pequenos, todos no
+marketplace, que dependem de um núcleo:
+
+- **Claude Code** (`termiau.claude`) — a ligação: instala e atualiza o hook,
+  acompanha a sessão de cada painel pelos eventos e pela status line, e passa isso
+  aos outros pela API dele. Não desenha nada; o app só empresta os eventos crus do
+  Claude a ele, assinado pelo TermIAu.
+- **Claude Context** (`termiau.claude-context`) — a pílula com o contexto da sessão
+  na barra de cada painel: amarela, depois vermelha com a borda do painel pulsando;
+  clicar ou `⌘⇧K` compacta, e o auto-compact pode ir sozinho. Os limites são as
+  configurações dele (Preferências ▸ Plugins).
+- **Claude Usage** (`termiau.claude-usage`) — a sessão de 5 horas e a semana no canto
+  esquerdo do rodapé, com o tempo restante e o ritmo.
+- **Claude Model** (`termiau.claude-model`) — o modelo e o esforço da sessão na barra
+  de cada painel, a um clique do `/model` e do `/effort`.
+
+Instalar qualquer um dos três traz o Claude Code junto.
+
 ## Plugins
 
 O TermIAu aceita plugins, no molde das extensões do VS Code mas organizados por
@@ -485,6 +540,24 @@ diálogo e o letreiro do app, e o idioma — veja
 menus com o atalho do comando, e o `icon` é o que a aba Plugins mostra (plugin sem
 ícone ganha o ícone padrão de plugin). Quem monta o menu é o Rust (`src-tauri/src/plugins.rs`), que
 também serve os arquivos do plugin por `termiau-plugin://`.
+
+Um plugin também pode declarar **configurações** (`contributes.configuration`, como
+no VS Code): cada uma com `key`, `title` e `description` traduzidos e um `type` —
+`enum` (com `options`), `boolean` ou `number` (com `min` e `max`) — com um `default`.
+A aba Plugins desenha os campos embaixo do plugin, e o plugin lê com
+`ctx.settings.get(key)` e ouve as mudanças com `ctx.settings.onChange`. A escuta usa
+uma para o idioma falado.
+
+As regiões até aqui são o rodapé (`statusBar`, no canto esquerdo com `"alignment":
+"start"`, depois das pílulas de tarefa com `"left"`, ou encostado na direita) e
+`panelHeader`, um lugar na barra de cada painel de terminal — o
+`ctx.regions.panelHeader(id, (panel, el) => …)` do plugin desenha em cada um, nos
+abertos e nos que abrirem depois.
+
+Um plugin pode **depender** de outros (`"dependencies": ["termiau.claude"]`): eles
+ativam antes, o que o `activate` deles devolve é a API deles (`ctx.plugins.api(id)`),
+e o marketplace instala junto. Se um falta ou está desligado, o plugin não carrega e
+a aba Plugins diz por quê.
 
 O plugin roda dentro da webview do app, com o acesso do app: instalar é confiar. O
 que o app garante é que um plugin quebrado não o derruba — o erro aparece na aba
@@ -550,6 +623,7 @@ gera o pacote, e a aba Plugins instala.
 | `⌘⇧V` | Cola o **caminho** do arquivo que está na área de transferência |
 | `⌘E` | Liga e desliga a escuta (com o plugin Escuta) |
 | `⌘⇧P` | Toca ou pausa a rádio (com o plugin Rádio) |
+| `⌘⇧K` | Compacta a conversa do Claude (com o plugin Claude Context) |
 
 Todo o resto vai direto para o shell. `⌥` compõe caractere como no resto do
 macOS — `⌥C` dá `ç`, `⌥E`+`E` dá `é` —, então não serve de Meta: `⌥F` e `⌥B`
@@ -637,16 +711,15 @@ Eventos na direção contrária: `pty://data` (saída em base64) e `pty://exit`.
 **Claude Code** (pelo hook)
 - Cada aba mostra o estado da sessão do Claude — trabalhando, esperando você —, o
   badge do Dock conta as que esperam e `⌘⇧A` leva ao painel que espera
-- Barra do painel com o contexto, o modelo e o esforço da sessão: clique para
-  compactar (`⌘⇧K`), trocar o modelo ou trocar o esforço
-- O contexto fica amarelo, depois vermelho com a borda pulsando, e o auto-compact pode
-  ir sozinho — os limites ficam nas Preferências (`⌘,`)
-- Rodapé com o uso dos limites de 5 horas e de 7 dias
+- Com os plugins do Claude: o contexto, o modelo e o esforço da sessão na barra do
+  painel — clique para compactar (`⌘⇧K`), trocar o modelo ou trocar o esforço —, o
+  contexto ficando amarelo, depois vermelho com a borda pulsando, o auto-compact, e o
+  uso dos limites de 5 horas e de 7 dias no rodapé
 - Modo chat (`⌘⇧C`): a conversa lida do transcript, com as perguntas e os pedidos de
   permissão do Claude respondidos num clique, comandos `/`, imagens coladas, retomada
   de sessões anteriores e o diff de cada edição
 - Ir para a sua mensagem anterior / seguinte no terminal (`⌘⇧↑` / `⌘⇧↓`)
-- Instalação pelo menu: **TermIAu ▸ Ligar ao Claude Code…**
+- Instalação pelo menu: **Claude Code ▸ Ligar ao Claude Code…** (plugin Claude Code)
 
 **Visor de arquivos**
 - Abre um arquivo ao lado, abaixo ou por cima do terminal (`⌘⇧O`), com Markdown

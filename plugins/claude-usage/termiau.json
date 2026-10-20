@@ -1,0 +1,16 @@
+{
+  "id": "termiau.claude-usage",
+  "name": "Claude Usage",
+  "version": "1.0.0",
+  "author": "TermIAu",
+  "description": "Your Claude account's usage in the footer: the 5-hour session and the week, with the time left and the pace.",
+  "engines": { "termiau": ">=0.1.0" },
+  "main": "main.js",
+  "style": "style.css",
+  "icon": "icon.svg",
+  "activationEvents": ["onStartupFinished"],
+  "dependencies": ["termiau.claude"],
+  "contributes": {
+    "regions": [{ "region": "statusBar", "id": "usage", "alignment": "start", "priority": 100 }]
+  }
+}

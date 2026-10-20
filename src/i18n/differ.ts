@@ -63,15 +63,6 @@ const pt = {
     { code: "{file}" },
     ", o caminho vai no fim. Vazio abre no VS Code.",
   ] as Snippet[],
-  contextOfSession: "Contexto da sessão",
-  yellowFrom: "Amarelo a partir de",
-  redFrom: "Vermelho a partir de",
-  autoCompactFrom: "Auto-compact a partir de",
-  contextHelp: [
-    "Quanto do contexto a conversa do Claude já usou, na pílula da barra de cada painel. No vermelho o painel inteiro ganha uma borda vermelha pulsando: é hora de compactar. Com o auto-compact ligado, o ",
-    { code: "/compact" },
-    " vai sozinho quando o contexto chega no limite e o Claude está parado. O limite tem de passar do vermelho; abaixo dele, vale o vermelho mais um.",
-  ] as Snippet[],
 
   // preferences: the plugins tab
   prefsTabTermiau: "TermIAu",
@@ -96,6 +87,7 @@ const pt = {
   marketplaceSearch: "Buscar plugins",
   marketplaceCount: (n: number) => (n === 1 ? "1 plugin" : `${n} plugins`),
   marketplaceBy: (author: string) => `por ${author}`,
+  marketplaceRequires: (names: string) => `Precisa de ${names} — vem junto na instalação.`,
   marketplaceInstall: "Instalar",
   marketplaceUpdate: (version: string) => `Atualizar para ${version}`,
   marketplaceInstalled: "Instalado",
@@ -425,15 +417,6 @@ const en: typeof pt = {
     { code: "{file}" },
     ", the path goes at the end. Empty opens VS Code.",
   ],
-  contextOfSession: "Session context",
-  yellowFrom: "Yellow from",
-  redFrom: "Red from",
-  autoCompactFrom: "Auto-compact from",
-  contextHelp: [
-    "How much of the context Claude's conversation has used, shown in the pill on each panel's bar. On red, the whole panel gets a pulsing red border: time to compact. With auto-compact on, ",
-    { code: "/compact" },
-    " is sent on its own when the context reaches the limit and Claude is idle. The limit must be above red; below it, red plus one is used.",
-  ],
 
   // preferences: the plugins tab
   prefsTabTermiau: "TermIAu",
@@ -458,6 +441,7 @@ const en: typeof pt = {
   marketplaceSearch: "Search plugins",
   marketplaceCount: (n) => (n === 1 ? "1 plugin" : `${n} plugins`),
   marketplaceBy: (author) => `by ${author}`,
+  marketplaceRequires: (names) => `Requires ${names} — installed along with it.`,
   marketplaceInstall: "Install",
   marketplaceUpdate: (version) => `Update to ${version}`,
   marketplaceInstalled: "Installed",

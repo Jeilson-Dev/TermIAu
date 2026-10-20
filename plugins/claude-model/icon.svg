@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- The Claude model plugin's icon: the two header chips, model and effort, with
+       the effort's level as rising bars, on the same dark tile as the other plugins. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#343746"/>
+      <stop offset="1" stop-color="#21222c"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <rect x="16" y="30" width="96" height="28" rx="7" fill="#44475a" stroke="#bd93f9" stroke-width="3"/>
+  <path d="M30 44 H74" stroke="#f8f8f2" stroke-width="6" stroke-linecap="round"/>
+  <rect x="16" y="70" width="96" height="28" rx="7" fill="#44475a"/>
+  <g fill="#d97757">
+    <rect x="30" y="86" width="8" height="6" rx="2"/>
+    <rect x="44" y="81" width="8" height="11" rx="2"/>
+    <rect x="58" y="76" width="8" height="16" rx="2"/>
+  </g>
+</svg>

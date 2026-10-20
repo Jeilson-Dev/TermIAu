@@ -14,14 +14,6 @@ export interface Settings {
    * your shell. Empty means VS Code, through `vscode://`, which doesn't depend on `code` being on PATH.
    */
   editor: string;
-  /** The Claude session's context, in %: the pill turns yellow from this one. */
-  contextAttention: number;
-  /** And red from this one, with the panel outlined in pulsing red. */
-  contextDanger: number;
-  /** Sends `/compact` on its own when the context reaches `autoCompactAt`. Off by default. */
-  autoCompact: boolean;
-  /** The auto-compact %. Must exceed red: below it, red plus one applies. */
-  autoCompactAt: number;
 }
 
 export interface RepoConfig {
@@ -50,10 +42,6 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultTarget: "",
   scope: "branch",
   editor: "",
-  contextAttention: 60,
-  contextDanger: 75,
-  autoCompact: false,
-  autoCompactAt: 76,
 };
 
 let store: Promise<Store> | null = null;

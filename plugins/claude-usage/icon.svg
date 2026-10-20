@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- The Claude usage plugin's icon: the footer's clock — the session's circle,
+       mostly lit, with its hands — on the same dark tile as the other plugins. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#343746"/>
+      <stop offset="1" stop-color="#21222c"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <circle cx="64" cy="64" r="36" fill="none" stroke="#6272a4" stroke-width="9" opacity=".45"/>
+  <circle cx="64" cy="64" r="36" fill="none" stroke="#bd93f9" stroke-width="9" stroke-linecap="round"
+          stroke-dasharray="158 226" transform="rotate(-90 64 64)"/>
+  <path d="M64 64 V42 M64 64 L80 72" stroke="#f8f8f2" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="64" cy="64" r="5" fill="#f8f8f2"/>
+</svg>

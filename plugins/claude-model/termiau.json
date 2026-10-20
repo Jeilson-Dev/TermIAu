@@ -1,0 +1,16 @@
+{
+  "id": "termiau.claude-model",
+  "name": "Claude Model",
+  "version": "1.0.0",
+  "author": "TermIAu",
+  "description": "The session's model and effort on each Claude panel, one click away from /model and /effort.",
+  "engines": { "termiau": ">=0.1.0" },
+  "main": "main.js",
+  "style": "style.css",
+  "icon": "icon.svg",
+  "activationEvents": ["onStartupFinished"],
+  "dependencies": ["termiau.claude"],
+  "contributes": {
+    "regions": [{ "region": "panelHeader", "id": "model", "priority": 90 }]
+  }
+}

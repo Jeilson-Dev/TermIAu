@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- The Claude Code plugin's icon: Claude's orange spark on the same dark tile as
+       the other TermIAu plugins, with a plug's two prongs below — it is the link. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#343746"/>
+      <stop offset="1" stop-color="#21222c"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <g transform="translate(64 54)" stroke="#d97757" stroke-width="9" stroke-linecap="round">
+    <path d="M0 -30 V30 M-30 0 H30 M-21 -21 L21 21 M-21 21 L21 -21"/>
+  </g>
+  <path d="M52 96 V108 M76 96 V108" stroke="#bd93f9" stroke-width="6" stroke-linecap="round"/>
+</svg>

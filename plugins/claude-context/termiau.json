@@ -1,0 +1,68 @@
+{
+  "id": "termiau.claude-context",
+  "name": "Claude Context",
+  "version": "1.0.0",
+  "author": "TermIAu",
+  "description": "How much of Claude's context each session has used, as a pill on its panel — yellow, then red with the panel outlined — and /compact on its own when it gets full.",
+  "engines": { "termiau": ">=0.1.0" },
+  "main": "main.js",
+  "style": "style.css",
+  "icon": "icon.svg",
+  "activationEvents": ["onStartupFinished"],
+  "dependencies": ["termiau.claude"],
+  "contributes": {
+    "regions": [{ "region": "panelHeader", "id": "context", "priority": 100 }],
+    "commands": [
+      {
+        "id": "compact",
+        "title": { "en": "Compact Claude Conversation", "pt": "Compactar a Conversa do Claude" },
+        "keybinding": "CmdOrCtrl+Shift+K",
+        "menu": { "en": "Claude Code", "pt": "Claude Code" }
+      }
+    ],
+    "configuration": [
+      {
+        "key": "attention",
+        "title": { "en": "Yellow from (%)", "pt": "Amarelo a partir de (%)" },
+        "type": "number",
+        "default": 60,
+        "min": 1,
+        "max": 100
+      },
+      {
+        "key": "danger",
+        "title": { "en": "Red from (%)", "pt": "Vermelho a partir de (%)" },
+        "description": {
+          "en": "In the red the whole panel gets a pulsing red border: time to compact.",
+          "pt": "No vermelho o painel inteiro ganha uma borda vermelha pulsando: é hora de compactar."
+        },
+        "type": "number",
+        "default": 75,
+        "min": 1,
+        "max": 100
+      },
+      {
+        "key": "autoCompact",
+        "title": { "en": "Compact on its own", "pt": "Compactar sozinho" },
+        "description": {
+          "en": "Sends /compact when the context reaches the limit below and Claude is idle.",
+          "pt": "Manda o /compact quando o contexto chega no limite abaixo e o Claude está parado."
+        },
+        "type": "boolean",
+        "default": false
+      },
+      {
+        "key": "autoCompactAt",
+        "title": { "en": "Compact from (%)", "pt": "Compactar a partir de (%)" },
+        "description": {
+          "en": "It has to be past the red; below it, red plus one applies.",
+          "pt": "Tem de passar do vermelho; abaixo dele, vale o vermelho mais um."
+        },
+        "type": "number",
+        "default": 76,
+        "min": 1,
+        "max": 100
+      }
+    ]
+  }
+}

@@ -54,6 +54,7 @@ for (const name of readdirSync(join(root, "plugins")).sort()) {
     package: packageFile,
     size: statSync(join(out, packageFile)).size,
     sha256: createHash("sha256").update(data).digest("hex"),
+    dependencies: manifest.dependencies,
   });
   console.log(`${manifest.id} ${manifest.version}`);
 }

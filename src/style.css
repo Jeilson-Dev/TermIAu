@@ -262,11 +262,11 @@ body {
 }
 
 /* Three states speak even without the keyboard: the panel waiting for you, the one
-   about to get the file being dragged and the one with full context. Dimming them
-   would swallow the notice. */
+   about to get the file being dragged and the one a plugin raised an alert on (the
+   Claude context, full). Dimming them would swallow the notice. */
 .tab-body.divided .split > .leaf.waiting,
 .tab-body.divided .split > .leaf.receiving,
-.tab-body.divided .split > .leaf.context-full {
+.tab-body.divided .split > .leaf.alert {
   opacity: 1;
 }
 
@@ -629,6 +629,13 @@ body {
   -webkit-user-select: none;
 }
 
+/* The plugins' slots (the `panelHeader` region), in the bar's own flow: each slot
+   takes part in the bar's gap as if it were one of its chips. */
+.panel-plugins,
+.panel-header-slot {
+  display: contents;
+}
+
 .task-title {
   /* As wide as the text, not stretched: the branch comes right after it.
      The controls' `margin-left: auto` is what pushes them to the right. */
@@ -654,81 +661,6 @@ body {
 }
 
 .branch[hidden] {
-  display: none;
-}
-
-/* The Claude session's context, after the branch: a single pill, with the
-   bar filling inside and the number on top. It is a button — the click sends
-   /compact. */
-.task-btn.task-context {
-  --tint: var(--purple);
-  position: relative;
-  flex: none;
-  justify-content: center;
-  min-width: 92px;
-  height: 16px;
-  margin-left: 8px;
-  padding: 0 10px;
-  overflow: hidden;
-  /* The tab chip's proportion (8px in 32px of height): a radius of
-     half the height made a round pill that didn't match them. */
-  border-radius: 4px;
-  background: var(--bg-lighter);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.task-context[hidden] {
-  display: none;
-}
-
-.task-context-full {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 0;
-  background: color-mix(in srgb, var(--tint), transparent 45%);
-  transition: width 600ms cubic-bezier(0.22, 0.61, 0.36, 1), background-color 300ms ease;
-}
-
-.task-context-num {
-  position: relative;
-  display: block;
-  text-align: center;
-  line-height: 16px;
-  color: var(--fg);
-}
-
-.task-btn.task-context:hover {
-  box-shadow: inset 0 0 0 1px var(--tint);
-}
-
-/* Yellow from 60% used, red from 75%: time to compact. */
-.task-context[data-level="attention"] { --tint: var(--yellow); }
-.task-context[data-level="danger"] { --tint: var(--red); }
-
-/* Model and effort, right after the context: the same box, without the bar
-   filling. The click opens the list to change them. */
-.task-btn.task-claude-option {
-  flex: none;
-  height: 16px;
-  margin-left: 4px;
-  padding: 0 8px;
-  border-radius: 4px;
-  background: var(--bg-lighter);
-  color: var(--fg);
-  font-size: 10px;
-  line-height: 16px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.task-btn.task-claude-option:hover {
-  box-shadow: inset 0 0 0 1px var(--purple);
-}
-
-.task-claude-option[hidden] {
   display: none;
 }
 
@@ -1065,217 +997,10 @@ body.dragging * {
   color: var(--comment);
 }
 
-/* ---------- Claude usage in the footer ---------- */
-
-/* In the strip's left corner, before the plugins' left slots. Hover opens the
-   details to the right, over them. */
-#usage {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  height: 100%;
-  padding-right: 4px;
-  color: var(--comment);
-  font-variant-numeric: tabular-nums;
-  cursor: default;
-}
-
-#usage[hidden] {
-  display: none;
-}
-
-/* 1px above center: the strip has its border on top, and a truly centered
-   circle looked low. */
-.usage-icon {
-  display: inline-flex;
-  transform: translateY(-1px);
-}
-
-/* The clock is time: in the cyan of the time bars, and it doesn't light up with
-   the pace — the tokens, beside it, are what light up. */
-.usage-icon .circle {
-  stroke: #3a9fb5;
-  transition: stroke-dashoffset 900ms cubic-bezier(0.22, 0.61, 0.36, 1), stroke 300ms ease;
-}
-
-/* The hands: they rotate around the circle's center (8,8 in the viewBox). The
-   hour hand follows the tip of the lit segment; the minute hand makes a turn on hover,
-   through `drainUsage` (src/main.ts), and stops. */
-.usage-icon .pointers {
-  color: var(--fg-dim);
-}
-
-.usage-icon .pointer-hour,
-.usage-icon .pointer-minute {
-  transform-box: view-box;
-  transform-origin: 8px 8px;
-}
-
-.usage-icon .pointer-hour {
-  transition: transform 900ms cubic-bezier(0.22, 0.61, 0.36, 1);
-}
-
-/* The shine running along the circle, from tip to start: it draining. */
-.usage-icon .circle-glow {
-  stroke: color-mix(in srgb, #3a9fb5, white 50%);
-  opacity: 0;
-}
-
-/* The available tokens: an upright bar, emptying from top to bottom, and
-   the number beside it. */
-.usage-summary {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.usage-pct {
-  font-size: 11px;
-}
-
-.usage-track.usage-mini {
-  position: relative;
-  width: 5px;
-  height: 18px;
-}
-
-/* Upright, the fill rises from the bottom: the height is the fraction, and the width is full. */
-.usage-mini .usage-full {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: auto;
-  height: 0;
-  transition: height 900ms cubic-bezier(0.22, 0.61, 0.36, 1);
-}
-
-.usage-mini .usage-pointer {
-  left: 0;
-  right: 0;
-  top: auto;
-  bottom: 0;
-  width: auto;
-  height: 6px;
-}
-
-/* The color is the pace's: orange is going too fast, red is running out before
-   renewing. On pace, the tokens stay in the radio's purple. */
-#usage[data-level="attention"] .usage-mini .usage-full { --tint: var(--orange); }
-#usage[data-level="danger"] .usage-mini .usage-full { --tint: var(--red); }
-#usage[data-level="attention"] .usage-pct { color: var(--orange); }
-#usage[data-level="danger"] .usage-pct { color: var(--red); font-weight: 600; }
-
-/* Two columns, session and week, each with two lines in the middle of the 30px
-   strip. Closed, they take no space; hover opens them to the right. */
-.usage-detail {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  max-width: 0;
-  overflow: hidden;
-  opacity: 0;
-  transition: max-width 220ms ease, opacity 160ms ease, margin 220ms ease;
-  font-size: 10px;
-  line-height: 12px;
-}
-
-#usage:hover .usage-detail {
-  max-width: 640px;
-  opacity: 1;
-  margin-left: 6px;
-}
-
-.usage-column {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.usage-column + .usage-column {
-  padding-left: 14px;
-  border-left: 1px solid var(--bg-lighter);
-}
-
-.usage-title {
-  color: var(--fg-dim);
-  font-size: 11px;
-}
-
-.usage-lines {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.usage-line {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-/* The labels say what the bar counts ("Time left", "Tokens
-   available"): a fixed width so the bars on both lines align. */
-.usage-label {
-  width: 92px;
-}
-
-.usage-track {
-  width: 72px;
-  height: 5px;
-  border-radius: 2px;
-  background: var(--bg-lighter);
-  overflow: hidden;
-}
-
-/* Time is cyan, usage is purple (or the pace's color). The color goes in `--tint`
-   so the inner little bar comes out of it, only lighter. */
-.usage-full {
-  --tint: var(--purple);
-  display: block;
-  height: 100%;
-  width: 0;
-  border-radius: 2px;
-  position: relative;
-  background-color: var(--tint);
-  transition: width 900ms cubic-bezier(0.22, 0.61, 0.36, 1);
-}
-
-/* Like the hand rotating inside the circle: a little bar inside the bar,
-   a few shades lighter than it, that leaves the tip and travels to the start
-   shrinking — the direction in which the bar decreases. `drainUsage`
-   (src/main.ts) animates it, along with the circle's shine. */
-.usage-pointer {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 10px;
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--tint), white 50%);
-  opacity: 0;
-}
-
-/* A deeper cyan than the theme's: in the light one the moving little bar vanished. */
-.usage-time .usage-full {
-  --tint: #3a9fb5;
-}
-
-.usage-line[data-level="attention"] .usage-full { --tint: var(--orange); }
-.usage-line[data-level="danger"] .usage-full { --tint: var(--red); }
-.usage-line[data-level="attention"] .usage-num { color: var(--orange); }
-.usage-line[data-level="danger"] .usage-num { color: var(--red); }
-
-.usage-num {
-  width: 34px;
-  color: var(--fg-dim);
-}
-
 /* ---------- a long task's progress, in the footer ---------- */
 
-/* Beside the usage: one pill per panel whose Claude published a plan. */
+/* In the footer's left corner, after the `start` plugin slots (the Claude usage): one
+   pill per panel whose Claude published a plan. */
 #progress {
   flex: none;
   display: flex;
@@ -1517,6 +1242,19 @@ body.dragging * {
 }
 
 #status-bar-plugins:empty {
+  display: none;
+}
+
+/* The left corner, before the task pills: the Claude usage. */
+#status-bar-start {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+}
+
+#status-bar-start:empty {
   display: none;
 }
 
@@ -3415,24 +3153,24 @@ body.dragging * {
   background: color-mix(in srgb, var(--comment) 8%, transparent);
 }
 
-/* The session's context passed the red limit (Preferences, ⌘,): the panel
-   gets a pulsing red border, time to compact. On ::after, which is the
-   card's border and goes over the terminal; `outline` stays free for the
-   orange of the waiting panel, and both apply at the same time. */
-.tab-body > .leaf.context-full::after,
-.tab-body .split > .leaf.context-full::after {
+/* A plugin raised the panel's alert (`Panel.setAlert` — the Claude context past its
+   red limit): a pulsing red border. On ::after, which is the card's border and goes
+   over the terminal; `outline` stays free for the orange of the waiting panel, and
+   both apply at the same time. */
+.tab-body > .leaf.alert::after,
+.tab-body .split > .leaf.alert::after {
   border: 2px solid var(--red);
   box-shadow: inset 0 0 14px #ff555559;
-  animation: context-pulse 1.4s ease-in-out infinite;
+  animation: alert-pulse 1.4s ease-in-out infinite;
 }
 
 /* The split's border is part of the panel: it pulses along with it. */
-.leaf.context-full .viewer-handle {
+.leaf.alert .viewer-handle {
   background-color: var(--red);
-  animation: context-pulse 1.4s ease-in-out infinite;
+  animation: alert-pulse 1.4s ease-in-out infinite;
 }
 
-@keyframes context-pulse {
+@keyframes alert-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }

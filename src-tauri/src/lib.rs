@@ -1390,8 +1390,6 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<()> {
                 restore_enabled(app.clone()),
                 None::<&str>,
             )?,
-            // The hooks alone, for those who only want the "waiting" notice on the tabs.
-            &MenuItem::with_id(app, "hooks", tr("Ligar ao Claude Code…", "Connect to Claude Code…"), true, None::<&str>)?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::services(app, Some(tr("Serviços", "Services")))?,
             &PredefinedMenuItem::separator(app)?,
@@ -1486,13 +1484,6 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<()> {
                 true,
                 Some("CmdOrCtrl+Shift+O"),
             )?,
-            &MenuItem::with_id(
-                app,
-                "compact",
-                tr("Compactar a Conversa do Claude", "Compact Claude Conversation"),
-                true,
-                Some("CmdOrCtrl+Shift+K"),
-            )?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(
                 app,
@@ -1577,7 +1568,6 @@ pub fn run() {
             "new-tab" => { let _ = app.emit("menu://new-tab", ()); }
             "reopen-tab" => { let _ = app.emit("menu://reopen-tab", ()); }
             "quit" => { let _ = app.emit("menu://quit", ()); }
-            "hooks" => { let _ = app.emit("menu://hooks", ()); }
             "restore" => toggle_restore(app),
             "split-right" => { let _ = app.emit("menu://split-right", ()); }
             "split-down" => { let _ = app.emit("menu://split-down", ()); }
@@ -1588,7 +1578,6 @@ pub fn run() {
             "shortcuts" => { let _ = app.emit("menu://shortcuts", ()); }
             "chat" => { let _ = app.emit("menu://chat", ()); }
             "viewer" => { let _ = app.emit("menu://viewer", ()); }
-            "compact" => { let _ = app.emit("menu://compact", ()); }
             "previous-message" => { let _ = app.emit("menu://message", -1); }
             "next-message" => { let _ = app.emit("menu://message", 1); }
             id => { plugins::on_menu(app, id); }
