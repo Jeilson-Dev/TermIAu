@@ -1143,7 +1143,13 @@ fn claude_dir() -> Option<PathBuf> {
     dirs_home().map(|h| PathBuf::from(h).join(".claude"))
 }
 
+/// The script's name today. `termiau-evento.sh` is the one earlier versions installed:
+/// still ours, so an update replaces its entries instead of adding a second hook.
 const HOOK_FILE: &str = "termiau-event.sh";
+
+fn hook_is_ours(h: &serde_json::Value) -> bool {
+    h["command"].as_str().is_some_and(|c| c.contains("termiau-event.sh") || c.contains("termiau-evento"))
+}
 
 fn hook_is_current(h: &serde_json::Value) -> bool {
     h["command"].as_str().is_some_and(|c| c.contains(HOOK_FILE))
@@ -1155,7 +1161,7 @@ fn hook_is_current(h: &serde_json::Value) -> bool {
 /// whoever put it there wanted something else.
 fn status_line_current(settings: &serde_json::Value) -> bool {
     let s = &settings["statusLine"];
-    s.is_object() && !hook_is_current(s) || hook_is_current(s) && s["command"].as_str().is_some_and(|c| c.ends_with(" status"))
+    s.is_object() && !hook_is_ours(s) || hook_is_current(s) && s["command"].as_str().is_some_and(|c| c.ends_with(" status"))
 }
 
 fn status_line(command: &str) -> serde_json::Value {
@@ -1187,7 +1193,8 @@ fn hooks_state() -> &'static str {
     let Some(dir) = claude_dir().filter(|d| d.is_dir()) else { return "no-claude" };
     let script = dir.join("hooks").join(HOOK_FILE);
     if !script.exists() {
-        return "missing";
+        // Only the old script: installed, by a version from before the rename.
+        return if dir.join("hooks/termiau-evento.sh").exists() { "outdated" } else { "missing" };
     }
     let script_current = std::fs::read_to_string(&script).is_ok_and(|s| s == HOOK);
     let registered = std::fs::read_to_string(dir.join("settings.json"))
@@ -1243,7 +1250,7 @@ fn hooks_install() -> Result<(), String> {
             hooks.get(*event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
         for g in &mut groups {
             if let Some(hs) = g.get_mut("hooks").and_then(|h| h.as_array_mut()) {
-                hs.retain(|h| !hook_is_current(h));
+                hs.retain(|h| !hook_is_ours(h));
             }
         }
         groups.retain(|g| g["hooks"].as_array().is_some_and(|hs| !hs.is_empty()));

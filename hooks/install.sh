@@ -51,10 +51,11 @@ EVENTS='["SessionStart","UserPromptSubmit","PermissionRequest","Notification","S
 
 jq --arg cmd "bash $TARGET" --argjson events "$EVENTS" '
   # Puts the TermIAu hook, one per event, replacing any previous registration
-  # of it — that is what makes running it again harmless.
+  # of it — that is what makes running it again harmless. `termiau-evento` is what
+  # the script was called before: an install from before the rename is replaced too.
   reduce $events[] as $e (.;
     .hooks[$e] = (((.hooks[$e] // [])
-      | map(.hooks |= map(select((.command // "") | test("termiau-event\\.sh") | not)))
+      | map(.hooks |= map(select((.command // "") | test("termiau-event\\.sh|termiau-evento") | not)))
       | map(select((.hooks | length) > 0)))
       + [{hooks: [{type: "command", command: $cmd,
                    timeout: (if $e == "PermissionRequest" then 3600 else 5 end)}]}
@@ -63,7 +64,7 @@ jq --arg cmd "bash $TARGET" --argjson events "$EVENTS" '
             else {} end)]))
   # The status line goes through the same hook (context and usage go to the app).
   # One that is not ours stays: whoever put it there wanted something else.
-  | if (.statusLine | type) == "object" and ((.statusLine.command // "") | test("termiau-event\\.sh") | not)
+  | if (.statusLine | type) == "object" and ((.statusLine.command // "") | test("termiau-event\\.sh|termiau-evento") | not)
     then . else .statusLine = {type: "command", command: ($cmd + " status"), padding: 0} end
 ' "$BACKUP" > "$SETTINGS"
 
