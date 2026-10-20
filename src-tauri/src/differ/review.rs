@@ -495,35 +495,35 @@ mod tests {
     #[test]
     fn diffs_working_tree_including_untracked() {
         let repo = TestRepo::new();
-        repo.write("editado.txt", "um\ndois\n");
-        repo.write("apagado.txt", "tchau\n");
-        repo.write("intocado.txt", "igual\n");
+        repo.write("edited.txt", "one\ntwo\n");
+        repo.write("deleted.txt", "bye\n");
+        repo.write("untouched.txt", "same\n");
         repo.commit("base");
 
         // The three states the tab has to show together: what went into the
         // index, what stayed out of it and what git doesn't even know.
-        repo.write("adicionado.txt", "novo no índice\n");
-        repo.git(&["add", "adicionado.txt"]);
-        repo.write("editado.txt", "um\nDOIS\n");
-        fs::remove_file(repo.path().join("apagado.txt")).unwrap();
-        repo.write("solto.txt", "ninguém me rastreia\n");
-        repo.write(".gitignore", "ignorado.txt\n");
+        repo.write("added.txt", "new in the index\n");
+        repo.git(&["add", "added.txt"]);
+        repo.write("edited.txt", "one\nTWO\n");
+        fs::remove_file(repo.path().join("deleted.txt")).unwrap();
+        repo.write("untracked.txt", "nobody tracks me\n");
+        repo.write(".gitignore", "ignored.txt\n");
         repo.git(&["add", ".gitignore"]);
-        repo.write("ignorado.txt", "não apareço\n");
+        repo.write("ignored.txt", "you don't see me\n");
 
         let diff = load_diff_working(repo.path()).unwrap();
         let shown: Vec<&str> = diff.files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(
             shown,
-            [".gitignore", "adicionado.txt", "apagado.txt", "editado.txt", "solto.txt"]
+            [".gitignore", "added.txt", "deleted.txt", "edited.txt", "untracked.txt"]
         );
 
-        assert_eq!(file(&diff, "adicionado.txt").status, FileStatus::Added);
-        assert_eq!(file(&diff, "apagado.txt").status, FileStatus::Deleted);
-        assert_eq!(file(&diff, "editado.txt").status, FileStatus::Modified);
+        assert_eq!(file(&diff, "added.txt").status, FileStatus::Added);
+        assert_eq!(file(&diff, "deleted.txt").status, FileStatus::Deleted);
+        assert_eq!(file(&diff, "edited.txt").status, FileStatus::Modified);
 
         // The file git doesn't track comes in whole, as a new file.
-        let no_index = file(&diff, "solto.txt");
+        let no_index = file(&diff, "untracked.txt");
         assert_eq!(no_index.status, FileStatus::Added);
         assert_eq!(no_index.additions, 1);
         assert_eq!(no_index.hunks[0].lines[0].kind, LineKind::Add);
@@ -531,47 +531,47 @@ mod tests {
         // The new side of what is on disk gets a content key in place of the
         // blob id, which doesn't exist there.
         assert!(no_index.new_oid.as_deref().unwrap().starts_with(WORKTREE_KEY));
-        assert!(file(&diff, "editado.txt").new_oid.as_deref().unwrap().starts_with(WORKTREE_KEY));
+        assert!(file(&diff, "edited.txt").new_oid.as_deref().unwrap().starts_with(WORKTREE_KEY));
         // What is already in the index has a real blob.
-        let in_index = file(&diff, "adicionado.txt").new_oid.clone().unwrap();
+        let in_index = file(&diff, "added.txt").new_oid.clone().unwrap();
         assert_eq!(in_index.len(), 40);
-        assert_eq!(read_worktree(repo.path(), "solto.txt").unwrap(), ["ninguém me rastreia"]);
-        assert!(read_worktree(repo.path(), "../fora.txt").is_err());
+        assert_eq!(read_worktree(repo.path(), "untracked.txt").unwrap(), ["nobody tracks me"]);
+        assert!(read_worktree(repo.path(), "../outside.txt").is_err());
     }
 
     #[test]
     fn stages_unstages_and_commits() {
         let repo = TestRepo::new();
-        repo.write("editado.txt", "um\n");
+        repo.write("edited.txt", "one\n");
         repo.commit("base");
-        repo.write("editado.txt", "dois\n");
-        repo.write("solto.txt", "novo\n");
+        repo.write("edited.txt", "two\n");
+        repo.write("untracked.txt", "new\n");
 
         let pending = || load_diff_working(repo.path()).unwrap();
-        assert_eq!(file(&pending(), "editado.txt").staged, Some(Staged::Unstaged));
-        assert_eq!(file(&pending(), "solto.txt").staged, Some(Staged::Unstaged));
+        assert_eq!(file(&pending(), "edited.txt").staged, Some(Staged::Unstaged));
+        assert_eq!(file(&pending(), "untracked.txt").staged, Some(Staged::Unstaged));
 
-        stage(repo.path(), "solto.txt").unwrap();
-        assert_eq!(file(&pending(), "solto.txt").staged, Some(Staged::Staged));
+        stage(repo.path(), "untracked.txt").unwrap();
+        assert_eq!(file(&pending(), "untracked.txt").staged, Some(Staged::Staged));
 
         // Changed again after `git add`: half is in the index, half isn't.
-        repo.write("solto.txt", "novo e mudado\n");
-        assert_eq!(file(&pending(), "solto.txt").staged, Some(Staged::Partial));
+        repo.write("untracked.txt", "new and changed\n");
+        assert_eq!(file(&pending(), "untracked.txt").staged, Some(Staged::Partial));
 
-        unstage(repo.path(), "solto.txt").unwrap();
-        assert_eq!(file(&pending(), "solto.txt").staged, Some(Staged::Unstaged));
+        unstage(repo.path(), "untracked.txt").unwrap();
+        assert_eq!(file(&pending(), "untracked.txt").staged, Some(Staged::Unstaged));
 
         // The commit takes what is in the index and leaves the rest where it was.
-        stage(repo.path(), "editado.txt").unwrap();
-        let new_commit = commit(repo.path(), "só o editado").unwrap();
+        stage(repo.path(), "edited.txt").unwrap();
+        let new_commit = commit(repo.path(), "only the edited one").unwrap();
         assert_eq!(new_commit.len(), 40);
         let after = pending();
         assert_eq!(after.head_sha, new_commit);
         let remaining: Vec<&str> = after.files.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(remaining, ["solto.txt"]);
+        assert_eq!(remaining, ["untracked.txt"]);
 
         // With nothing in the index git refuses, and its refusal is what the tab shows.
-        let error = commit(repo.path(), "vazio").unwrap_err().to_string();
+        let error = commit(repo.path(), "empty").unwrap_err().to_string();
         assert!(error.contains("nothing added") || error.contains("no changes added"), "{error}");
         assert!(commit(repo.path(), "   ").is_err());
     }
@@ -579,15 +579,15 @@ mod tests {
     #[test]
     fn stages_folders_and_everything() {
         let repo = TestRepo::new();
-        repo.write("fora.txt", "raiz\n");
-        repo.write("sub/um.txt", "um\n");
-        repo.write("sub/dois.txt", "dois\n");
+        repo.write("outside.txt", "root\n");
+        repo.write("sub/um.txt", "one\n");
+        repo.write("sub/dois.txt", "two\n");
         repo.commit("base");
         // A folder with a bit of everything: edited, deleted and never seen.
         repo.write("sub/um.txt", "um mudado\n");
         fs::remove_file(repo.path().join("sub/dois.txt")).unwrap();
-        repo.write("sub/tres.txt", "novo\n");
-        repo.write("fora.txt", "raiz mudada\n");
+        repo.write("sub/three.txt", "new\n");
+        repo.write("outside.txt", "root changed\n");
 
         let pending = || load_diff_working(repo.path()).unwrap();
         let state = |d: &ReviewDiff, p: &str| file(d, p).staged;
@@ -597,8 +597,8 @@ mod tests {
         let d = pending();
         assert_eq!(state(&d, "sub/um.txt"), Some(Staged::Staged));
         assert_eq!(state(&d, "sub/dois.txt"), Some(Staged::Staged));
-        assert_eq!(state(&d, "sub/tres.txt"), Some(Staged::Staged));
-        assert_eq!(state(&d, "fora.txt"), Some(Staged::Unstaged));
+        assert_eq!(state(&d, "sub/three.txt"), Some(Staged::Staged));
+        assert_eq!(state(&d, "outside.txt"), Some(Staged::Unstaged));
 
         // `.` is the whole repository, both ways.
         stage(repo.path(), ".").unwrap();
@@ -610,23 +610,23 @@ mod tests {
     #[test]
     fn working_stamp_changes_with_the_work() {
         let repo = TestRepo::new();
-        repo.write("a.txt", "um\n");
+        repo.write("a.txt", "one\n");
         repo.commit("base");
 
         let stamp_now = || working_stamp(repo.path()).unwrap();
         let idle = stamp_now();
         assert_eq!(idle, stamp_now(), "touching nothing, the signature stays the same");
 
-        repo.write("a.txt", "dois\n");
+        repo.write("a.txt", "two\n");
         let edited = stamp_now();
         assert_ne!(idle, edited);
 
         // The case git's lists miss: already modified, modified again.
-        repo.write("a.txt", "três\n");
+        repo.write("a.txt", "three\n");
         let again = stamp_now();
         assert_ne!(edited, again);
 
-        repo.write("novo.txt", "apareci\n");
+        repo.write("new.txt", "here I am\n");
         let with_new = stamp_now();
         assert_ne!(again, with_new);
 
@@ -634,7 +634,7 @@ mod tests {
         let in_index = stamp_now();
         assert_ne!(with_new, in_index);
 
-        repo.git(&["commit", "-q", "-m", "tudo"]);
+        repo.git(&["commit", "-q", "-m", "everything"]);
         assert_ne!(in_index, stamp_now());
     }
 
@@ -652,7 +652,7 @@ mod tests {
         repo.write("edit.txt", "one\nTWO\nthree\nfour\n");
         fs::remove_file(repo.path().join("remove.txt")).unwrap();
         repo.git(&["mv", "move.txt", "moved.txt"]);
-        repo.write("dir/novo arquivo ç.txt", "olá\n");
+        repo.write("dir/new file ç.txt", "hello\n");
         repo.write("image.bin", [0u8, 9, 9, 9]);
         repo.commit("feature work");
 
@@ -671,7 +671,7 @@ mod tests {
         paths.sort();
         assert_eq!(
             paths,
-            ["dir/novo arquivo ç.txt", "edit.txt", "image.bin", "moved.txt", "remove.txt"]
+            ["dir/new file ç.txt", "edit.txt", "image.bin", "moved.txt", "remove.txt"]
         );
 
         let edit = file(&diff, "edit.txt");
@@ -700,7 +700,7 @@ mod tests {
 
         assert_eq!(file(&diff, "remove.txt").status, FileStatus::Deleted);
         assert!(file(&diff, "remove.txt").new_oid.is_none());
-        assert_eq!(file(&diff, "dir/novo arquivo ç.txt").status, FileStatus::Added);
+        assert_eq!(file(&diff, "dir/new file ç.txt").status, FileStatus::Added);
         assert!(file(&diff, "image.bin").binary);
 
         let blob = read_blob(repo.path(), edit.new_oid.as_deref().unwrap()).unwrap();

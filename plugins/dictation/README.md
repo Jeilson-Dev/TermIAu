@@ -10,6 +10,10 @@ Transcription is local: whisper.cpp with Metal, the `small` model (466 MB),
 downloaded once into `~/.termiau/plugin-data/termiau.dictation/models/`. A model
 TermIAu downloaded while dictation was part of the app is reused from where it is.
 
+**Preferences ▸ Plugins ▸ Dictation ▸ Spoken language** picks what Whisper listens
+for: the same language as TermIAu (the default), English, Portuguese, or detecting it
+on each stretch of speech. It takes effect the next time listening turns on.
+
 ## How it is built
 
 - `engine/` — a Rust crate, the binary `termiau-dictation`: microphone capture
@@ -19,7 +23,7 @@ TermIAu downloaded while dictation was part of the app is reused from where it i
 - `src/main.ts` — the plugin: the footer strip, the countdown, writing into the
   focused panel (`ctx.terminal`), and the engine (`ctx.process.spawn("engine")`).
 - `termiau.json` — declares the binary, the platform (`darwin-arm64`), the footer
-  slot on the left and the `⌘E` command.
+  slot on the left, the `⌘E` command and the spoken-language setting.
 
 The plugin ships native code, so it must be signed by a publisher TermIAu trusts:
 `npm run plugin:dictation` builds the engine in release, signs it ad hoc for macOS,

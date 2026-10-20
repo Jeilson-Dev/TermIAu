@@ -1,8 +1,8 @@
 /// The manifest rules that don't need the DOM or Tauri, so they can be tested.
 /// Rust already validated the shape (see plugins.rs); this side checks what the
-/// webview owns: the regions.
+/// webview owns: the regions and the settings.
 
-import type { Language, Localized, Manifest, RegionContribution, RegionName } from "./api";
+import type { Language, Localized, Manifest, RegionContribution, RegionName, SettingContribution, SettingValue } from "./api";
 
 /// What `plugins_list` returns, one per folder.
 export type InstalledPlugin = {
@@ -53,6 +53,45 @@ export function regionProblems(m: Manifest): string[] {
     seen.add(`${r.region}:${r.id}`);
   }
   return problems;
+}
+
+/// The problems with a manifest's settings, as messages. Empty means it can load.
+export function settingProblems(m: Manifest): string[] {
+  const problems: string[] = [];
+  const seen = new Set<string>();
+  for (const s of m.contributes?.configuration ?? []) {
+    if (!s.key) problems.push("a setting without a key");
+    else if (seen.has(s.key)) problems.push(`setting "${s.key}" declared twice`);
+    seen.add(s.key);
+    if (s.type === "enum") {
+      if (!s.options?.length) problems.push(`setting "${s.key}" has no options`);
+      else if (!s.options.some((o) => o.value === s.default)) problems.push(`setting "${s.key}": the default isn't an option`);
+    } else if (s.type === "boolean") {
+      if (typeof (s.default as unknown) !== "boolean") problems.push(`setting "${s.key}": the default isn't true or false`);
+    } else {
+      const other = s as unknown as { key: string; type: string };
+      problems.push(`setting "${other.key}": type "${other.type}" is not supported`);
+    }
+  }
+  return problems;
+}
+
+/// Where a setting's value lives in localStorage: the main window (the plugin) and
+/// the Preferences (a same-origin iframe, which writes it) share it, and the
+/// `storage` event tells one when the other changed it.
+export const settingStorageKey = (plugin: string, key: string) => `termiau:plugin:${plugin}:setting:${key}`;
+
+/// The stored value, if it is still valid for the setting; otherwise the default. A
+/// plugin update can drop an option, and the user's old pick must not survive it.
+export function settingValue(s: SettingContribution, stored: string | null): SettingValue {
+  if (stored === null) return s.default;
+  try {
+    const v: unknown = JSON.parse(stored);
+    if (s.type === "boolean") return typeof v === "boolean" ? v : s.default;
+    return typeof v === "string" && s.options.some((o) => o.value === v) ? v : s.default;
+  } catch {
+    return s.default;
+  }
 }
 
 export type StatusBarEntry = { plugin: string; region: RegionContribution };

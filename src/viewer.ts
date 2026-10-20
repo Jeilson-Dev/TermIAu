@@ -1,10 +1,10 @@
 /// What the viewer needs to know without touching the DOM: finding file references
 /// (`src/main.ts:848`) in a text. It lives in its own module so it can be tested, like
-/// `conversa.ts`.
+/// `conversation.ts`.
 
 /// A reference found in a text. `beginning` and `end` are positions in the text
 /// (`end` exclusive), and `file` is still as it was written: relative or not,
-/// Rust is the one that knows whether it exists (`arquivos_existem`).
+/// Rust is the one that knows whether it exists (`files_exist`).
 export type Reference = {
   beginning: number;
   end: number;

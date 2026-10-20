@@ -67,6 +67,9 @@ pub struct Contributes {
     pub regions: Vec<serde_json::Value>,
     #[serde(default)]
     pub commands: Vec<Command>,
+    /// The plugin's settings. Checked and drawn by the webview (the Plugins tab).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub configuration: Vec<serde_json::Value>,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]

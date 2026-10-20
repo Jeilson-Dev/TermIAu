@@ -11,7 +11,8 @@
 //! ```
 //!
 //! It speaks newline-delimited JSON. On stdin, commands:
-//!   {"cmd":"modelReady"} {"cmd":"downloadModel"} {"cmd":"start"} {"cmd":"stop"}
+//!   {"cmd":"modelReady"} {"cmd":"downloadModel"} {"cmd":"stop"}
+//!   {"cmd":"start","language":"pt"|"en"|...|"auto"}
 //! On stdout, events:
 //!   {"event":"modelReady","ready":bool}  {"event":"progress","value":0..1}
 //!   {"event":"downloaded"}  {"event":"started"}  {"event":"level","value":0..1}
@@ -39,10 +40,9 @@ use std::time::{Duration, Instant};
 use language::tr;
 use serde_json::{json, Value};
 
-/// The recommended balance for Portuguese — 466 MB. The others in the catalog
-/// stay in `model` for when there is a settings screen.
+/// The recommended balance of speed and accuracy — 466 MB, multilingual. The
+/// others in the catalog stay in `model` for when there is a setting for them.
 const MODEL: &str = "small";
-const LANGUAGE: &str = "pt";
 
 /// One line of JSON on stdout. Locked, because three threads report at once.
 fn emit(event: Value) {
@@ -91,7 +91,7 @@ fn stop() {
 
 /// Opens the microphone. Three threads: capture, level meter and transcription —
 /// the `cpal::Stream` must live entirely on the thread that opened it.
-fn start() -> Result<(), String> {
+fn start(language: String) -> Result<(), String> {
     let mut session = SESSION.lock().unwrap();
     // A session that died on its own (microphone gone, corrupted model) leaves
     // the flag behind; clear it before deciding whether we are still listening.
@@ -147,7 +147,7 @@ fn start() -> Result<(), String> {
         let flag = flag.clone();
         let path = path.to_string_lossy().into_owned();
         std::thread::spawn(move || {
-            let engine = match stt::Engine::load(&path, LANGUAGE) {
+            let engine = match stt::Engine::load(&path, &language) {
                 Ok(e) => e,
                 Err(e) => {
                     error(e);
@@ -181,6 +181,15 @@ fn download() {
     });
 }
 
+/// The language the plugin asked for: a two-letter code, or `auto` for Whisper
+/// to detect it. Without one (or with junk), it detects.
+fn spoken_language(message: &Value) -> String {
+    match message.get("language").and_then(Value::as_str) {
+        Some(l) if l == "auto" || (l.len() == 2 && l.chars().all(|c| c.is_ascii_lowercase())) => l.to_string(),
+        _ => "auto".to_string(),
+    }
+}
+
 fn main() {
     // Without this whisper.cpp dumps its log onto the process output — and stdout
     // is the protocol.
@@ -194,7 +203,7 @@ fn main() {
         match message.get("cmd").and_then(Value::as_str) {
             Some("modelReady") => emit(json!({ "event": "modelReady", "ready": model_path().exists() })),
             Some("downloadModel") => download(),
-            Some("start") => match start() {
+            Some("start") => match start(spoken_language(&message)) {
                 Ok(()) => emit(json!({ "event": "started" })),
                 Err(e) => error(e),
             },
@@ -205,4 +214,19 @@ fn main() {
     // stdin closed: TermIAu is gone or turned the plugin off.
     stop();
     std::thread::sleep(Duration::from_millis(200));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::spoken_language;
+    use serde_json::json;
+
+    #[test]
+    fn the_language_is_a_code_or_auto() {
+        assert_eq!(spoken_language(&json!({ "cmd": "start", "language": "en" })), "en");
+        assert_eq!(spoken_language(&json!({ "cmd": "start", "language": "auto" })), "auto");
+        // Missing or junk: Whisper detects it.
+        assert_eq!(spoken_language(&json!({ "cmd": "start" })), "auto");
+        assert_eq!(spoken_language(&json!({ "cmd": "start", "language": "--x" })), "auto");
+    }
 }

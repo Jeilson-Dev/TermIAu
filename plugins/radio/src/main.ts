@@ -7,7 +7,7 @@
 import type { PluginContext } from "../../../src/plugins/api";
 import { texts } from "./i18n";
 import { STATIONS, type Station } from "./stations";
-import { KEY_PLAYING, KEY_STATION, KEY_VOLUME, migrateLegacyKeys } from "./storage";
+import { KEY_PLAYING, KEY_STATION, KEY_VOLUME } from "./storage";
 
 let dispose: (() => void) | undefined;
 
@@ -112,7 +112,6 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string): H
 function createRadio(ctx: PluginContext): () => void {
   const t = texts(ctx.language);
   const stations = STATIONS;
-  migrateLegacyKeys(ctx.storage, localStorage);
 
   /// A missing key and a key with junk end up the same: the default. `Number(null)` is 0, and
   /// without the null check the volume would be born muted on the first run.
@@ -724,7 +723,7 @@ function createRadio(ctx: PluginContext): () => void {
   draw();
 
   // `onStartupFinished`: the tabs are already open, so a stream that holds the page's
-  // `load` can't keep them from opening (see src/inicio.ts).
+  // `load` can't keep them from opening (see src/startup.ts).
   if (ctx.storage.get(KEY_PLAYING)) play(true);
 
   return () => {

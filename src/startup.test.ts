@@ -5,10 +5,10 @@ import { start, type Steps } from "./startup";
 /// stuck page.
 function steps(done: string[], extra: Partial<Steps> = {}): Steps {
   return {
-    fonts: async () => void done.push("fontes"),
-    connect: async () => void done.push("ligar"),
-    openTabs: async () => void done.push("abrirAbas"),
-    after: () => void done.push("depois"),
+    fonts: async () => void done.push("fonts"),
+    connect: async () => void done.push("connect"),
+    openTabs: async () => void done.push("openTabs"),
+    after: () => void done.push("after"),
     activatePlugins: () => void done.push("activatePlugins"),
     ...extra,
   };
@@ -18,7 +18,7 @@ describe("start", () => {
   it("starts in order: fonts, events, tabs, the rest and the plugins last", async () => {
     const done: string[] = [];
     await start(steps(done));
-    expect(done).toEqual(["fontes", "ligar", "abrirAbas", "depois", "activatePlugins"]);
+    expect(done).toEqual(["fonts", "connect", "openTabs", "after", "activatePlugins"]);
   });
 
   it("plugins don't hold the tabs: fonts are only ready with no stream loading on the page", async () => {
@@ -35,22 +35,22 @@ describe("start", () => {
       },
     });
     await start(p);
-    expect(done).toContain("abrirAbas");
-    expect(done.indexOf("abrirAbas")).toBeLessThan(done.indexOf("activatePlugins"));
+    expect(done).toContain("openTabs");
+    expect(done.indexOf("openTabs")).toBeLessThan(done.indexOf("activatePlugins"));
   });
 
   it("waits for each async step to finish before the next", async () => {
     const done: string[] = [];
     const slow = (name: string) => () =>
       new Promise<void>((ok) => setTimeout(() => (done.push(name), ok()), 5));
-    await start(steps(done, { fonts: slow("fontes"), connect: slow("ligar"), openTabs: slow("abrirAbas") }));
-    expect(done).toEqual(["fontes", "ligar", "abrirAbas", "depois", "activatePlugins"]);
+    await start(steps(done, { fonts: slow("fonts"), connect: slow("connect"), openTabs: slow("openTabs") }));
+    expect(done).toEqual(["fonts", "connect", "openTabs", "after", "activatePlugins"]);
   });
 
   it("no tabs, no plugins: a failure opening the tabs stops the startup", async () => {
     const done: string[] = [];
     const p = steps(done, { openTabs: () => Promise.reject(new Error("pty")) });
     await expect(start(p)).rejects.toThrow("pty");
-    expect(done).toEqual(["fontes", "ligar"]);
+    expect(done).toEqual(["fonts", "connect"]);
   });
 });

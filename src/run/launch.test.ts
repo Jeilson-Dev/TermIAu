@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setLanguage, language } from "../i18n";
 import { configsOf, readJsonc, playList, resolver, taskBefore, type Task } from "./launch";
 
-// The texts expected here are the Portuguese ones.
+// The texts expected here are the English ones.
 const initial = language();
-beforeEach(() => setLanguage("pt"));
+beforeEach(() => setLanguage("en"));
 afterEach(() => setLanguage(initial));
 
-const ctx = { folder: "/w/app", home: "/Users/eu" };
+const ctx = { folder: "/w/app", home: "/Users/me" };
 
 describe("readJsonc", () => {
   it("accepts comments and trailing commas, leaving strings alone", () => {
@@ -57,7 +57,7 @@ describe("playList", () => {
 describe("resolver", () => {
   it("replaces workspace variables and leaves env ones to the shell", () => {
     expect(resolver("${workspaceFolder}/lib", ctx)).toBe("/w/app/lib");
-    expect(resolver("${workspaceFolderBasename}:${userHome}", ctx)).toBe("app:/Users/eu");
+    expect(resolver("${workspaceFolderBasename}:${userHome}", ctx)).toBe("app:/Users/me");
     expect(resolver("${env:HOME}/x", ctx)).toBe("${env:HOME}/x");
   });
 
@@ -68,24 +68,24 @@ describe("resolver", () => {
 
 describe("taskBefore", () => {
   const tasks: Task[] = [
-    { label: "gerar", type: "shell", command: "dart run build_runner build", args: ["--delete-conflicting-outputs"] },
+    { label: "generate", type: "shell", command: "dart run build_runner build", args: ["--delete-conflicting-outputs"] },
     { type: "npm", script: "build" },
-    { label: "longe", type: "process", command: "make", options: { cwd: "${workspaceFolder}/native" } },
-    { label: "vigia", type: "shell", command: "tsc -w", isBackground: true },
+    { label: "elsewhere", type: "process", command: "make", options: { cwd: "${workspaceFolder}/native" } },
+    { label: "watch", type: "shell", command: "tsc -w", isBackground: true },
     { label: "flutter", type: "flutter", command: "flutter" },
   ];
   const withTask = (preLaunchTask?: string) => taskBefore({ name: "x", type: "dart", preLaunchTask }, tasks, ctx);
 
   it("turns supported tasks into a shell line", () => {
     expect(withTask()).toBeNull();
-    expect(withTask("gerar")).toBe("dart run build_runner build --delete-conflicting-outputs");
+    expect(withTask("generate")).toBe("dart run build_runner build --delete-conflicting-outputs");
     expect(withTask("npm: build")).toBe("npm run build");
-    expect(withTask("longe")).toBe("(cd /w/app/native && make)");
+    expect(withTask("elsewhere")).toBe("(cd /w/app/native && make)");
   });
 
   it("refuses what it can't run", () => {
-    expect(() => withTask("nenhuma")).toThrow(/não está/);
-    expect(() => withTask("vigia")).toThrow(/segundo plano/);
-    expect(() => withTask("flutter")).toThrow(/tipo "flutter"/);
+    expect(() => withTask("missing")).toThrow(/is not in tasks\.json/);
+    expect(() => withTask("watch")).toThrow(/runs in the background/);
+    expect(() => withTask("flutter")).toThrow(/of type "flutter"/);
   });
 });

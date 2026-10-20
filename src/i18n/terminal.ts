@@ -18,6 +18,7 @@ const pt = {
   oneTool: "uma ferramenta",
 
   // chat mode
+  chatEmpty: "Nenhuma mensagem ainda. Escreva abaixo para começar.",
   isWaiting: "O Claude está esperando por você.",
   working: (time: string) => `Trabalhando… ${time} · esc interrompe`,
   alreadyAnsweredInTerminal: "A pergunta já tinha sido respondida no terminal.",
@@ -43,6 +44,7 @@ const pt = {
   blocksDone: (done: number, total: number) => `${done} de ${total} blocos`,
   tabN: (n: number) => `aba ${n}`,
   panelN: (n: number) => `painel ${n}`,
+  imageN: (n: number) => `imagem ${n}`,
   goToPanel: "Ir ao painel",
   removeFromFooter: "Tirar do rodapé",
   sessionNoLongerOpen: "Essa sessão não está mais aberta em nenhum painel.",
@@ -297,6 +299,7 @@ const en: typeof pt = {
   oneTool: "a tool",
 
   // chat mode
+  chatEmpty: "No messages yet. Write below to start.",
   isWaiting: "Claude is waiting for you.",
   working: (time) => `Working… ${time} · esc interrupts`,
   alreadyAnsweredInTerminal: "The question had already been answered in the terminal.",
@@ -322,6 +325,7 @@ const en: typeof pt = {
   blocksDone: (done, total) => `${done} of ${total} blocks`,
   tabN: (n) => `tab ${n}`,
   panelN: (n) => `panel ${n}`,
+  imageN: (n) => `image ${n}`,
   goToPanel: "Go to panel",
   removeFromFooter: "Remove from the footer",
   sessionNoLongerOpen: "That session is no longer open in any panel.",

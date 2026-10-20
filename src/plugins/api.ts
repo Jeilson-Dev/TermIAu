@@ -43,6 +43,29 @@ export type CommandContribution = {
   menu?: Localized;
 };
 
+/// A setting the plugin declares, like VS Code's `contributes.configuration`. The
+/// Plugins tab draws the field; the plugin reads the value with `ctx.settings`.
+export type SettingContribution = {
+  /// Unique within the plugin.
+  key: string;
+  title: Localized;
+  description?: Localized;
+} & (
+  | {
+      /// One of a fixed list, drawn as a select.
+      type: "enum";
+      options: { value: string; label: Localized }[];
+      default: string;
+    }
+  | {
+      /// On or off, drawn as a checkbox.
+      type: "boolean";
+      default: boolean;
+    }
+);
+
+export type SettingValue = string | boolean;
+
 export type Manifest = {
   id: string;
   name: string;
@@ -64,6 +87,7 @@ export type Manifest = {
   contributes?: {
     regions?: RegionContribution[];
     commands?: CommandContribution[];
+    configuration?: SettingContribution[];
   };
   /// Native executables, by name → path in the package. Only a plugin signed by a
   /// publisher TermIAu trusts can install with them.
@@ -114,6 +138,14 @@ export interface PluginContext {
   /// Goes to the app's log (the process stderr), prefixed with the plugin's id.
   log(message: string): void;
   readonly storage: PluginStorage;
+  /// The values of the settings declared in the manifest (`contributes.configuration`),
+  /// which the user changes in the Plugins tab.
+  readonly settings: {
+    /// The value set, or the declared default.
+    get(key: string): SettingValue;
+    /// Fires with the setting's key when the user changes it.
+    onChange(handler: (key: string) => void): Disposable;
+  };
   readonly regions: {
     /// The element of the footer slot declared in the manifest with this id.
     statusBar(id: string): HTMLElement;

@@ -188,11 +188,18 @@ function createDictation(ctx: PluginContext): () => void {
   let waiting: { kinds: string[]; resolve(e: EngineEvent): void } | undefined;
 
   /// Sends a command and waits for one of `kinds` (or an error) back.
-  function ask(cmd: string, kinds: string[]): Promise<EngineEvent> {
+  function ask(cmd: string, kinds: string[], args: Record<string, unknown> = {}): Promise<EngineEvent> {
     return new Promise((resolve) => {
       waiting = { kinds, resolve };
-      engine!.send({ cmd });
+      engine!.send({ cmd, ...args });
     });
+  }
+
+  /// The language Whisper transcribes in, from the plugin's setting: `app` follows
+  /// TermIAu's, `auto` lets Whisper guess each stretch of speech.
+  function spokenLanguage(): string {
+    const chosen = String(ctx.settings.get("language"));
+    return chosen === "app" ? ctx.language : chosen;
   }
 
   async function ensureEngine(): Promise<PluginProcess> {
@@ -316,7 +323,7 @@ function createDictation(ctx: PluginContext): () => void {
         if (done.event === "error") throw new Error(done.message);
       }
       show(t.listening);
-      const started = await ask("start", ["started"]);
+      const started = await ask("start", ["started"], { language: spokenLanguage() });
       if (started.event === "error") throw new Error(started.message);
       listening = true;
       root.classList.add("listening");

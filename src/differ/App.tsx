@@ -207,7 +207,7 @@ export default function App() {
   const scrollLock = useRef(false);
   /** Where the scroll has to go. A new mark (the header's checkbox) only changes the destination. */
   const jumpTarget = useRef<string | null>(null);
-  /** Qual file closing destrava a scrollPos: close e andar junto se atropelam. */
+  /** Which file's closing unlocks scrollPos: closing and moving at once would trip over each other. */
   const jumpFrom = useRef<string | null>(null);
   const jumpTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   /** Lets go of the scroll held still while the reviewed file closes (see `lockScroll`). */

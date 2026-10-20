@@ -52,7 +52,6 @@ import { WEEK_MIN, SESSION_MIN, missingFor, windowNow, statusLineUsage, type Sta
 import { blockProgress, planProgress, type TaskPlan } from "./progress";
 import { loadSettings, onSettings, saveViewMode, type Settings } from "./differ/lib/persist";
 import type { ViewMode } from "./differ/types";
-import { fromLegacy, LEGACY_SESSION, LEGACY_USAGE, LEGACY_VIEWER_PREF } from "./legacy";
 import "@xterm/xterm/css/xterm.css";
 import "./style.css";
 
@@ -185,7 +184,7 @@ type ClaudeSession = {
   /// and the chat field sends that as well as the terminal.
   asks?: "permission" | "terminal";
   /// A Claude question (`AskUserQuestion`) chat mode can
-  /// answer: the hook is waiting for it (see `Pendentes` in lib.rs). The
+  /// answer: the hook is waiting for it (see `PendingQuestions` in lib.rs). The
   /// terminal shows the same question at the same time, and whoever answers first
   /// wins.
   question?: { id: string; questions: QuestionItem[] };
@@ -937,7 +936,7 @@ function createDivisor(d: Split): HTMLDivElement {
 
       const tab = tabOf(d);
       if (!tab) return;
-      measure(tab); // o drawing acompanha o arrasto, frame a frame
+      measure(tab); // the drawing follows the drag, frame by frame
       scheduleSync(tab);
     };
     const release = () => {
@@ -1410,7 +1409,7 @@ function receive(
 ) {
   // The hook wraps Claude's payload with the panel number outside. An
   // earlier one put the panel inside it — and that may be the one still
-  // installed (Rust has already renamed its keys, see `normalize_socket`).
+  // installed.
   const ev: ClaudeEvent = "event" in raw ? { ...raw.event, panel: raw.panel } : raw;
   // A Claude question whose hook stayed waiting for the chat's answer, with
   // the number Rust gave it.
@@ -1423,7 +1422,7 @@ function receive(
   }
 
   // The folder name is what shows on the tab.
-  const name = ev.cwd?.split("/").filter(Boolean).pop() || `painel ${ev.panel}`;
+  const name = ev.cwd?.split("/").filter(Boolean).pop() || T.panelN(ev.panel);
   // The session changes without Claude exiting (a `/clear`, a `/resume`): the last
   // event's always wins. The folder is the one from each session's first event — afterwards
   // Claude may have moved, and `--resume` looks for the session where it was born.
@@ -1514,7 +1513,7 @@ function dropQuestion(leaf: Leaf) {
   const id = leaf.claude?.question?.id;
   if (!id) return;
   leaf.claude!.question = undefined;
-  invoke("question_drop", { id }).catch((e) => jlog(`pergunta_largar: ${e}`));
+  invoke("question_drop", { id }).catch((e) => jlog(`question_drop: ${e}`));
 }
 
 /// Jumps to the next panel that is waiting, in any tab. Repeating the
@@ -1964,6 +1963,7 @@ function keyboard(leaf: Leaf) {
 function createChat(leaf: Leaf): Chat {
   const el = element("div", "chat");
   const list = element("div", "chat-list");
+  list.dataset.empty = T.chatEmpty;
   const question = element("div", "chat-question");
   question.hidden = true;
   const thinking = element("div", "chat-thinking");
@@ -2337,7 +2337,7 @@ function drawSessions(chat: Chat) {
   chat.menu.replaceChildren(
     head,
     ...chat.sessionsFound.map((s, i) => {
-      const item = element("div", "chat-command chat-sessao");
+      const item = element("div", "chat-command chat-session");
       item.dataset.i = String(i);
       item.classList.toggle("selected", i === chat.picked);
       const title = element("span", "chat-session-title");
@@ -2546,7 +2546,7 @@ function drawYour(el: HTMLElement, text: string, images: string[]) {
     if (p.kind === "image") {
       const img = element("img", "chat-image");
       img.src = images[p.index];
-      img.alt = `imagem ${p.index + 1}`;
+      img.alt = T.imageN(p.index + 1);
       img.addEventListener("click", () => expandImage(img.src));
       el.append(img);
     } else if (p.kind === "pasted") {
@@ -2859,13 +2859,13 @@ const LAYOUT_LABEL: Record<Layout, string> = {
   below: T.layoutBelow,
   over: T.layoutOver,
 };
-const VIEWER_KEY = "termiau:visor";
+const VIEWER_KEY = "termiau:viewer";
 
 let { layout: layoutViewer, share: shareViewer } = readPrefViewer();
 
 function readPrefViewer(): { layout: Layout; share: number } {
   try {
-    const savedItem = fromLegacy(JSON.parse(localStorage.getItem(VIEWER_KEY) ?? "{}"), LEGACY_VIEWER_PREF) as {
+    const savedItem = JSON.parse(localStorage.getItem(VIEWER_KEY) ?? "{}") as {
       layout?: Layout;
       share?: number;
     };
@@ -3936,7 +3936,7 @@ async function saveEdit(leaf: Leaf): Promise<boolean> {
 async function canDropEdit(leaf: Leaf): Promise<boolean> {
   const ed = leaf.viewer?.edit;
   if (!ed || ed.area.value === ed.savedItem) return true;
-  const r = await choose("visor-sair-edicao", {
+  const r = await choose("viewer-leave-editing", {
     title: T.saveChangesTitle,
     text: T.saveChangesText,
     confirm: T.save,
@@ -4038,13 +4038,13 @@ function mermaidZoom(drawing: HTMLElement, area: HTMLElement, svg: SVGSVGElement
   const adjusted = () => Math.min(1, (area.clientWidth - 24) / width);
   apply(adjusted());
 
-  const less = element("button", "visor-mermaid-botao");
+  const less = element("button", "viewer-mermaid-button");
   less.textContent = "−";
   less.title = T.zoomLess;
   less.addEventListener("click", () => apply(scale / 1.25));
   pct.title = T.zoomAdjust;
   pct.addEventListener("click", () => apply(adjusted()));
-  const more = element("button", "visor-mermaid-botao");
+  const more = element("button", "viewer-mermaid-button");
   more.textContent = "+";
   more.title = T.zoomMore;
   more.addEventListener("click", () => apply(scale * 1.25));
@@ -4210,7 +4210,7 @@ function referenceClick(leaf: Leaf, e: MouseEvent, base?: string): boolean {
   return true;
 }
 
-// ---------- paths: arrastar e paste files ----------
+// ---------- paths: dragging and pasting files ----------
 
 /// Several files become several arguments, each protected by `quote`.
 /// The space at the end is so the next
@@ -4586,8 +4586,8 @@ function drawBar(leaf: Leaf) {
   b.model.textContent = c?.model ?? T.emptyModel;
   b.model.title = c?.model ? T.modelHint(c.model) : T.emptyModelHint;
   b.effort.hidden = !c?.effort;
-  const esf = EFFORTS.find((e) => e.level === c?.effort);
-  b.effort.textContent = T.effort(esf?.label ?? c?.effort ?? "");
+  const effort = EFFORTS.find((e) => e.level === c?.effort);
+  b.effort.textContent = T.effort(effort?.label ?? c?.effort ?? "");
   b.effort.title = T.effortHint;
 
   const g = leaf.drawer;
@@ -4977,7 +4977,7 @@ async function execute(owner: Leaf, cfg: ConfigLaunch) {
 /// Opens as you left it last time; the first time, hidden.
 function drawerOpenByDefault(): boolean {
   try {
-    return localStorage.getItem("termiau:gaveta") === "aberta";
+    return localStorage.getItem("termiau:drawer") === "open";
   } catch {
     return false;
   }
@@ -4985,7 +4985,7 @@ function drawerOpenByDefault(): boolean {
 
 function rememberDrawer(open: boolean) {
   try {
-    localStorage.setItem("termiau:gaveta", open ? "aberta" : "fechada");
+    localStorage.setItem("termiau:drawer", open ? "open" : "closed");
   } catch {
     // Just a convenience.
   }
@@ -5187,7 +5187,7 @@ function usageColumn(name: string) {
   title.textContent = name;
   const lines = element("span", "usage-lines");
   const time = usageBar(T.timeLeft, "usage-time");
-  const usage = usageBar(T.availableTokens, "uso-uso");
+  const usage = usageBar(T.availableTokens, "usage-tokens");
   lines.append(time.line, usage.line);
   column.append(title, lines);
   return { column, time, usage };
@@ -5355,7 +5355,7 @@ usageEl.addEventListener("mouseenter", replayUsage);
 
 /// The last usage news is kept: the status line only speaks with Claude
 /// running, and opening the app must not leave the footer empty until then.
-const USAGE_KEY = "termiau:uso";
+const USAGE_KEY = "termiau:usage";
 
 /// Usage arrived through some panel's status line: it applies to all, there is
 /// only one account.
@@ -5380,7 +5380,7 @@ function updateUsage() {
 }
 
 try {
-  usageNews = (fromLegacy(JSON.parse(localStorage.getItem(USAGE_KEY) ?? "null"), LEGACY_USAGE) as Usage | null) ?? undefined;
+  usageNews = (JSON.parse(localStorage.getItem(USAGE_KEY) ?? "null") as Usage | null) ?? undefined;
 } catch {
   usageNews = undefined;
 }
@@ -5902,7 +5902,7 @@ function readSession(text: string | null): { tabs: SavedTab[]; active: number; c
   const emptyOne = { tabs: [], active: 0, closed: [] };
   if (!text) return emptyOne;
   try {
-    const given = fromLegacy(JSON.parse(text), LEGACY_SESSION) as { tabs?: unknown; active?: unknown; closed?: unknown } | null;
+    const given = JSON.parse(text) as { tabs?: unknown; active?: unknown; closed?: unknown } | null;
     if (!given || !Array.isArray(given.tabs)) return emptyOne;
     const closed = Array.isArray(given.closed) ? given.closed.flatMap((f) => savedClosed(f) ?? []) : [];
     const savedOnes = given.tabs.flatMap((a: { root?: unknown; focus?: unknown } | null): SavedTab[] => {
@@ -5964,7 +5964,7 @@ function resume(leaf: Leaf, savedItem: Extract<SavedNode, { kind: "leaf" }>) {
     folder: savedItem.cwd ?? undefined,
   };
   invoke("pty_write", { id: leaf.id, data: `claude --resume ${savedItem.claude}\r` }).catch((e) =>
-    jlog(`retomar: ${e}`),
+    jlog(`resume: ${e}`),
   );
 }
 
@@ -6158,14 +6158,14 @@ async function quit() {
 async function askQuit() {
   if (leaving) return;
   const panels = tabs.flatMap((a) => [...leaves(a.root)]);
-  const claudes = panels.filter((f) => f.claude?.session).length;
+  const withClaude = panels.filter((f) => f.claude?.session).length;
   const howMany = T.tabCloses(tabs.length);
   const restores = await invoke<boolean>("restore_enabled").catch(() => false);
   const back = !restores
     ? T.dontComeBack
-    : claudes === 0
+    : withClaude === 0
       ? T.comeBackInFolders
-      : T.comeBackWithSessions(claudes);
+      : T.comeBackWithSessions(withClaude);
   const yes = await ask("quit", {
     title: T.quitTermiau,
     text: T.quitText(howMany, back),
@@ -6464,7 +6464,7 @@ function afterTabs() {
   // Watch the body, NOT the panels: fit() changes the panel and would feed the observer back.
   new ResizeObserver(() => {
     if (!active || inDiff) return;
-    measure(active); // render local acompanha o arrasto, frame a frame
+    measure(active); // the local render follows the drag, frame by frame
     scheduleSync(active);
   }).observe(document.body);
 }

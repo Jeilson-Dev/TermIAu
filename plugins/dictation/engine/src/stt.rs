@@ -113,7 +113,7 @@ impl Engine {
 }
 
 /// Folds accents and case and drops punctuation: the hallucination arrives
-/// decorated and different every time ("Não se esqueça de se inscrever no canal!"),
+/// decorated and different every time ("Don't forget to subscribe!", "Thanks for watching."),
 /// so the comparison has to be on a single form.
 fn normalize(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -140,7 +140,7 @@ fn normalize(s: &str) -> String {
     out.trim().to_string()
 }
 
-/// Removes markers ([MÚSICA], (risos)) and typical silence hallucinations.
+/// Removes markers ([MUSIC], (laughs)) and typical silence hallucinations.
 fn clean(s: &str) -> String {
     let mut t = s.trim().to_string();
 
@@ -158,23 +158,24 @@ fn clean(s: &str) -> String {
     let key = normalize(&t);
 
     // Short standalone phrases: Whisper returns these when it hears only silence.
-    // Exact equality, because "obrigado" in the middle of a sentence is real speech.
-    const JUNK: [&str; 9] = [
-        "you", "thank you", "obrigado", "obrigada", "tchau",
+    // Exact equality, because "thank you" in the middle of a sentence is real speech.
+    // Portuguese and English: Whisper is trained on both and hallucinates in both.
+    const JUNK: &[&str] = &[
+        "you", "thank you", "thanks", "bye", "obrigado", "obrigada", "tchau",
         "legendas pela comunidade amara org", "amara org",
         "legendas pela comunidade", "subtitles by the amara org community",
+        "subtitles by the amara org",
     ];
     if key.is_empty() || JUNK.contains(&key.as_str()) {
         return String::new();
     }
 
-    // Whisper's Portuguese training is full of YouTube captions, and the average
-    // video ends asking for likes and subscriptions. It makes these up over
-    // silence and fan noise, always worded differently — so we match by
-    // content, not equality. The price is that these phrases can't be dictated
-    // on purpose, and dictating "deixa o like" to a shell is not a use case
-    // that exists.
-    const BAITS: [&str; 24] = [
+    // Whisper's training is full of YouTube captions, and the average video ends
+    // asking for likes and subscriptions. It makes these up over silence and fan
+    // noise, always worded differently — so we match by content, not equality.
+    // The price is that these phrases can't be dictated on purpose, and dictating
+    // "like and subscribe" to a shell is not a use case that exists.
+    const BAITS: &[&str] = &[
         "inscreva se no canal", "se inscreva no canal", "inscrever no canal",
         "se inscrever no canal", "nao se esqueca de se inscrever",
         "esqueca de se inscrever", "se inscreve no canal",
@@ -184,6 +185,10 @@ fn clean(s: &str) -> String {
         "obrigado por assistir", "obrigada por assistir",
         "ate o proximo video", "compartilhe o video", "curta o video",
         "like and subscribe", "dont forget to subscribe",
+        "subscribe to the channel", "subscribe to my channel", "please subscribe",
+        "hit the like button", "smash that like button", "leave a like",
+        "hit the bell", "ring the bell", "thanks for watching",
+        "thank you for watching", "see you in the next video",
     ];
     if BAITS.iter().any(|bait| key.contains(bait)) {
         return String::new();
@@ -205,6 +210,9 @@ mod tests {
             "Inscreva-se no canal, ative o sininho.",
             "Obrigado por assistir, até o próximo vídeo!",
             "deixa o like aí galera",
+            "Don't forget to like and subscribe!",
+            "Thanks for watching, see you in the next video.",
+            "Hit the bell so you don't miss anything.",
         ] {
             assert_eq!(clean(phrase), "", "got through: {phrase}");
         }
@@ -214,6 +222,7 @@ mod tests {
     fn normalize_folds_accents_and_punctuation() {
         assert_eq!(normalize("Inscreva-se, JÁ!"), "inscreva se ja");
         assert_eq!(normalize("  ação   ç  "), "acao c");
+        assert_eq!(normalize("Don't, NOW!"), "don t now");
     }
 
     #[test]
@@ -224,6 +233,9 @@ mod tests {
         assert_eq!(clean("Legendas pela comunidade Amara.org"), "");
         assert_eq!(clean("[MÚSICA]"), "");
         assert_eq!(clean("a   reunião    começa   já"), "a reunião começa já");
+        assert_eq!(clean("  [MUSIC]  good morning  "), "good morning");
+        assert_eq!(clean("Thank you."), "");
+        assert_eq!(clean("Bye."), "");
     }
 
     #[test]
@@ -232,6 +244,10 @@ mod tests {
         assert_eq!(clean(s), s);
         // "like" and "canal" outside the catchphrase still get through.
         let s = "gostei do canal de áudio novo";
+        assert_eq!(clean(s), s);
+        let s = "thank you for the review, merging now";
+        assert_eq!(clean(s), s);
+        let s = "subscribe the handler to the channel";
         assert_eq!(clean(s), s);
     }
 }

@@ -278,7 +278,7 @@ export function cancel(id: string) {
   if (!a?.running) return;
   cancelAsk(a.running).catch(() => {});
   // Cancelling the bookmark drafting doesn't touch the conversation; cancelling the question removes it.
-  const drafting = a.running.endsWith(":decisao");
+  const drafting = a.running.endsWith(":decision");
   update(id, { running: null, turns: drafting ? a.turns : a.turns.slice(0, -1) });
 }
 
@@ -287,7 +287,7 @@ export async function draftNote(id: string, root: string, file: FileDiff) {
   const a = get(id);
   const said = a?.decision?.trim();
   if (!a || !said || a.running) return;
-  const run = `${id}:decisao`;
+  const run = `${id}:decision`;
   update(id, { running: run, noteError: null });
   let text: string | null = null;
   let error: string | null = null;

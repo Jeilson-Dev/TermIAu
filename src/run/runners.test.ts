@@ -3,11 +3,11 @@ import type { ConfigLaunch } from "./launch";
 import { commandLine, runnerFor } from "./runners";
 import { word } from "./shell";
 
-const ctx = (flutter: boolean) => ({ folder: "/w/app", home: "/Users/eu", isFlutter: async () => flutter });
+const ctx = (flutter: boolean) => ({ folder: "/w/app", home: "/Users/me", isFlutter: async () => flutter });
 
-function build(cfg: { type: string; [campo: string]: unknown }, flutter = true) {
+function build(cfg: { type: string; [field: string]: unknown }, flutter = true) {
   const runner = runnerFor(cfg.type);
-  if (!runner) throw new Error(`sem runner para ${cfg.type}`);
+  if (!runner) throw new Error(`no runner for ${cfg.type}`);
   const complete: ConfigLaunch = { name: "x", request: "launch", ...cfg };
   return runner.build(complete, ctx(flutter));
 }
@@ -80,7 +80,7 @@ describe("commandLine", () => {
     const plan = {
       label: "Flutter",
       cwd: "/w/app",
-      env: { API: "${env:HOME}/x", "NÃO-VALE": "1" },
+      env: { API: "${env:HOME}/x", "NOT-VÁLID": "1" },
       argv: ["flutter", "run", "-t", "lib/my main.dart"],
     };
     expect(commandLine(plan, null)).toBe('API="${HOME}"/x flutter run -t lib/my\\ main.dart');

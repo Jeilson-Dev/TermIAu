@@ -11,7 +11,7 @@ export type Shortcut = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "shiftKe
 /// xterm needs to know them so it doesn't send the key to the shell before the
 /// window handler acts.
 /// ⌘T, ⌘W, ⌘D and ⌘⇧↩ aren't here: they are menu items, and on macOS the menu takes the
-/// key before anything reaches the page (see `montar_menu` in Rust).
+/// key before anything reaches the page (see `build_menu` in Rust).
 export function ourShortcut(e: Shortcut): boolean {
   if (!e.metaKey) return false;
   if (e.altKey) return e.code.startsWith("Arrow");

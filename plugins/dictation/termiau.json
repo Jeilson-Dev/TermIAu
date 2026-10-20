@@ -4,21 +4,81 @@
   "version": "1.0.0",
   "author": "TermIAu",
   "description": "Speak instead of typing: local transcription with whisper.cpp, typed into the focused panel and sent after a pause.",
-  "engines": { "termiau": ">=0.1.0" },
+  "engines": {
+    "termiau": ">=0.1.0"
+  },
   "main": "main.js",
   "style": "style.css",
   "icon": "icon.svg",
-  "activationEvents": ["onStartupFinished"],
-  "binaries": { "engine": "bin/termiau-dictation" },
-  "platforms": ["darwin-arm64"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "binaries": {
+    "engine": "bin/termiau-dictation"
+  },
+  "platforms": [
+    "darwin-arm64"
+  ],
   "contributes": {
-    "regions": [{ "region": "statusBar", "id": "dictation", "alignment": "left", "priority": 100 }],
+    "regions": [
+      {
+        "region": "statusBar",
+        "id": "dictation",
+        "alignment": "left",
+        "priority": 100
+      }
+    ],
     "commands": [
       {
         "id": "toggle",
-        "title": { "en": "Listen", "pt": "Escutar" },
+        "title": {
+          "en": "Listen",
+          "pt": "Escutar"
+        },
         "keybinding": "CmdOrCtrl+E",
-        "menu": { "en": "Dictation", "pt": "Escuta" }
+        "menu": {
+          "en": "Dictation",
+          "pt": "Escuta"
+        }
+      }
+    ],
+    "configuration": [
+      {
+        "key": "language",
+        "title": {
+          "en": "Spoken language",
+          "pt": "Idioma falado"
+        },
+        "description": {
+          "en": "The language you dictate in. Takes effect the next time dictation turns on.",
+          "pt": "O idioma em que você dita. Vale a partir da próxima vez que a escuta ligar."
+        },
+        "type": "enum",
+        "options": [
+          {
+            "value": "app",
+            "label": {
+              "en": "Same as TermIAu",
+              "pt": "O mesmo do TermIAu"
+            }
+          },
+          {
+            "value": "auto",
+            "label": {
+              "en": "Detect automatically",
+              "pt": "Detectar sozinho"
+            }
+          },
+          {
+            "value": "en",
+            "label": "English"
+          },
+          {
+            "value": "pt",
+            "label": "Português"
+          }
+        ],
+        "default": "app"
       }
     ]
   }

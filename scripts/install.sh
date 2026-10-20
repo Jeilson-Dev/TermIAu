@@ -40,6 +40,5 @@ xattr -cr "$target" 2>/dev/null || true
 codesign --force --deep --sign - "$target" >/dev/null 2>&1 || true
 
 echo "installed: $target"
-# `--rodar` is the flag's earlier name.
-case "${2:-}" in --run | --rodar) open -a "$target" ;; esac
+case "${2:-}" in --run) open -a "$target" ;; esac
 exit 0

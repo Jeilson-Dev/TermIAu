@@ -26,6 +26,9 @@ import {
   localize,
   pluginFileUrl,
   regionProblems,
+  settingProblems,
+  settingStorageKey,
+  settingValue,
   sortStatusBar,
   type InstalledPlugin,
   type StatusBarEntry,
@@ -131,6 +134,24 @@ export function createPluginHost(core: CoreServices) {
         set: (k, v) => localStorage.setItem(prefix + k, v),
         remove: (k) => localStorage.removeItem(prefix + k),
       },
+      settings: {
+        get(key) {
+          const s = manifest.contributes?.configuration?.find((c) => c.key === key);
+          if (!s) throw new Error(`no setting "${key}" in the manifest`);
+          return settingValue(s, localStorage.getItem(settingStorageKey(manifest.id, key)));
+        },
+        onChange(handler) {
+          // The Plugins tab writes from its own document; this one hears the `storage` event.
+          const listen = (e: StorageEvent) => {
+            const key = manifest.contributes?.configuration?.find((c) => e.key === settingStorageKey(manifest.id, c.key))?.key;
+            if (key) handler(key);
+          };
+          window.addEventListener("storage", listen);
+          const d = { dispose: () => window.removeEventListener("storage", listen) };
+          entry.subscriptions.push(d);
+          return d;
+        },
+      },
       regions: {
         statusBar(id) {
           const slot = slots.get(id);
@@ -233,7 +254,7 @@ export function createPluginHost(core: CoreServices) {
 
   async function activate(p: InstalledPlugin) {
     const m = p.manifest!;
-    const problems = regionProblems(m);
+    const problems = [...regionProblems(m), ...settingProblems(m)];
     if (problems.length) return fail(m.id, problems.join("; "));
 
     const entry: Active = { manifest: m, subscriptions: [], commands: new Map(), slots: [] };

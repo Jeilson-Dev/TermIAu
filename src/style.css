@@ -202,7 +202,7 @@ body {
 }
 
 /* The terminal inside the panel: between the bar, on top, and the drawer, below.
-   Inside it, `.folha-tela` (the terminal and the chat) and, when the viewer is
+   Inside it, `.leaf-screen` (the terminal and the chat) and, when the viewer is
    split, the handle and the viewer beside it. */
 .leaf-term {
   flex: 1;
@@ -218,7 +218,7 @@ body {
   position: relative;
 }
 
-/* The breathing room goes on `.xterm`, NOT on `.folha-tela`: FitAddon measures the
+/* The breathing room goes on `.xterm`, NOT on `.leaf-screen`: FitAddon measures the
    parent's height and only discounts `.xterm`'s own padding. With the padding on the parent (and
    `border-box`), the 10px top+bottom counted as free
    space — whenever the remainder of dividing by the cell height was less than
@@ -433,7 +433,7 @@ body {
 }
 
 /* Armed tab: the first click on ✕ lit the ring red, and the second,
-   within CONFIRMA_FECHAR (src/main.ts), closes it. The notice is the ring and not ✕
+   within CONFIRM_CLOSE (src/main.ts), closes it. The notice is the ring and not ✕
    because what matters isn't that the button was pressed, it is WHICH tab is going
    away — the ring outlines the whole tab and answers that on its own.
 
@@ -909,7 +909,7 @@ body {
   border-radius: 6px;
   box-shadow: 0 6px 20px #0009;
   overflow-y: auto;
-  /* The max-height alternarMenu writes is the height of the whole box on
+  /* The max-height toggleMenu writes is the height of the whole box on
      screen. Without this it would apply only to the content, and the padding and border
      pushed the end of the list 10px past the computed limit. */
   box-sizing: border-box;
@@ -1014,7 +1014,7 @@ body {
 }
 
 /* The panel about to get the file being dragged. It comes after
-   `.esperando` on purpose: both are outlines and may apply at the same time,
+   `.waiting` on purpose: both are outlines and may apply at the same time,
    and during the drag the destination matters more than the notice. Thicker than the
    focus outline because it is the only response there is while the pointer
    holds the file — the app's cursor doesn't even show. */
@@ -1801,7 +1801,7 @@ body.dragging * {
 }
 
 
-/* ---------- modo chat ---------- */
+/* ---------- chat mode ---------- */
 
 /* The chat covers the terminal without moving it: xterm keeps measuring the
    same area underneath. */
@@ -2509,7 +2509,7 @@ body.dragging * {
   border: 0;
   background: transparent;
   color-scheme: dark;
-  /* Invisible until the page is drawn (.pronta): loading, WebKit paints it white.
+  /* Invisible until the page is drawn (.ready): loading, WebKit paints it white.
      Transparent, not `visibility: hidden` — hidden, the first field couldn't take the cursor
      when the page mounts. */
   opacity: 0;
@@ -3329,7 +3329,7 @@ body.dragging * {
 
 /* Before the first turn: Claude just opened, or the conversation is new. */
 .chat-list:not(:has(.chat-message, .chat-tool))::before {
-  content: "Nenhuma mensagem ainda. Escreva abaixo para começar.";
+  content: attr(data-empty);
   margin: auto;
   font-size: 12px;
   color: var(--comment);

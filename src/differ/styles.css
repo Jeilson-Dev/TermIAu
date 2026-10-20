@@ -2348,6 +2348,57 @@ tr.gap {
   overflow-wrap: anywhere;
 }
 
+/* The settings the plugin declares, under its description. */
+.plugin-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--selection);
+}
+
+.plugin-setting {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 12px;
+}
+
+.plugin-setting-name,
+.plugin-setting-check {
+  color: var(--fg);
+}
+
+.plugin-setting-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.plugin-setting select {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--selection);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 12px;
+  transition: border-color 0.2s ease;
+}
+
+.plugin-setting select:focus {
+  border-color: var(--purple);
+  outline: none;
+}
+
+.plugin-setting-help {
+  flex-basis: 100%;
+  font-size: 11.5px;
+  color: var(--fg-dim);
+}
+
 .plugin-controls {
   flex: none;
   display: flex;

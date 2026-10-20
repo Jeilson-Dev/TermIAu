@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setLanguage, language } from "./i18n";
 import { missingFor, remainingFraction, windowNow, autoCompactLimit, paceLevel, contextLevel, usageLevel, statusLineUsage } from "./usage";
 
-// The texts expected here are the Portuguese ones.
+// The texts expected here are the English ones.
 const initial = language();
-beforeEach(() => setLanguage("pt"));
+beforeEach(() => setLanguage("en"));
 afterEach(() => setLanguage(initial));
 
 const now = Date.parse("2026-10-09T12:00:00Z");
@@ -36,7 +36,7 @@ describe("usage", () => {
     expect(missingFor(fromHere(113), now)).toBe("1h53");
     expect(missingFor(fromHere(42), now)).toBe("42min");
     expect(missingFor(fromHere(60 * 76), now)).toBe("3d4h");
-    expect(missingFor(fromHere(-1), now)).toBe("agora");
+    expect(missingFor(fromHere(-1), now)).toBe("now");
   });
 });
 

@@ -144,6 +144,12 @@ bar with the command's shortcut, and `icon` is what the Plugins tab shows (a plu
 without one gets the default plugin icon). Rust builds the menu (`src-tauri/src/plugins.rs`) and
 serves the plugin's files over `termiau-plugin://`.
 
+A plugin can also declare **settings** (`contributes.configuration`, like VS Code's):
+each one a `key`, a localized `title` and `description`, and a `type` — `enum` (with
+`options`) or `boolean` — with a `default`. The Plugins tab draws them under the
+plugin, and the plugin reads them with `ctx.settings.get(key)` and hears changes with
+`ctx.settings.onChange`. Dictation uses one for the spoken language.
+
 A plugin runs inside the app's webview, with the app's access: installing one is
 trusting it. What the app does guarantee is that a broken one doesn't take it
 down — the error shows in the Plugins tab.

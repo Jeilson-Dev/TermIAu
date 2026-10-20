@@ -10,9 +10,6 @@
 # `install_cli` in lib.rs). Like the hook, it only talks to the app's socket:
 # TERMIAU_PANEL says which panel the request is from; the panel's shell
 # inherits it — and so does Claude, running in it.
-#
-# `ver` and `progresso` are the subcommands' earlier names, and TERMIAU_PAINEL the
-# variable's: a Claude session started before the rename still uses them.
 set -uo pipefail
 
 usage() {
@@ -22,7 +19,7 @@ usage() {
   exit 2
 }
 
-PANEL="${TERMIAU_PANEL:-${TERMIAU_PAINEL:-0}}"
+PANEL="${TERMIAU_PANEL:-0}"
 case "$PANEL" in '' | *[!0-9]*) PANEL=0 ;; esac
 
 # ---------- termiau progress: a long task's plan, in the footer ----------
@@ -31,7 +28,7 @@ case "$PANEL" in '' | *[!0-9]*) PANEL=0 ;; esac
 # text (escaped here, without `jq`) and the app parses and checks it: what is wrong
 # comes back on this connection and becomes this command's error — that is how Claude
 # learns to fix it. See progress.rs.
-if [ "${1:-}" = progress ] || [ "${1:-}" = progresso ]; then
+if [ "${1:-}" = progress ]; then
   shift
   if [ -z "${TERMIAU_SOCK:-}" ] || [ ! -S "$TERMIAU_SOCK" ]; then
     echo "termiau: only works inside a TermIAu panel" >&2
@@ -60,7 +57,7 @@ if [ "${1:-}" = progress ] || [ "${1:-}" = progresso ]; then
   exit 0
 fi
 
-[ "${1:-}" = view ] || [ "${1:-}" = ver ] || usage
+[ "${1:-}" = view ] || usage
 shift
 
 target="" ref=""

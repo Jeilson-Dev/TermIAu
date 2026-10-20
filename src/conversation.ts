@@ -538,7 +538,7 @@ export type Command = {
 
 /// The commands that come built into Claude Code. Written by hand: it doesn't publish them
 /// anywhere readable from outside. Yours (commands, skills, plugins)
-/// come from disk, through Rust's `comandos_listar`.
+/// come from disk, through Rust's `commands_list`.
 export const CLAUDE_COMMANDS: Command[] = [
   { name: "clear", description: T.cmdClear },
   { name: "compact", description: T.cmdCompact },

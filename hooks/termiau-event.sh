@@ -2,8 +2,7 @@
 # Forwards a Claude Code event to the TermIAu panel it came from.
 #
 # The environment says which panel: TermIAu sets TERMIAU_PANEL and
-# TERMIAU_SOCK in every shell it opens (and TERMIAU_PAINEL, the earlier name),
-# and this hook runs as its descendant.
+# TERMIAU_SOCK in every shell it opens, and this hook runs as its descendant.
 # Outside TermIAu neither exists and the hook exits quietly — that is what lets the
 # same settings.json serve iTerm2, VS Code and any other terminal.
 set -uo pipefail
@@ -23,7 +22,7 @@ if [ "${1:-}" = status ]; then
   fi
   STATUS=$(cat)
   [ -n "${STATUS// /}" ] || exit 0
-  PANEL="${TERMIAU_PANEL:-${TERMIAU_PAINEL:-0}}"
+  PANEL="${TERMIAU_PANEL:-0}"
   case "$PANEL" in '' | *[!0-9]*) PANEL=0 ;; esac
   {
     printf '{"panel":%s,"status":%s}' "$PANEL" "$STATUS" | nc -U "$TERMIAU_SOCK" -w 1
@@ -115,7 +114,7 @@ diff_of_bash() {
   } | head -c 1048576 >"$DIFFS/$session/$id.patch"
 }
 
-PANEL="${TERMIAU_PANEL:-${TERMIAU_PAINEL:-0}}"
+PANEL="${TERMIAU_PANEL:-0}"
 case "$PANEL" in '' | *[!0-9]*) PANEL=0 ;; esac
 
 case "$PAYLOAD" in

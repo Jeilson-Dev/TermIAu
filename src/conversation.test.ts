@@ -23,14 +23,14 @@ describe("readMessages", () => {
       line({ type: "assistant", message: { content: [{ type: "thinking", thinking: "" }] } }),
       line({
         type: "assistant",
-        message: { content: [{ type: "tool_use", name: "Bash", input: { command: "ls\n-la", description: "Lista" } }] },
+        message: { content: [{ type: "tool_use", name: "Bash", input: { command: "ls\n-la", description: "List" } }] },
       }),
       line({ type: "user", message: { content: [{ type: "tool_result", content: "a" }] } }),
       line({ type: "assistant", message: { content: [{ type: "text", text: "pronto" }] } }),
     ].join("\n");
     expect(readMessages(jsonl)).toEqual([
       { who: "you", text: "oi" },
-      { who: "tool", name: "Bash", summary: "Lista" },
+      { who: "tool", name: "Bash", summary: "List" },
       { who: "claude", text: "pronto" },
     ]);
   });
@@ -92,7 +92,7 @@ describe("readMessages", () => {
 });
 
 describe("markdown", () => {
-  it("with origem, each block carries the source lines it came from", () => {
+  it("with origin, each block carries the source lines it came from", () => {
     const md = "# T\n\nlinha um\nlinha dois\n\n- a\n  cont\n- b\n\n```\nx\n```\n\n| a |\n|---|\n| 1 |";
     expect(markdown(md, 0, undefined, true)).toBe(
       '<h1 data-from="1" data-to="1">T</h1>' +
@@ -126,20 +126,20 @@ describe("markdown", () => {
   });
 
   it("checkboxes only where asked, with the item's line to mark", () => {
-    const md = "# Plano\n- [ ] a\n- [x] **b**\n- c";
+    const md = "# Plan\n- [ ] a\n- [x] **b**\n- c";
     expect(markdown(md, 0)).toContain("<li>[ ] a</li>");
     expect(markdown(md, 0, "mark")).toBe(
-      '<h1>Plano</h1><ul><li><input type="checkbox" class="task" data-line="1">a</li>' +
+      '<h1>Plan</h1><ul><li><input type="checkbox" class="task" data-line="1">a</li>' +
         '<li><input type="checkbox" class="task" checked data-line="2"><strong>b</strong></li><li>c</li></ul>',
     );
     expect(markdown("- [X] a", 0, "view")).toBe('<ul><li><input type="checkbox" class="task" checked disabled>a</li></ul>');
   });
 
   it("checkboxes in table cells, with line and column", () => {
-    const md = "| feito | item |\n|---|---|\n| [x] | a |\n| [ ] b | [x] |";
+    const md = "| done | item |\n|---|---|\n| [x] | a |\n| [ ] b | [x] |";
     expect(markdown(md, 0)).toContain("<td>[x]</td>");
     expect(markdown(md, 0, "mark")).toBe(
-      "<table><thead><tr><th>feito</th><th>item</th></tr></thead><tbody>" +
+      "<table><thead><tr><th>done</th><th>item</th></tr></thead><tbody>" +
         '<tr><td><input type="checkbox" class="task" checked data-line="2" data-column="0"></td><td>a</td></tr>' +
         '<tr><td><input type="checkbox" class="task" data-line="3" data-column="0">b</td>' +
         '<td><input type="checkbox" class="task" checked data-line="3" data-column="1"></td></tr></tbody></table>',
@@ -174,18 +174,18 @@ describe("markdown", () => {
 
 describe("promptLines", () => {
   const screen = [
-    "❯ para remover o pooling o q falta eh...",
+    "❯ what is left to remove the pooling...",
     "",
-    "● Para remover o polling o que falta é",
-    "  > uma citação",
-    "❯ segunda pergunta bem",
-    "  comprida",
+    "● To remove the polling, what is left is",
+    "  > a quote",
+    "❯ a second, quite",
+    "  long question",
     "",
     "❯ ",
   ];
 
   it("finds only the known prompts", () => {
-    const prompts = ["para remover o pooling o q falta eh...", "segunda pergunta bem\ncomprida"];
+    const prompts = ["what is left to remove the pooling...", "a second, quite\nlong question"];
     expect(promptLines(screen, prompts)).toEqual([
       { line: 0, height: 1 },
       { line: 4, height: 2 },
@@ -197,7 +197,7 @@ describe("promptLines", () => {
   });
 
   it("matches a line wrapped by a narrow panel", () => {
-    expect(promptLines(["> uma pergunta"], ["uma pergunta que continua depois da quebra"])).toEqual([
+    expect(promptLines(["> a question"], ["a question that goes on after the wrap"])).toEqual([
       { line: 0, height: 1 },
     ]);
   });
@@ -205,7 +205,7 @@ describe("promptLines", () => {
 
 describe("filterCommands", () => {
   const all = [
-    { name: "review", description: "meu" },
+    { name: "review", description: "mine" },
     { name: "clear", description: "" },
     { name: "design:design-critique", description: "" },
     { name: "code-review", description: "" },
@@ -214,7 +214,7 @@ describe("filterCommands", () => {
 
   it("puts first the ones starting with the typed text, without repeating names", () => {
     expect(filterCommands(all, "rev").map((c) => `${c.name}|${c.description}`)).toEqual([
-      "review|meu",
+      "review|mine",
       "code-review|",
     ]);
   });
@@ -230,11 +230,11 @@ describe("filterCommands", () => {
 
 describe("partsOfYour", () => {
   it("removes the tags from pasted text", () => {
-    const t = 'antes\n<pasted_content id="56ad">\nlog\nmais\n</pasted_content id="56ad">\ndepois';
+    const t = 'before\n<pasted_content id="56ad">\nlog\nmore\n</pasted_content id="56ad">\nafter';
     expect(partsOfYour(t, 0)).toEqual([
-      { kind: "text", text: "antes" },
-      { kind: "pasted", text: "log\nmais" },
-      { kind: "text", text: "depois" },
+      { kind: "text", text: "before" },
+      { kind: "pasted", text: "log\nmore" },
+      { kind: "text", text: "after" },
     ]);
   });
 
@@ -297,8 +297,8 @@ describe("readMessages and the diffs", () => {
 
 describe("Claude's questions", () => {
   const qs = [
-    { question: "Qual cor?", header: "Cor", options: [{ label: "Azul" }, { label: "Verde" }] },
-    { question: "Quais partes?", multiSelect: true, options: [{ label: "A" }, { label: "B" }] },
+    { question: "Which color?", header: "Color", options: [{ label: "Blue" }, { label: "Green" }] },
+    { question: "Which parts?", multiSelect: true, options: [{ label: "A" }, { label: "B" }] },
   ];
 
   it("only accepts the AskUserQuestion format", () => {
@@ -309,18 +309,18 @@ describe("Claude's questions", () => {
   });
 
   it("waits for all questions to be answered", () => {
-    expect(hookAnswer(qs, [{ labels: ["Azul"] }, undefined])).toBeUndefined();
-    expect(hookAnswer(qs, [{ labels: ["Azul"] }, { labels: [], other: "  " }])).toBeUndefined();
+    expect(hookAnswer(qs, [{ labels: ["Blue"] }, undefined])).toBeUndefined();
+    expect(hookAnswer(qs, [{ labels: ["Blue"] }, { labels: [], other: "  " }])).toBeUndefined();
   });
 
   it("builds the decision with answers keyed by question text", () => {
-    const r = JSON.parse(hookAnswer(qs, [{ labels: [], other: "Roxo" }, { labels: ["A", "B"], other: "C" }])!);
+    const r = JSON.parse(hookAnswer(qs, [{ labels: [], other: "Purple" }, { labels: ["A", "B"], other: "C" }])!);
     expect(r).toEqual({
       hookSpecificOutput: {
         hookEventName: "PermissionRequest",
         decision: {
           behavior: "allow",
-          updatedInput: { questions: qs, answers: { "Qual cor?": "Roxo", "Quais partes?": "A, B, C" } },
+          updatedInput: { questions: qs, answers: { "Which color?": "Purple", "Which parts?": "A, B, C" } },
         },
       },
     });
@@ -367,7 +367,7 @@ describe("provisionalResolved", () => {
   it("removes the provisional bubble of the turn that arrived, not just the oldest", () => {
     expect(provisionalResolved(["a", "b"], "a")).toBe(1);
     // An old provisional one that never became a turn goes along with the one after it.
-    expect(provisionalResolved(["!ls", "3.6 valido"], "3.6 valido")).toBe(2);
+    expect(provisionalResolved(["!ls", "3.6 valid"], "3.6 valid")).toBe(2);
   });
 
   it("matches queued messages Claude merged into a single turn", () => {

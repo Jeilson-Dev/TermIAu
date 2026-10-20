@@ -8,17 +8,17 @@ const base = {
   side: "new" as const,
   startLine: 12,
   endLine: 35,
-  note: "poderia trocar esses if/else por um switch/case?",
+  note: "could these if/else become a switch/case?",
 };
 
 const initial = language();
-beforeEach(() => setLanguage("pt"));
+beforeEach(() => setLanguage("en"));
 afterEach(() => setLanguage(initial));
 
 describe("bookmarkReference", () => {
   it("formats a line range with the comment", () => {
     expect(bookmarkReference(base)).toBe(
-      "packages/app/lib/main.dart:12-35\ncomment:\npoderia trocar esses if/else por um switch/case?",
+      "packages/app/lib/main.dart:12-35\ncomment:\ncould these if/else become a switch/case?",
     );
   });
 
@@ -34,35 +34,35 @@ describe("bookmarkReference", () => {
 
   it("points old-side notes at the previous path", () => {
     expect(bookmarkReference({ ...base, side: "old" }, "lib/old.dart")).toMatch(
-      /^lib\/old\.dart:12-35 \(versão anterior\)\n/,
-    );
-    setLanguage("en");
-    expect(bookmarkReference({ ...base, side: "old" }, "lib/old.dart")).toMatch(
       /^lib\/old\.dart:12-35 \(previous version\)\n/,
+    );
+    setLanguage("pt");
+    expect(bookmarkReference({ ...base, side: "old" }, "lib/old.dart")).toMatch(
+      /^lib\/old\.dart:12-35 \(versão anterior\)\n/,
     );
   });
 });
 
 describe("bookmarksReference", () => {
   const bookmark = (n: number, resolved = false) =>
-    ({ ...base, id: `b${n}`, startLine: n, endLine: n, note: `nota ${n}`, resolved }) as Bookmark;
+    ({ ...base, id: `b${n}`, startLine: n, endLine: n, note: `note ${n}`, resolved }) as Bookmark;
 
   it("joins every comment under a count, in the order given", () => {
     const text = bookmarksReference([bookmark(1), bookmark(2)], (b) => bookmarkReference(b));
     expect(text).toBe(
-      "2 comentários de revisão\n\n" +
-        `${base.path}:1\ncomment:\nnota 1\n\n` +
-        `${base.path}:2\ncomment:\nnota 2`,
+      "2 review comments\n\n" +
+        `${base.path}:1\ncomment:\nnote 1\n\n` +
+        `${base.path}:2\ncomment:\nnote 2`,
     );
   });
 
   it("marks the ones already checked off", () => {
     expect(bookmarksReference([bookmark(3, true)], (b) => bookmarkReference(b))).toBe(
-      `1 comentário de revisão\n\n${base.path}:3\ncomment:\nnota 3\n(resolvido)`,
+      `1 review comment\n\n${base.path}:3\ncomment:\nnote 3\n(resolved)`,
     );
-    setLanguage("en");
+    setLanguage("pt");
     expect(bookmarksReference([bookmark(3, true)], (b) => bookmarkReference(b))).toBe(
-      `1 review comment\n\n${base.path}:3\ncomment:\nnota 3\n(resolved)`,
+      `1 comentário de revisão\n\n${base.path}:3\ncomment:\nnote 3\n(resolvido)`,
     );
   });
 

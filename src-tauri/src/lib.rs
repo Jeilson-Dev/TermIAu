@@ -127,8 +127,6 @@ fn shell(cwd: Option<String>, id: u64, cfg: &Config) -> CommandBuilder {
     // of this shell, so it inherits both — and outside TermIAu they don't exist, which
     // is what keeps the same hook quiet in another terminal.
     cmd.env("TERMIAU_PANEL", id.to_string());
-    // The name the hook and the CLI read before; one installed by an earlier version still does.
-    cmd.env("TERMIAU_PAINEL", id.to_string());
     cmd.env("TERMIAU_SOCK", &cfg.socket);
     cmd
 }
@@ -509,7 +507,7 @@ fn diff_from_hook(transcript: &std::path::Path, line: &str) -> Option<String> {
 fn files_from_patch(text: &str) -> Vec<serde_json::Value> {
     use serde_json::json;
     let mut lines = text.lines();
-    let root = lines.next().and_then(|l| l.strip_prefix("# root ").or_else(|| l.strip_prefix("# raiz "))).unwrap_or("");
+    let root = lines.next().and_then(|l| l.strip_prefix("# root ")).unwrap_or("");
     let mut files: Vec<serde_json::Value> = Vec::new();
     let mut path: Option<String> = None;
     let mut hunks: Vec<serde_json::Value> = Vec::new();
@@ -682,7 +680,7 @@ fn question_drop(pending: State<'_, PendingQuestions>, id: String) {
 
 /// Listens to the events Claude Code's hooks send and hands them to the webview.
 /// A unix socket, one connection per event: the hook writes a JSON and closes. The
-/// exception is Claude's question: it arrives with `"espera":true` and a trailing
+/// exception is Claude's question: it arrives with `"wait":true` and a trailing
 /// newline, and the connection stays open waiting for the answer (see
 /// `PendingQuestions`).
 ///
@@ -716,7 +714,6 @@ fn listen_hooks(app: AppHandle, path: PathBuf) {
                 if text.trim().is_empty() {
                     return;
                 }
-                let text = normalize_socket(&text);
                 // `termiau progress` waits for the answer: a plan that doesn't hold up goes
                 // back to Claude as the command's error, for it to fix.
                 if let Some(checked) = progress::from_socket(&text) {
@@ -754,37 +751,10 @@ fn waiting_question(text: &str) -> Option<serde_json::Value> {
     (v["wait"].as_bool() == Some(true)).then_some(v)
 }
 
-/// What came through the socket, with today's key names. The CLI and the hook
-/// used to send Portuguese ones (`painel`, `evento`, `espera`, `progresso_texto`,
-/// `ver: {path, line, ate}`), and a hook installed by an earlier version — or
-/// a Claude session that learned the old `termiau` — may still. What isn't a JSON
-/// object goes on as it came.
-fn normalize_socket(text: &str) -> String {
-    use serde_json::{Map, Value};
-    fn rename(m: &mut Map<String, Value>, keys: &[(&str, &str)]) {
-        for (old, new) in keys {
-            if let Some(v) = m.remove(*old) {
-                m.entry(*new).or_insert(v);
-            }
-        }
-    }
-    let Ok(Value::Object(mut m)) = serde_json::from_str::<Value>(text.trim()) else {
-        return text.to_string();
-    };
-    rename(
-        &mut m,
-        &[("painel", "panel"), ("evento", "event"), ("espera", "wait"), ("progresso_texto", "progress_text"), ("ver", "view")],
-    );
-    if let Some(Value::Object(view)) = m.get_mut("view") {
-        rename(view, &[("caminho", "path"), ("linha", "line"), ("ate", "to")]);
-    }
-    Value::Object(m).to_string()
-}
-
 // ---------- the viewer: a file shown inside the panel ----------
 
 /// The command Claude (or you) runs to open a file in the panel:
-/// `termiau ver file:line`. It only talks to the socket, like the hook.
+/// `termiau view file:line`. It only talks to the socket, like the hook.
 const CLI: &str = include_str!("../../hooks/termiau");
 
 fn cli_dir() -> Option<PathBuf> {
@@ -1119,9 +1089,7 @@ fn open_in_editor(path: String, line: Option<u32>, command: Option<String>) -> R
 /// `{file}` in the command, it goes at the end.
 fn editor_command(command: &str, path: &str, line: u32) -> String {
     let quoted = format!("'{}'", path.replace('\'', "'\\''"));
-    // `{file}` and `{line}` are the names the Portuguese UI showed; both work.
-    let command = command.replace("{arquivo}", "{file}");
-    let with_line = command.replace("{linha}", "{line}").replace("{line}", &line.to_string());
+    let with_line = command.replace("{line}", &line.to_string());
     if with_line.contains("{file}") {
         with_line.replace("{file}", &quoted)
     } else {
@@ -1175,13 +1143,7 @@ fn claude_dir() -> Option<PathBuf> {
     dirs_home().map(|h| PathBuf::from(h).join(".claude"))
 }
 
-/// The script's name today. `termiau-evento.sh` is the one earlier versions installed:
-/// still ours, so an update replaces its entries instead of adding a second hook.
 const HOOK_FILE: &str = "termiau-event.sh";
-
-fn hook_is_ours(h: &serde_json::Value) -> bool {
-    h["command"].as_str().is_some_and(|c| c.contains("termiau-event.sh") || c.contains("termiau-evento"))
-}
 
 fn hook_is_current(h: &serde_json::Value) -> bool {
     h["command"].as_str().is_some_and(|c| c.contains(HOOK_FILE))
@@ -1193,7 +1155,7 @@ fn hook_is_current(h: &serde_json::Value) -> bool {
 /// whoever put it there wanted something else.
 fn status_line_current(settings: &serde_json::Value) -> bool {
     let s = &settings["statusLine"];
-    s.is_object() && !hook_is_ours(s) || hook_is_current(s) && s["command"].as_str().is_some_and(|c| c.ends_with(" status"))
+    s.is_object() && !hook_is_current(s) || hook_is_current(s) && s["command"].as_str().is_some_and(|c| c.ends_with(" status"))
 }
 
 fn status_line(command: &str) -> serde_json::Value {
@@ -1225,8 +1187,7 @@ fn hooks_state() -> &'static str {
     let Some(dir) = claude_dir().filter(|d| d.is_dir()) else { return "no-claude" };
     let script = dir.join("hooks").join(HOOK_FILE);
     if !script.exists() {
-        // Only the old script: installed, by a version from before the rename.
-        return if dir.join("hooks/termiau-evento.sh").exists() { "outdated" } else { "missing" };
+        return "missing";
     }
     let script_current = std::fs::read_to_string(&script).is_ok_and(|s| s == HOOK);
     let registered = std::fs::read_to_string(dir.join("settings.json"))
@@ -1282,7 +1243,7 @@ fn hooks_install() -> Result<(), String> {
             hooks.get(*event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
         for g in &mut groups {
             if let Some(hs) = g.get_mut("hooks").and_then(|h| h.as_array_mut()) {
-                hs.retain(|h| !hook_is_ours(h));
+                hs.retain(|h| !hook_is_current(h));
             }
         }
         groups.retain(|g| g["hooks"].as_array().is_some_and(|hs| !hs.is_empty()));
@@ -1350,21 +1311,6 @@ fn session_file(app: &AppHandle) -> Result<PathBuf, String> {
 /// built here in Rust, before the webview exists to say anything.
 fn restore_marker(app: &AppHandle) -> Option<PathBuf> {
     Some(data_dir(app).ok()?.join("restore-tabs"))
-}
-
-/// The session file and the restore flag had Portuguese names (`session.json`,
-/// `restaurar-abas`) before: on the first launch after the rename they are moved
-/// to the new ones, so neither the choice nor the tabs get lost.
-fn migrate_legacy_files(app: &AppHandle) {
-    let Ok(dir) = data_dir(app) else { return };
-    for (old, new) in [("sessao.json", "session.json"), ("restaurar-abas", "restore-tabs")] {
-        let (old, new) = (dir.join(old), dir.join(new));
-        if old.exists() && !new.exists() {
-            if let Err(e) = std::fs::rename(&old, &new) {
-                eprintln!("[termiau] couldn't move {old:?} to {new:?}: {e}");
-            }
-        }
-    }
 }
 
 #[tauri::command]
@@ -1617,8 +1563,6 @@ pub fn run() {
             if let Some(w) = app.get_webview_window("main") {
                 window::show(&w);
             }
-            // Before the menu: its "Restore Tabs" checkmark reads the flag.
-            migrate_legacy_files(app.handle());
             build_menu(app.handle())?;
             install_cli();
             Ok(())
@@ -1735,7 +1679,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod patch_tests {
-    use super::{files_from_patch, normalize_socket, waiting_question};
+    use super::{files_from_patch, waiting_question};
 
     #[test]
     fn only_a_waiting_question_keeps_the_connection() {
@@ -1746,27 +1690,14 @@ mod patch_tests {
     }
 
     #[test]
-    fn the_old_socket_keys_are_renamed() {
-        let v = |s: &str| serde_json::from_str::<serde_json::Value>(&normalize_socket(s)).unwrap();
-        let q = v(r#"{"painel":2,"evento":{"tool_name":"AskUserQuestion"},"espera":true}"#);
-        assert_eq!(q, serde_json::json!({ "panel": 2, "event": { "tool_name": "AskUserQuestion" }, "wait": true }));
-        let view = v(r#"{"painel":1,"ver":{"caminho":"/x","linha":3,"ate":null,"ref":"main"}}"#);
-        assert_eq!(view, serde_json::json!({ "panel": 1, "view": { "path": "/x", "line": 3, "to": null, "ref": "main" } }));
-        assert_eq!(v(r#"{"painel":1,"progresso_texto":"null"}"#), serde_json::json!({ "panel": 1, "progress_text": "null" }));
-        // The new keys pass as they are; what isn't JSON too.
-        assert_eq!(v(r#"{"panel":4,"status":{}}"#), serde_json::json!({ "panel": 4, "status": {} }));
-        assert_eq!(normalize_socket("junk\n"), "junk\n");
-    }
-
-    #[test]
     fn reads_the_hook_patch() {
         let patch = "# root /repo\n\
-diff --git a/novo.txt b/novo.txt\n\
+diff --git a/new.txt b/new.txt\n\
 new file mode 100644\n\
 --- /dev/null\n\
-+++ b/novo.txt\n\
++++ b/new.txt\n\
 @@ -0,0 +1 @@\n\
-+novo\n\
++new\n\
 diff --git a/x.txt b/x.txt\n\
 --- a/x.txt\n\
 +++ b/x.txt\n\
@@ -1775,10 +1706,10 @@ diff --git a/x.txt b/x.txt\n\
 -b\n\
 +B\n\
 @@ -40 +40 @@\n\
---- velho\n\
-+++ novo\n\
-diff --git a/apagado.txt b/apagado.txt\n\
---- a/apagado.txt\n\
+--- old\n\
++++ new\n\
+diff --git a/deleted.txt b/deleted.txt\n\
+--- a/deleted.txt\n\
 +++ /dev/null\n\
 @@ -1 +0,0 @@\n\
 -x\n\
@@ -1786,10 +1717,10 @@ diff --git a/img.png b/img.png\n\
 Binary files a/img.png and b/img.png differ\n";
         let a = files_from_patch(patch);
         let paths: Vec<_> = a.iter().map(|f| f["path"].as_str().unwrap()).collect();
-        assert_eq!(paths, ["/repo/novo.txt", "/repo/x.txt", "/repo/apagado.txt"]);
+        assert_eq!(paths, ["/repo/new.txt", "/repo/x.txt", "/repo/deleted.txt"]);
         assert_eq!(a[0]["hunks"][0]["newStart"], 1);
-        // Inside a hunk, `--- velho` is a removed line, not a header.
-        assert_eq!(a[1]["hunks"][1]["lines"], serde_json::json!(["--- velho", "+++ novo"]));
+        // Inside a hunk, `--- old` is a removed line, not a header.
+        assert_eq!(a[1]["hunks"][1]["lines"], serde_json::json!(["--- old", "+++ new"]));
         assert_eq!(a[1]["hunks"][0]["oldStart"], 1);
     }
 }
@@ -1801,9 +1732,9 @@ mod viewer_tests {
     #[test]
     fn lists_folders_first_then_by_name() {
         let items = folder_list(env!("CARGO_MANIFEST_DIR").into()).unwrap();
-        let primeiro_arquivo = items.iter().position(|e| !e.folder).unwrap();
-        assert!(items[..primeiro_arquivo].iter().all(|e| e.folder));
-        assert!(items[primeiro_arquivo..].iter().all(|e| !e.folder));
+        let first_file = items.iter().position(|e| !e.folder).unwrap();
+        assert!(items[..first_file].iter().all(|e| e.folder));
+        assert!(items[first_file..].iter().all(|e| !e.folder));
         assert!(items.iter().any(|e| e.folder && e.name == "src"));
         assert!(items.iter().any(|e| !e.folder && e.name == "Cargo.toml"));
         assert!(items.iter().all(|e| e.name != ".DS_Store"));
@@ -1828,7 +1759,7 @@ mod viewer_tests {
     #[test]
     fn editor_command_quotes_the_path() {
         assert_eq!(
-            editor_command("cursor -g {arquivo}:{linha}", "/a b/it's.ts", 7),
+            editor_command("cursor -g {file}:{line}", "/a b/it's.ts", 7),
             "cursor -g '/a b/it'\\''s.ts':7"
         );
         assert_eq!(editor_command("zed", "/x.md", 1), "zed '/x.md'");
@@ -1843,22 +1774,22 @@ mod viewer_tests {
 
     #[test]
     fn reads_from_disk_and_from_a_ref() {
-        let aqui = env!("CARGO_MANIFEST_DIR");
-        let cargo = format!("{aqui}/Cargo.toml");
-        let disco = file_read(cargo.clone(), None).unwrap();
-        assert!(disco.lines.iter().any(|l| l.starts_with("[package]")));
-        assert!(!disco.stamp.is_empty());
+        let here = env!("CARGO_MANIFEST_DIR");
+        let cargo = format!("{here}/Cargo.toml");
+        let on_disk = file_read(cargo.clone(), None).unwrap();
+        assert!(on_disk.lines.iter().any(|l| l.starts_with("[package]")));
+        assert!(!on_disk.stamp.is_empty());
         let head = file_read(cargo, Some("HEAD".into())).unwrap();
         assert!(head.lines.iter().any(|l| l.starts_with("[package]")));
         assert!(head.stamp.is_empty());
         assert!(file_read("relativo.txt".into(), None).is_err());
-        assert!(file_read(format!("{aqui}/Cargo.toml"), Some("--output=/tmp/x".into())).is_err());
+        assert!(file_read(format!("{here}/Cargo.toml"), Some("--output=/tmp/x".into())).is_err());
     }
 
     #[test]
     fn only_the_ones_that_exist() {
-        let aqui = env!("CARGO_MANIFEST_DIR").to_string();
-        let r = files_exist(aqui.clone(), vec!["Cargo.toml".into(), "nao-existe.rs".into(), "src".into()]);
-        assert_eq!(r, vec![Some(format!("{aqui}/Cargo.toml")), None, None]);
+        let here = env!("CARGO_MANIFEST_DIR").to_string();
+        let r = files_exist(here.clone(), vec!["Cargo.toml".into(), "does-not-exist.rs".into(), "src".into()]);
+        assert_eq!(r, vec![Some(format!("{here}/Cargo.toml")), None, None]);
     }
 }

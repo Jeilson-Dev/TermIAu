@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { Manifest } from "./api";
-import { compareVersions, displayKeybinding, localize, regionProblems, sortStatusBar } from "./manifest";
+import type { Manifest, SettingContribution } from "./api";
+import {
+  compareVersions,
+  displayKeybinding,
+  localize,
+  regionProblems,
+  settingProblems,
+  settingValue,
+  sortStatusBar,
+} from "./manifest";
 
 const base: Manifest = { id: "termiau.radio", name: "Radio", version: "1.0.0", main: "main.js" };
 
@@ -63,5 +71,47 @@ describe("displayKeybinding", () => {
     expect(displayKeybinding("Shift+Alt+Ctrl+k")).toBe("⌃⌥⇧K");
     expect(displayKeybinding("CmdOrCtrl+Enter")).toBe("⌘↩");
     expect(displayKeybinding("F5")).toBe("F5");
+  });
+});
+
+describe("settings", () => {
+  const language: SettingContribution = {
+    key: "language",
+    title: "Language",
+    type: "enum",
+    options: [
+      { value: "pt", label: "Português" },
+      { value: "en", label: "English" },
+    ],
+    default: "pt",
+  };
+  const sound: SettingContribution = { key: "sound", title: "Sound", type: "boolean", default: true };
+
+  it("accepts enums and booleans", () => {
+    expect(settingProblems({ ...base, contributes: { configuration: [language, sound] } })).toEqual([]);
+  });
+
+  it("refuses a default that isn't an option, duplicates and unknown types", () => {
+    const m = {
+      ...base,
+      contributes: {
+        configuration: [{ ...language, default: "fr" }, sound, sound, { key: "n", title: "N", type: "number", default: 1 }],
+      },
+    } as unknown as Manifest;
+    expect(settingProblems(m)).toEqual([
+      'setting "language": the default isn\'t an option',
+      'setting "sound" declared twice',
+      'setting "n": type "number" is not supported',
+    ]);
+  });
+
+  it("reads the stored value while it is still valid", () => {
+    expect(settingValue(language, null)).toBe("pt");
+    expect(settingValue(language, '"en"')).toBe("en");
+    // An option a plugin update dropped, or junk, falls back to the default.
+    expect(settingValue(language, '"fr"')).toBe("pt");
+    expect(settingValue(language, "{")).toBe("pt");
+    expect(settingValue(sound, "false")).toBe(false);
+    expect(settingValue(sound, '"no"')).toBe(true);
   });
 });

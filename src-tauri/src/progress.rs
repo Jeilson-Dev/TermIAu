@@ -94,7 +94,7 @@ fn validate(v: serde_json::Value) -> Result<Plan, String> {
 /// webview, already checked (`{"panel":N,"progress":plan|null}`), or what is wrong
 /// with it. `None` for everything else (the hooks, `termiau view`).
 ///
-/// The plan arrives as text, exactly as Claude wrote it (`progress_text`; lib.rs's `normalize_socket` has already renamed the old keys): parsing
+/// The plan arrives as text, exactly as Claude wrote it (`progress_text`): parsing
 /// it here is what lets a JSON mistake come back with its line and column.
 pub fn from_socket(text: &str) -> Option<Result<String, String>> {
     let v: serde_json::Value = serde_json::from_str(text.trim()).ok()?;

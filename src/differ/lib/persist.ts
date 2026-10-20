@@ -2,7 +2,6 @@
 
 import { load, type Store } from "@tauri-apps/plugin-store";
 import type { Bookmark, ReviewCheckpoint, Scope, ViewMode } from "../types";
-import { fromLegacy, LEGACY_SETTINGS } from "../../legacy";
 
 export interface Settings {
   viewMode: ViewMode;
@@ -69,7 +68,7 @@ async function write(key: string, value: unknown): Promise<void> {
 }
 
 export async function loadSettings(): Promise<Settings> {
-  return { ...DEFAULT_SETTINGS, ...(fromLegacy(await read<Partial<Settings>>("settings"), LEGACY_SETTINGS) as Partial<Settings>) };
+  return { ...DEFAULT_SETTINGS, ...(await read<Partial<Settings>>("settings")) };
 }
 
 export const saveSettings = (settings: Settings) => write("settings", settings);
@@ -85,7 +84,7 @@ export async function saveViewMode(viewMode: ViewMode): Promise<void> {
 /** Notifies when the preferences change — including when the other page changed them. */
 export async function onSettings(cb: (settings: Settings) => void): Promise<() => void> {
   return (await getStore()).onKeyChange<Partial<Settings>>("settings", (v) =>
-    cb({ ...DEFAULT_SETTINGS, ...(fromLegacy(v, LEGACY_SETTINGS) as Partial<Settings>) }),
+    cb({ ...DEFAULT_SETTINGS, ...v }),
   );
 }
 

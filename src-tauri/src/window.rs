@@ -23,10 +23,7 @@ use tauri::{AppHandle, Manager, Runtime};
 pub struct Frame {
     pub x: f64,
     pub y: f64,
-    // The aliases read the file written while these fields had Portuguese names.
-    #[serde(alias = "largura")]
     pub width: f64,
-    #[serde(alias = "altura")]
     pub height: f64,
 }
 
@@ -34,7 +31,6 @@ pub struct Frame {
 /// file (other coordinates), which no longer parses and is ignored.
 #[derive(Serialize, Deserialize)]
 struct Saved {
-    #[serde(alias = "quadro")]
     frame: Frame,
 }
 
@@ -69,12 +65,6 @@ pub fn validate(q: Frame, screens: &[Frame]) -> Option<Frame> {
 
 fn file<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
     Some(app.path().app_config_dir().ok()?.join("window.json"))
-}
-
-/// The same file under the name it had before (`janela.json`), read once if the new
-/// one doesn't exist yet.
-fn legacy_file<R: Runtime>(app: &AppHandle<R>) -> Option<PathBuf> {
-    Some(app.path().app_config_dir().ok()?.join("janela.json"))
 }
 
 #[cfg(target_os = "macos")]
@@ -130,10 +120,8 @@ pub fn show<R: Runtime>(window: &tauri::WebviewWindow<R>) {
     #[cfg(target_os = "macos")]
     {
         let app = window.app_handle();
-        let saved = [file(app), legacy_file(app)]
-            .into_iter()
-            .flatten()
-            .find_map(|a| std::fs::read_to_string(a).ok())
+        let saved = file(app)
+            .and_then(|a| std::fs::read_to_string(a).ok())
             .and_then(|t| serde_json::from_str::<Saved>(&t).ok());
         let frame = saved.and_then(|s| validate(s.frame, &native::screens()));
         if let (Some(q), Ok(ptr)) = (frame, window.ns_window()) {
@@ -217,6 +205,6 @@ mod testes {
     fn junk_in_the_file_is_ignored() {
         assert_eq!(validate(q(f64::NAN, 0.0, 1000.0, 600.0), &[MAIN]), None);
         assert_eq!(validate(q(0.0, 30.0, 10.0, 10.0), &[MAIN]), None);
-        assert!(serde_json::from_str::<Saved>(r#"{"x":-34.0,"y":-1050.0,"largura":1920.0,"altura":1050.0}"#).is_err());
+        assert!(serde_json::from_str::<Saved>(r#"{"x":-34.0,"y":-1050.0,"width":1920.0,"height":1050.0}"#).is_err());
     }
 }

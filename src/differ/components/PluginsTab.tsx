@@ -6,6 +6,7 @@ import { ACTIVATION_ERRORS_KEY, pluginFileUrl, type InstalledPlugin } from "../.
 import { Icon } from "./Icons";
 import { Marketplace } from "./Marketplace";
 import { PluginIcon, VerifiedBadge } from "./PluginIcon";
+import { PluginSettings } from "./PluginSettings";
 
 /// How long "Really remove?" waits for the second click.
 const CONFIRM_MS = 3000;
@@ -135,6 +136,9 @@ export function PluginsTab() {
                     {T.pluginsBroken}: {error}
                   </span>
                 )}
+                {p.enabled && p.manifest?.contributes?.configuration?.length ? (
+                  <PluginSettings plugin={p.id} settings={p.manifest.contributes.configuration} />
+                ) : null}
               </div>
               <div className="plugin-controls">
                 {p.manifest && (
