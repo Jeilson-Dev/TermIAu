@@ -7,6 +7,8 @@
 /// regions of the window it draws in, and its commands (with menu item and
 /// shortcut). The module draws and does the work.
 
+import type { Terminal } from "@xterm/xterm";
+
 export type Language = "en" | "pt";
 
 /// Text in the manifest: one string for every language, or one per language. `en`
@@ -128,19 +130,51 @@ export interface PluginStorage {
   remove(key: string): void;
 }
 
+/// What a panel is doing, as a plugin sees it, for the app's signals: `working` is the
+/// quiet dot on its tab; `waiting` (it needs you) is the orange outline, the tab's
+/// ring, the Dock badge and a stop for ⌘⇧A. The app draws them, and blinks them
+/// unless the user turned blinking off.
+export type PanelStatus = "working" | "waiting";
+
 /// A terminal panel, as a plugin sees it.
 export interface Panel {
-  /// The panel's number: stable while it is open, and the one Claude's events carry.
+  /// The panel's number: stable while it is open, and the one the hook's events carry.
   readonly id: number;
+  /// The terminal's title (the shell or the program in front of it sets it).
+  readonly title: string;
+  /// The panel's xterm.js terminal, to read its buffer and decorate lines.
+  readonly xterm: Terminal;
   /// Writes into the panel's shell as if typed (no Enter unless `text` has `\r`).
   write(text: string): void;
+  /// Hands text over the way ⌘V does: wrapped in bracketed paste when the program
+  /// asked for it, so several lines arrive as one block.
+  paste(text: string): void;
   /// False once the panel was closed or its shell exited.
   isAlive(): boolean;
+  /// The folder of the process in front of the shell.
+  cwd(): Promise<string | null>;
+  /// Whether a program other than the shell is in front.
+  isBusy(): Promise<boolean>;
+  /// Gives the panel the keyboard (and brings its tab to the front).
+  focus(): void;
   /// A short message on the panel's header bar, gone after a few seconds.
   notify(text: string): void;
   /// The red pulsing border that says the panel needs attention. Any plugin
   /// asking for it turns it on.
   setAlert(on: boolean): void;
+  /// This plugin's status for the panel; `undefined` clears it. The strongest of all
+  /// plugins' is the one shown.
+  setStatus(status: PanelStatus | undefined): void;
+  /// This plugin's layer over the panel's terminal, created on the first call. It
+  /// starts hidden; the plugin shows it (`hidden = false`) and draws in it.
+  layer(): HTMLElement;
+  /// Who gets the panel's keyboard while this plugin's layer is on screen: an element
+  /// of the layer, or `undefined` to give it back to the terminal. A text field set
+  /// here also gets the paths dropped on the panel.
+  setKeyboard(target: HTMLElement | undefined): void;
+  /// What this plugin wants back when the panel reopens with the app (or with ⌘⇧T):
+  /// a string, kept with the panel in the saved tabs. `undefined` forgets it.
+  setSaved(value: string | undefined): void;
 }
 
 /// Draws a plugin's slot in one panel's header. Runs for every panel, the open ones
@@ -158,24 +192,23 @@ export type MenuItem = {
   onSelect(): void;
 };
 
-/// What Claude Code tells the app about a panel, raw. Only the Claude Code plugin
-/// (`termiau.claude`, signed by TermIAu) gets it; other plugins use that plugin's API.
-export interface ClaudeChannel {
-  /// Each hook event (`hook_event_name`, `session_id`…), as Claude Code sends it.
-  onEvent(handler: (panel: number, event: Record<string, unknown>) => void): Disposable;
-  /// Each status line update: Claude Code's statusLine JSON (`context_window`,
-  /// `rate_limits`, `model`, `effort`…).
-  onStatus(handler: (panel: number, status: Record<string, unknown>) => void): Disposable;
-  /// The session the app tracks in the panel, if Claude is running there.
-  session(panel: number): { state: "idle" | "working" | "waiting"; session?: string; folder?: string } | undefined;
-  /// Types a command into the panel's Claude and presses Enter. While it is working,
-  /// shows `busy` on the panel's bar instead.
-  send(panel: number, command: string, busy: string): void;
-  readonly hooks: {
-    state(): Promise<"no-claude" | "missing" | "outdated" | "installed">;
-    install(): Promise<void>;
-  };
+/// The app's socket (`TERMIAU_SOCK`, with `TERMIAU_PANEL` saying which panel), as
+/// one plugin hears it. Whatever runs in a panel — the plugin's hook, say — writes
+/// `{"panel":…,"plugin":"<this plugin's id>","message":…}` on one line; with
+/// `"wait":true` the connection stays open for the plugin's answer.
+export interface PluginSocket {
+  /// Each message addressed to this plugin, as it was sent. One waiting for an
+  /// answer comes with `replyId`.
+  onMessage(handler: (panel: number, message: unknown, replyId?: string) => void): Disposable;
+  /// Writes the answer to the sender waiting under `replyId`; rejects when it is gone.
+  reply(replyId: string, answer: string): Promise<void>;
+  /// Lets the sender waiting under `replyId` go without an answer.
+  drop(replyId: string): void;
 }
+
+/// One end of the diff tab's line to the plugins: the diff tab calls `name` with
+/// `args` and gets back what the handler returns.
+export type DifferService = (args: Record<string, unknown>) => unknown;
 
 /// One of the plugin's native binaries, running (see `binaries` in the manifest).
 /// Speaks newline-delimited JSON: `send` writes one line to its stdin, each line it
@@ -212,8 +245,19 @@ export interface PluginContext {
     focusedPanel(): Panel | undefined;
     /// The open panel with this number.
     panel(id: number): Panel | undefined;
-    /// Fires on every key the user types into any panel.
-    onUserInput(handler: () => void): Disposable;
+    /// The open panels.
+    panels(): Panel[];
+    /// Fires on every key the user types into any panel, with what it sent. Not the
+    /// terminal's own answers to the program (focus in/out, cursor reports).
+    onUserInput(handler: (panel: Panel, data: string) => void): Disposable;
+    /// A panel got the keyboard.
+    onFocus(handler: (panel: Panel) => void): Disposable;
+    /// A panel was opened; the ones already open are reported at once.
+    onOpened(handler: (panel: Panel) => void): Disposable;
+    onClosed(handler: (id: number) => void): Disposable;
+    /// A panel came back with the saved tabs, with what the plugin saved in it
+    /// (`Panel.setSaved`). The ones restored before the plugin started arrive at once.
+    onRestored(handler: (panel: Panel, saved: string) => void): Disposable;
   };
   readonly process: {
     /// Starts one of the plugin's declared binaries. Only verified plugins have
@@ -224,8 +268,7 @@ export interface PluginContext {
     /// What a plugin in this one's `dependencies` returned from `activate`.
     api<T>(id: string): T;
   };
-  /// Claude Code's raw events. Only for `termiau.claude`; undefined for the rest.
-  readonly claude?: ClaudeChannel;
+  readonly socket: PluginSocket;
   readonly commands: {
     /// Runs when the command's menu item or shortcut fires.
     register(id: string, handler: () => void): Disposable;
@@ -243,6 +286,25 @@ export interface PluginContext {
     menu(anchor: HTMLElement, items: MenuItem[]): void;
     /// The app's question box. True for the confirm button; without `cancel` it is a notice.
     ask(question: { title: string; text: string; confirm: string; cancel?: string }): Promise<boolean>;
+    /// ⌘- or ⌃-click on a link: opens it in the browser. A plain click does nothing.
+    openLink(event: MouseEvent, url: string): void;
+    /// ⌘-click on a `<code>` that is a path (`file.ts:12`): opens it in the panel's
+    /// viewer. Returns whether the click was that.
+    openReference(panel: Panel, event: MouseEvent): boolean;
+    /// The key is one of TermIAu's shortcuts, which a plugin's field must let through.
+    isShortcut(event: KeyboardEvent): boolean;
+  };
+  /// The line to the diff tab (the differ): services it calls, and what it is told.
+  readonly differ: {
+    /// Answers the diff tab's calls to `name`.
+    serve(name: string, handler: DifferService): Disposable;
+    /// Tells the diff tab `topic`'s current value; it is kept and re-sent when the
+    /// diff tab (re)loads.
+    publish(topic: string, value: unknown): void;
+    /// Loads `main`, a module in the plugin's package, into the diff tab's page: its
+    /// `activate()` returns a `DifferExtension` (src/differ/lib/extensions.ts) — tools
+    /// for a passage and boxes under the lines. It renders with the page's React.
+    extend(main: string): Disposable;
   };
   /// Disposed on deactivation, after `deactivate()`.
   readonly subscriptions: Disposable[];

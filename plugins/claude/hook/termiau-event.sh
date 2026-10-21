@@ -25,7 +25,7 @@ if [ "${1:-}" = status ]; then
   PANEL="${TERMIAU_PANEL:-0}"
   case "$PANEL" in '' | *[!0-9]*) PANEL=0 ;; esac
   {
-    printf '{"panel":%s,"status":%s}' "$PANEL" "$STATUS" | nc -U "$TERMIAU_SOCK" -w 1
+    printf '{"panel":%s,"plugin":"termiau.claude","message":{"status":%s}}' "$PANEL" "$STATUS" | nc -U "$TERMIAU_SOCK" -w 1
   } >/dev/null 2>&1 &
   exit 0
 fi
@@ -130,7 +130,7 @@ esac
 # ---------- Claude's question, answered by chat mode ----------
 #
 # On an `AskUserQuestion` the hook doesn't return right away: it sends the question to the app and
-# waits for the answer over the same connection (see `PendingQuestions` in lib.rs). What
+# waits for the answer over the same connection (see `PendingReplies` in the app's lib.rs). What
 # comes back is the hook's output — the decision with the answers, which Claude Code reads
 # as if you had chosen in the terminal. Coming back empty (the app closed, or the
 # question was answered in the terminal first) means exiting quietly: then the terminal applies,
@@ -138,7 +138,7 @@ esac
 case "$PAYLOAD" in
   *'"hook_event_name":"PermissionRequest"'*'"tool_name":"AskUserQuestion"'* | \
     *'"tool_name":"AskUserQuestion"'*'"hook_event_name":"PermissionRequest"'*)
-    printf '{"panel":%s,"event":%s,"wait":true}\n' "$PANEL" "$PAYLOAD" | nc -U "$TERMIAU_SOCK" 2>/dev/null
+    printf '{"panel":%s,"plugin":"termiau.claude","message":{"event":%s},"wait":true}\n' "$PANEL" "$PAYLOAD" | nc -U "$TERMIAU_SOCK" 2>/dev/null
     exit 0
     ;;
 esac
@@ -162,7 +162,7 @@ esac
 # The payload goes wrapped, not edited: adding the panel number outside
 # spares `jq`, which someone who only installed the app may not have. `nc` ships with macOS.
 {
-  printf '{"panel":%s,"event":%s}' "$PANEL" "$PAYLOAD" \
+  printf '{"panel":%s,"plugin":"termiau.claude","message":{"event":%s}}' "$PANEL" "$PAYLOAD" \
     | nc -U "$TERMIAU_SOCK" -w 1
 } >/dev/null 2>&1 &
 

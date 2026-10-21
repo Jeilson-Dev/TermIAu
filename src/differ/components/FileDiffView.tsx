@@ -1,4 +1,5 @@
 import {
+  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -18,9 +19,7 @@ import { readTextSelection, type TextSelection } from "../lib/textSelection";
 import { useFileSources } from "../lib/useFileSources";
 import type { Bookmark, FileDiff, FocusTarget, Side, ViewMode } from "../types";
 import { T } from "../../i18n/differ";
-import * as askStore from "../lib/asks";
-import type { Ask, AskState } from "../lib/asks";
-import { AskBox } from "./AskBox";
+import { useBoxes, usePassageTools, type Passage } from "../lib/extensions";
 import { BookmarkBox, BookmarkEditor, CopyPathButton } from "./BookmarkBox";
 import { SplitTable, UnifiedTable, type RowContext, type Selection } from "./DiffTable";
 import { DiffStat, Icon, StatusIcon } from "./Icons";
@@ -101,8 +100,10 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pick, setPick] = useState<CommentOffer | null>(null);
-  // Outside the component: the pending tab remounts it when the disk changes, and the conversation must stay.
-  const asks = askStore.useAsks(file.path);
+  // What plugins add here (see lib/extensions.ts). The boxes live outside the component:
+  // the pending tab remounts it when the disk changes, and what they hold must stay.
+  const boxes = useBoxes(file.path);
+  const tools = usePassageTools();
   const pendingFocus = useRef<FocusTarget | null>(null);
 
   // The body stays mounted while it animates closed and is dropped afterwards, so collapsed
@@ -238,11 +239,9 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
     window.getSelection()?.removeAllRanges();
   };
 
-  const openAsk = (ask: Omit<Ask, "id" | "path">, question?: string) => askStore.open({ ...ask, path: file.path }, question);
-
-  const askPick = () => {
+  const toolPick = (run: (p: Passage) => void) => {
     if (!pick) return;
-    openAsk({ side: pick.side, start: pick.start, end: pick.end, quote: pick.quote });
+    run({ path: file.path, side: pick.side, start: pick.start, end: pick.end, quote: pick.quote });
     setPick(null);
     window.getSelection()?.removeAllRanges();
   };
@@ -325,29 +324,28 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
     cancelDraft();
   }
 
-  // The decision made with Claude becomes the bookmark — or rewrites the one the question came from.
-  async function decide(ask: AskState, note: string) {
-    if (ask.bookmarkId) onUpdateBookmark(ask.bookmarkId, note);
-    else await addBookmark(ask, note);
-    askStore.close(ask.id);
+  // A box's passage becomes a bookmark — or rewrites the one it came from.
+  async function bookmarkPassage(p: Passage, note: string) {
+    if (p.bookmarkId) onUpdateBookmark(p.bookmarkId, note);
+    else await addBookmark(p, note);
   }
 
-  const askBox = (a: AskState) => (
-    <AskBox key={a.id} root={root} file={file} ask={a} onDecide={(note) => decide(a, note)} />
+  const drawBox = ({ box, render }: (typeof boxes)[number]) => (
+    <div key={box.key}>{render({ root, file, bookmark: (note) => bookmarkPassage(box.passage, note) })}</div>
   );
 
-  // An edit may remove from the diff the line the question was pinned to. It doesn't vanish
-  // because of that: it moves to the top of the file, where the conversation (and undo) stay at hand.
+  // An edit may remove from the diff the line a box was pinned to. It doesn't vanish
+  // because of that: it moves to the top of the file, where what it holds stays at hand.
   const orphans = useMemo(() => {
-    if (!asks.length || !rows.length) return [];
+    if (!boxes.length || !rows.length) return [];
     const anchors = new Set<string>();
     for (const row of rows) {
       if (row.type === "gap") continue;
       if (row.kind !== "add" && row.oldNo !== null) anchors.add(`old:${row.oldNo}`);
       if (row.kind !== "del" && row.newNo !== null) anchors.add(`new:${row.newNo}`);
     }
-    return asks.filter((a) => !anchors.has(`${a.side}:${a.end}`));
-  }, [asks, rows]);
+    return boxes.filter(({ box: { passage: p } }) => !anchors.has(`${p.side}:${p.end}`));
+  }, [boxes, rows]);
 
   const ctx: RowContext = {
     sources,
@@ -381,7 +379,7 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
     renderAfter(side, line) {
       const list = inline.at.get(`${side}:${line}`);
       const showDraft = draft !== null && draft.side === side && draft.end === line;
-      const here = asks.filter((a) => a.side === side && a.end === line);
+      const here = boxes.filter(({ box: { passage: p } }) => p.side === side && p.end === line);
       if (!list && !showDraft && !here.length) return null;
       return (
         <div className="annotations" key={side}>
@@ -407,8 +405,10 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
                 onEdit={() => setEditingId(b.id)}
                 onRemove={() => onRemoveBookmark(b.id)}
                 onToggleResolved={() => onToggleResolved(b.id)}
-                onAsk={() =>
-                  openAsk({
+                tools={tools}
+                onTool={(tool) =>
+                  tool.run({
+                    path: file.path,
                     side: b.side,
                     start: b.startLine,
                     end: b.endLine,
@@ -420,15 +420,16 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
               />
             ),
           )}
-          {here.map(askBox)}
+          {here.map(drawBox)}
           {showDraft && (
             <BookmarkEditor
               label={rangeLabel({ side: draft.side, startLine: draft.start, endLine: draft.end })}
               quote={draft.quote}
               onSave={saveDraft}
               onCancel={cancelDraft}
-              onAsk={(question) => {
-                openAsk({ side: draft.side, start: draft.start, end: draft.end, quote: draft.quote }, question);
+              tools={tools}
+              onTool={(tool, text) => {
+                tool.run({ path: file.path, side: draft.side, start: draft.start, end: draft.end, quote: draft.quote }, text);
                 cancelDraft();
               }}
             />
@@ -457,7 +458,7 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
   } else {
     body = (
       <>
-        {orphans.length > 0 && <div className="annotations orphan-asks">{orphans.map(askBox)}</div>}
+        {orphans.length > 0 && <div className="annotations orphan-boxes">{orphans.map(drawBox)}</div>}
         {pairs ? <SplitTable rows={pairs} ctx={ctx} /> : <UnifiedTable rows={rows} ctx={ctx} />}
       </>
     );
@@ -546,11 +547,15 @@ export const FileDiffView = memo(function FileDiffView(props: Props) {
             <Icon name="bookmark" size={13} />
             {T.comment}
           </button>
-          <span className="sep" />
-          <button className="ask-pick" title={T.askSelection} onClick={askPick}>
-            <Icon name="sparkle" size={13} />
-            {T.ask}
-          </button>
+          {tools.map((tool) => (
+            <Fragment key={tool.id}>
+              <span className="sep" />
+              <button className={`tool-${tool.id}`} title={tool.titles.selection} onClick={() => toolPick((p) => tool.run(p))}>
+                <Icon name={tool.icon} size={13} />
+                {tool.label}
+              </button>
+            </Fragment>
+          ))}
         </div>
       )}
     </section>

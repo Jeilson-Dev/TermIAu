@@ -11,7 +11,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createDialog, footerButton, marquee, stopMarquee } from "../ui";
 import type {
-  ClaudeChannel,
+  DifferService,
   Dialog,
   Disposable,
   Language,
@@ -49,15 +49,31 @@ export type CoreServices = {
   panel(id: number, owner: string): Panel | undefined;
   /// The open panels that have a header bar (the drawer's terminal has none).
   panelIds(): number[];
+  /// A panel got the keyboard.
+  onFocus(listener: (id: number) => void): Disposable;
+  /// What `owner` saved in panels that came back with the tabs: the pending ones at
+  /// once, then each one restored later.
+  onRestored(owner: string, listener: (id: number, saved: string) => void): Disposable;
   /// Where a panel's `panelHeader` slots go.
   panelHeader(id: number): HTMLElement | undefined;
   onPanelOpened(listener: (id: number) => void): void;
   onPanelClosed(listener: (id: number) => void): void;
-  /// Turns off every alert `owner` left on.
-  clearAlerts(owner: string): void;
+  /// Takes back everything `owner` left on the panels: alerts, statuses, layers and
+  /// the keyboard. What it saved stays, for when it is turned on again.
+  clearPanels(owner: string): void;
   menu(anchor: HTMLElement, items: MenuItem[]): void;
-  claude: ClaudeChannel;
-  onUserInput(listener: () => void): Disposable;
+  onSocket(owner: string, listener: (panel: number, message: unknown, replyId?: string) => void): Disposable;
+  socketReply(id: string, answer: string): Promise<void>;
+  socketDrop(id: string): void;
+  onUserInput(listener: (id: number, data: string) => void): Disposable;
+  openLink(event: MouseEvent, url: string): void;
+  openReference(id: number, event: MouseEvent): boolean;
+  isShortcut(event: KeyboardEvent): boolean;
+  /// The diff tab's calls to plugins, and what plugins tell it.
+  differServe(name: string, handler: DifferService): Disposable;
+  differPublish(topic: string, value: unknown): void;
+  /// Loads the module at `main` (a URL) into the diff tab's page, for plugin `owner`.
+  differExtend(owner: string, main: string): Disposable;
   log(message: string): void;
   restoreFocus(): void;
   closeLabel: string;
@@ -82,10 +98,6 @@ export type CoreServices = {
   };
 };
 
-/// The plugin that may hear Claude Code directly. Signed by TermIAu too: an unsigned
-/// package claiming the id gets nothing.
-const CLAUDE_PLUGIN = "termiau.claude";
-const CLAUDE_PUBLISHER = "TermIAu";
 
 /// What `plugins_take_opened` returns: a .termiau macOS handed to the app.
 type OpenedPackage = { path: string; manifest?: Manifest; error?: string };
@@ -168,11 +180,17 @@ export function createPluginHost(core: CoreServices) {
     container.replaceChildren(...(sortStatusBar(entries) as typeof entries).map((e) => e.el));
   }
 
+  /// The plugins listening to panels opening and closing.
+  const opened = new Set<(id: number) => void>();
+  const closed = new Set<(id: number) => void>();
+
   core.onPanelOpened((id) => {
     for (const s of headerSlots) mount(s, id);
+    for (const fn of opened) fn(id);
   });
   core.onPanelClosed((id) => {
     for (const s of headerSlots) unmount(s, id);
+    for (const fn of closed) fn(id);
   });
   /// A reload asked for while one is running waits for it, then runs once.
   let running: Promise<void> = Promise.resolve();
@@ -202,6 +220,11 @@ export function createPluginHost(core: CoreServices) {
 
   function context(manifest: Manifest, entry: Active, verified?: string): PluginContext {
     const prefix = `termiau:plugin:${manifest.id}:`;
+    /// Deactivating disposes whatever the plugin subscribed to, even if it forgets.
+    const keep = (d: Disposable): Disposable => {
+      entry.subscriptions.push(d);
+      return d;
+    };
     const slots = new Map<string, HTMLElement>();
     for (const r of manifest.contributes?.regions ?? []) {
       if (r.region !== "statusBar") continue;
@@ -264,10 +287,46 @@ export function createPluginHost(core: CoreServices) {
       terminal: {
         focusedPanel: () => core.focusedPanel(manifest.id),
         panel: (id) => core.panel(id, manifest.id),
+        panels: () => core.panelIds().flatMap((id) => core.panel(id, manifest.id) ?? []),
         onUserInput(handler) {
-          const d = core.onUserInput(handler);
-          entry.subscriptions.push(d);
-          return d;
+          return keep(
+            core.onUserInput((id, data) => {
+              const panel = core.panel(id, manifest.id);
+              if (panel) handler(panel, data);
+            }),
+          );
+        },
+        onFocus(handler) {
+          return keep(
+            core.onFocus((id) => {
+              const panel = core.panel(id, manifest.id);
+              if (panel) handler(panel);
+            }),
+          );
+        },
+        onOpened(handler) {
+          for (const id of core.panelIds()) {
+            const panel = core.panel(id, manifest.id);
+            if (panel) handler(panel);
+          }
+          const fn = (id: number) => {
+            const panel = core.panel(id, manifest.id);
+            if (panel) handler(panel);
+          };
+          opened.add(fn);
+          return keep({ dispose: () => void opened.delete(fn) });
+        },
+        onClosed(handler) {
+          closed.add(handler);
+          return keep({ dispose: () => void closed.delete(handler) });
+        },
+        onRestored(handler) {
+          return keep(
+            core.onRestored(manifest.id, (id, saved) => {
+              const panel = core.panel(id, manifest.id);
+              if (panel) handler(panel, saved);
+            }),
+          );
         },
       },
       process: {
@@ -307,7 +366,11 @@ export function createPluginHost(core: CoreServices) {
           return dep.api as T;
         },
       },
-      claude: manifest.id === CLAUDE_PLUGIN && verified === CLAUDE_PUBLISHER ? core.claude : undefined,
+      socket: {
+        onMessage: (handler) => keep(core.onSocket(manifest.id, handler)),
+        reply: (id, answer) => core.socketReply(id, answer),
+        drop: (id) => core.socketDrop(id),
+      },
       commands: {
         register(id, handler) {
           entry.commands.set(id, handler);
@@ -347,6 +410,14 @@ export function createPluginHost(core: CoreServices) {
         restoreFocus: core.restoreFocus,
         menu: core.menu,
         ask: core.ask,
+        openLink: core.openLink,
+        openReference: (panel, event) => core.openReference(panel.id, event),
+        isShortcut: core.isShortcut,
+      },
+      differ: {
+        serve: (name, handler) => keep(core.differServe(name, handler)),
+        publish: core.differPublish,
+        extend: (main) => keep(core.differExtend(manifest.id, fileUrl(manifest.id, main, manifest.version))),
       },
       subscriptions: entry.subscriptions,
     };
@@ -421,7 +492,7 @@ export function createPluginHost(core: CoreServices) {
       slot.remove();
     }
     a.style?.remove();
-    core.clearAlerts(id);
+    core.clearPanels(id);
   }
 
   async function reloadNow() {

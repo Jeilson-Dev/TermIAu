@@ -1,4 +1,4 @@
-import { Terminal, type IDecoration } from "@xterm/xterm";
+import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { invoke } from "@tauri-apps/api/core";
@@ -12,32 +12,10 @@ import { language } from "./i18n";
 import { configsOf, playList, taskBefore, tasksOf, type ConfigLaunch, type Task } from "./run/launch";
 import { commandLine, runnerFor, type Plan } from "./run/runners";
 import { quote, word } from "./run/shell";
-import type { Disposable, MenuItem, Panel } from "./plugins/api";
+import type { DifferService, Disposable, MenuItem, Panel, PanelStatus } from "./plugins/api";
 import { createPluginHost } from "./plugins/host";
 import { CLOSE_DIALOG_ICON, footerButton, isMarqueeRunning, marquee } from "./ui";
-import {
-  CLAUDE_COMMANDS,
-  filterCommands,
-  readMessages,
-  promptLines,
-  sideBySide,
-  diffLines,
-  markdown,
-  markOnLine,
-  partsOfYour,
-  provisionalResolved,
-  questionsOf,
-  hookAnswer,
-  summaryOf,
-  choiceText,
-  type Command,
-  type Choice,
-  type FileDiff,
-  type Message,
-  type LineDiff,
-  type QuestionItem,
-  escape,
-} from "./conversation";
+import { escape, markdown, markOnLine } from "./markdown";
 import {
   findReferences,
   isImage,
@@ -50,8 +28,7 @@ import {
   type Reference,
 } from "./viewer";
 import { blockProgress, planProgress, type TaskPlan } from "./progress";
-import { loadSettings, onSettings, saveViewMode } from "./differ/lib/persist";
-import type { ViewMode } from "./differ/types";
+import { loadSettings, onSettings, type Settings } from "./differ/lib/persist";
 import "@xterm/xterm/css/xterm.css";
 import "./style.css";
 
@@ -132,8 +109,6 @@ type Leaf = {
   /// The node keeps pointing to its parents after being torn out, so walking up the tree
   /// doesn't tell a dead panel from a live one. This flag does.
   dead?: boolean;
-  /// Present while a Claude Code session is running in this panel.
-  claude?: ClaudeSession;
   /// The tree's panels have a bar: title, play, stop, diff.
   bar?: Bar;
   /// The terminal of the app this panel's play button runs.
@@ -142,19 +117,7 @@ type Leaf = {
   owner?: Leaf;
   /// The app this panel's play button launched, in its drawer.
   execution?: Run;
-  /// What you sent to Claude in this panel: it is how the terminal finds
-  /// your lines on screen to highlight (see `mark`).
-  prompts?: string[];
-  /// The highlight of each prompt found, by the line it is on.
-  marks?: Map<string, IDecoration>;
-  /// How the screen was at the last search: what had already gone into scrollback
-  /// doesn't change anymore, and needn't be read again (see `mark`).
-  seenOnes?: { base: number; cols: number; prompts: number };
-  waitMarks?: ReturnType<typeof setTimeout>;
-  /// The conversation in bubbles, over the terminal. It exists after the first time
-  /// the panel enters chat mode.
-  chat?: Chat;
-  /// The file shown in the panel, over the terminal and the chat. It exists
+  /// The file shown in the panel, over the terminal and the plugins' layers. It exists
   /// after the first `termiau view` or ⌘-click on a reference.
   viewer?: Viewer;
   /// The file explorer, a drawer over the panel. It exists after the first time it opens.
@@ -164,42 +127,16 @@ type Leaf = {
   progress?: TaskPlan;
   /// The plugins that turned the panel's alert border on (`Panel.setAlert`).
   alerts?: Set<string>;
+  /// Each plugin's status for the panel (`Panel.setStatus`): what the tab's dot, the
+  /// waiting outline, the Dock badge and ⌘⇧A read.
+  statuses?: Map<string, PanelStatus>;
+  /// Each plugin's layer over the terminal (`Panel.layer`), and the element of it that
+  /// gets the keyboard while it is on screen (`Panel.setKeyboard`).
+  layers?: Map<string, HTMLElement>;
+  keyboards?: Map<string, HTMLElement>;
+  /// What each plugin wants back when the panel reopens (`Panel.setSaved`).
+  saved?: Record<string, string>;
 };
-
-type ClaudeSession = {
-  /// How the voice calls this panel. It is the folder name, not "panel 2": hearing
-  /// "MOBILE needs your permission" says where to go; a number doesn't.
-  name: string;
-  state: "idle" | "working" | "waiting";
-  /// The session id, as the hook reports it. It is what `claude --resume` asks for
-  /// to resume it when the tab comes back (see `resume`).
-  session?: string;
-  /// The folder the session was born in: `--resume` only finds it from there.
-  folder?: string;
-  /// The JSONL where Claude Code writes the conversation. Chat mode reads from it.
-  transcript?: string;
-  /// Why Claude stopped to wait, when the hook said.
-  notice?: string;
-  /// What the wait asks for. `permission`: a yes or no, which the chat answers with
-  /// buttons. `terminal`: a menu only the terminal shows (a question's options,
-  /// the plan to approve). With nothing, it just waits for the next message —
-  /// and the chat field sends that as well as the terminal.
-  asks?: "permission" | "terminal";
-  /// A Claude question (`AskUserQuestion`) chat mode can
-  /// answer: the hook is waiting for it (see `PendingQuestions` in lib.rs). The
-  /// terminal shows the same question at the same time, and whoever answers first
-  /// wins.
-  question?: { id: string; questions: QuestionItem[] };
-};
-
-/// The tools whose wait is a menu of options, not a yes or no: the
-/// Enter of "Allow" would pick the first option without you having read it.
-const NEED_TERMINAL = new Set(["AskUserQuestion", "ExitPlanMode"]);
-
-/// The wait resolves without leaving the chat: it is just a missing message, or a
-/// question the chat card answers.
-const answerableInChat = (leaf: Leaf) =>
-  leaf.chat?.isOpen && (!leaf.claude?.asks || leaf.claude.question !== undefined);
 
 /// A split: two children and the share that goes to the first. Nesting these nodes
 /// gives the layouts iTerm2 makes — splitting an already split panel.
@@ -320,12 +257,7 @@ function applyFraction(d: Split) {
 /// Redoes the grid of every visible panel in the tab from its size on screen.
 /// Local drawing only: doesn't talk to the kernel.
 function measure(tab: Tab) {
-  for (const f of visibleOnes(tab)) {
-    f.fit.fit();
-    // Splitting, closing and switching tabs move the panel out of place (or off screen), and
-    // the browser resets the scroll of whatever goes through that.
-    if (f.chat?.isOpen) restoreScroll(f.chat);
-  }
+  for (const f of visibleOnes(tab)) f.fit.fit();
 }
 
 /// Tells the kernel the grids that actually changed, so the TUI redraws correctly.
@@ -365,12 +297,8 @@ function focusLeaf(leaf: Leaf) {
   leaf.el.classList.add("focused");
   keyboard(leaf);
   rotular(tab);
-  // Looking at the panel is attending to it: the notice has done its job. In chat mode
-  // too, if what is missing is a message; a permission request or a menu
-  // stays lit until answered (through the notice's buttons or in the terminal).
-  if (leaf.claude?.state === "waiting" && (!leaf.chat?.isOpen || answerableInChat(leaf))) {
-    leaf.claude.state = "idle";
-  }
+  // Looking at the panel may be attending to it: the plugin that asked for attention decides.
+  for (const fn of focusListeners) fn(leaf.id);
   paint();
 }
 
@@ -418,7 +346,7 @@ async function createLeaf(
   const bar = withBar ? createBar() : undefined;
   // The terminal lives in an element of its own: the panel also carries the bar on top and,
   // when play runs something, the drawer below. Inside it, `leaf-screen` holds
-  // the terminal and the chat; the split viewer sits beside it, not on top.
+  // the terminal and the plugins' layers; the split viewer sits beside it, not on top.
   const host = element("div", "leaf-term");
   const screen = element("div", "leaf-screen");
   host.append(screen);
@@ -481,9 +409,7 @@ async function createLeaf(
       const bin = atob(e.payload);
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      // Claude redraws the screen whenever it wants, and the highlight of your prompts
-      // has to follow the lines: redo it after each batch of output.
-      term.write(bytes, () => scheduleMarks(leaf));
+      term.write(bytes);
     }),
   );
   // The shell ended on its own — ⌃D, `exit`, crash: the panel goes with it.
@@ -498,19 +424,8 @@ async function createLeaf(
   // screen -> PTY. `onData` is user input: plugins (dictation) write through
   // `pty_write` directly and don't pass here, so typing is distinguishable from speaking.
   term.onData((data) => {
-    for (const listener of userInputListeners) listener();
-    // Touching the panel is attending to it, as much as clicking it: the
-    // "waiting" notice stops blinking on the first key. `focusLeaf` only covers whoever
-    // arrives at the panel; whoever was already on it types directly.
-    if (leaf.claude?.state === "waiting" && !TERMINAL_ANSWER.test(data)) {
-      leaf.claude.state = "idle";
-      paint();
-    }
-    // Esc alone interrupts Claude, and when interrupted it doesn't send `Stop`.
-    if (data === "\x1b" && leaf.claude?.state === "working") {
-      leaf.claude.state = "idle";
-      paint();
-    }
+    // The terminal's own answers to the program aren't you touching the panel.
+    if (!TERMINAL_ANSWER.test(data)) for (const listener of userInputListeners) listener(id, data);
     invoke("pty_write", { id, data }).catch((e) => jlog(`pty_write: ${e}`));
   });
   // The prompt (p10k, zsh) publishes the directory via OSC; it is the tab's title.
@@ -537,7 +452,7 @@ async function createLeaf(
 /// answers the program through it — focus in or out, cursor position,
 /// terminal attributes, the mouse, colors. None of that is you touching the panel.
 /// Focus matters most: switching tabs sends an "I left", and without this filter
-/// leaving a waiting panel would clear its notice.
+/// leaving a waiting panel would look like answering it.
 const TERMINAL_ANSWER = /^\x1b(?:\[[IO]$|\[[?>=]?[\d;]*[Rcnty]$|\[<|\[M|[\]P_])/;
 
 /// How long the ✕ stays armed waiting for the second click. Short on purpose:
@@ -578,7 +493,7 @@ async function newTab(at?: string | null): Promise<Tab | undefined> {
 
     const chip = document.createElement("div");
     chip.className = "tab";
-    // Claude's status dot; stays transparent while there is no session.
+    // The panel's status dot; stays transparent while no plugin set one.
     const sinal = document.createElement("span");
     sinal.className = "tab-dot";
     const label = document.createElement("span");
@@ -806,47 +721,32 @@ function flash(msg: unknown) {
   else pinned.queue.push(msg);
 }
 
-/// A Claude session running in a panel, as the diff tab sees it: where to send a review request.
-type LiveSession = { panel: number; session: string; name: string; title: string; folder: string; state: ClaudeSession["state"] };
+/// What plugins offer the diff tab (`ctx.differ`): services it calls by name, topics
+/// whose last value it is told, and scripts it loads into its page (by plugin) — again
+/// whenever it asks, after a reload.
+const differServices = new Map<string, DifferService>();
+const differTopics = new Map<string, unknown>();
+const differExtensions = new Map<string, string>();
 
-function sessionsLive(): LiveSession[] {
-  const list: LiveSession[] = [];
-  for (const a of tabs) {
-    for (const f of leaves(a.root)) {
-      const c = f.claude;
-      if (!c?.session || f.dead) continue;
-      // Claude Code puts a spinner in front of the title while it works.
-      const title = f.title.replace(/^[^\p{L}\p{N}]+/u, "");
-      list.push({ panel: f.id, session: c.session, name: c.name, title, folder: c.folder ?? "", state: c.state });
-    }
+function announceExtensions() {
+  flash({ termiauExtensions: [...differExtensions].map(([id, main]) => ({ id, main })) });
+}
+
+function publishTopics() {
+  announceExtensions();
+  for (const [topic, value] of differTopics) flash({ termiauTopic: { topic, value } });
+}
+
+/// A call from the diff tab, answered by the plugin that serves it.
+async function differCall({ id, name, args }: { id: string; name: string; args?: Record<string, unknown> }) {
+  const handler = differServices.get(name);
+  try {
+    if (!handler) throw new Error(T.serviceUnavailable);
+    const value = await handler(args ?? {});
+    flash({ termiauReply: { id, value } });
+  } catch (e) {
+    flash({ termiauReply: { id, error: e instanceof Error ? e.message : String(e) } });
   }
-  return list;
-}
-
-/// The diff tab keeps the list in its session menu; it only goes out when something in it changed.
-let sessionsNotified = "";
-function notifySessions(force = false) {
-  const list = sessionsLive();
-  const key = JSON.stringify(list);
-  if (!force && key === sessionsNotified) return;
-  sessionsNotified = key;
-  flash({ termiauLiveSessions: list });
-}
-
-/// A change asked from the diff tab goes to the session as if typed in its panel: the paste
-/// way (several lines as one block), and Enter after, on its own. A session waiting for a yes or no
-/// would take the paste as the answer — that one is refused.
-function askInSession(panel: number, text: string): string | null {
-  const leaf = leafByPanel(panel);
-  if (!leaf?.claude?.session || leaf.dead) return T.sessionNoLongerOpen;
-  if (leaf.claude.state === "waiting") return T.sessionWaitingForYou(leaf.claude.name);
-  paste(leaf, text);
-  setTimeout(() => {
-    invoke("pty_write", { id: leaf.id, data: "\r" }).catch((err) => jlog(`review send: ${err}`));
-  }, 80);
-  leaf.claude.state = "working";
-  paint();
-  return null;
 }
 
 /// Takes the panel's repository to the diff tab and brings it to the front.
@@ -1030,10 +930,7 @@ function destroyLeaf(leaf: Leaf, alreadyDead: boolean) {
   // The drawer lives inside the panel: it goes along, and so does the app running in it.
   if (leaf.drawer) destroyLeaf(leaf.drawer.leaf, false);
   leaf.execution = undefined;
-  clearTimeout(leaf.waitMarks);
-  clearInterval(leaf.chat?.pulse);
   clearInterval(leaf.viewer?.pulse);
-  dropQuestion(leaf);
   for (const off of leaf.turnOff) off();
   leaf.turnOff = [];
   if (!alreadyDead) invoke("pty_close", { id: leaf.id }).catch((e) => jlog(`pty_close: ${e}`));
@@ -1041,7 +938,6 @@ function destroyLeaf(leaf: Leaf, alreadyDead: boolean) {
   leaf.el.remove();
   // The panel's plan leaves the footer with it.
   if (leaf.progress) drawProgress();
-  lastStatus.delete(leaf.id);
   if (pluginPanels.delete(leaf.id)) for (const fn of panelClosed) fn(leaf.id);
 }
 
@@ -1294,43 +1190,32 @@ function goToTab(delta: number) {
   else activate(target as Tab);
 }
 
-// ---------- Claude sessions ----------
+// ---------- what the hooks report, and the panels' signals ----------
 
-/// What arrives from the hooks. `panel` is set by termiau-event.sh from the
-/// shell's environment; the rest comes from Claude Code as is.
-type ClaudeEvent = {
-  panel: number;
-  hook_event_name: string;
-  cwd?: string;
-  session_id?: string;
-  transcript_path?: string;
-  /// On `UserPromptSubmit`: what you wrote.
-  prompt?: string;
-  /// On `Notification`: what Claude wants from you.
-  message?: string;
-  /// On `Notification`, in the versions that send it: `permission_prompt`,
-  /// `idle_prompt`, `elicitation_dialog`...
-  notification_type?: string;
-  /// On `PermissionRequest`: the tool asking for permission, and with what.
-  tool_name?: string;
-  tool_input?: Record<string, unknown>;
-  /// On tool events (except `PermissionRequest`): which call.
-  tool_use_id?: string;
-};
+/// A message for a plugin, from something running in a panel (its hook, say). A
+/// sender waiting for an answer carries the number Rust gave it. The app only passes
+/// it on: the plugin is what makes sense of it.
+type SocketMessage = { panel: number; plugin: string; message?: unknown; reply_id?: string };
 
-/// What Claude Code's status line sends, through the hook (`termiau-event.sh
-/// status`). The app only passes it on: the Claude Code plugin reads it.
-type SocketStatus = { panel: number; status: Record<string, unknown> };
-
-function receiveStatus(raw: SocketStatus) {
-  const st = raw.status ?? {};
-  lastStatus.set(raw.panel, st);
-  for (const fn of claudeStatusListeners) fn(raw.panel, st);
+function receive(raw: SocketMessage) {
+  const listeners = socketListeners.get(raw.plugin);
+  // The panel closed before the message arrived, or its plugin isn't on: nobody answers.
+  if (!leafByPanel(raw.panel) || !listeners?.size) {
+    if (raw.reply_id) void invoke("socket_drop", { id: raw.reply_id });
+    return;
+  }
+  for (const fn of listeners) fn(raw.panel, raw.message, raw.reply_id);
 }
 
 function leafByPanel(id: number): Leaf | undefined {
   for (const a of tabs) for (const f of leaves(a.root)) if (f.id === id) return f;
   return undefined;
+}
+
+/// The strongest of the plugins' statuses for the panel.
+function statusOf(leaf: Leaf): PanelStatus | undefined {
+  const all = [...(leaf.statuses?.values() ?? [])];
+  return all.includes("waiting") ? "waiting" : all.includes("working") ? "working" : undefined;
 }
 
 /// Redraws the status signals: a dot on each tab, an outline on the waiting
@@ -1341,9 +1226,8 @@ function paint() {
   for (const tab of tabs) {
     let sinal = "";
     for (const f of leaves(tab.root)) {
-      const state = f.claude?.state;
+      const state = statusOf(f);
       f.el.classList.toggle("waiting", state === "waiting");
-      drawNotice(f);
       if (state === "waiting") {
         waiting++;
         sinal = "waiting";
@@ -1351,122 +1235,13 @@ function paint() {
         sinal = "working";
       }
     }
-    tab.chip.dataset.claude = sinal;
+    tab.chip.dataset.status = sinal;
     // Opening or closing a panel changes how many folders the tab has.
     showBranches(tab);
   }
   appWindow.setBadgeCount(waiting || undefined).catch(() => {});
-  // Everything that changes the tabs, the panels or the Claude sessions goes through here.
+  // Everything that changes the tabs or the panels goes through here.
   scheduleSave();
-  notifySessions();
-}
-
-function receive(
-  raw:
-    | ClaudeEvent
-    | { panel: number; event: Omit<ClaudeEvent, "panel">; wait?: boolean; question_id?: string },
-) {
-  // The hook wraps Claude's payload with the panel number outside. An
-  // earlier one put the panel inside it — and that may be the one still
-  // installed.
-  const ev: ClaudeEvent = "event" in raw ? { ...raw.event, panel: raw.panel } : raw;
-  // A Claude question whose hook stayed waiting for the chat's answer, with
-  // the number Rust gave it.
-  const questionId = "question_id" in raw ? raw.question_id : undefined;
-  const leaf = leafByPanel(ev.panel);
-  if (!leaf) {
-    // The panel closed before the event arrived: the hook waits for no one.
-    if (questionId) void invoke("question_drop", { id: questionId });
-    return;
-  }
-
-  // The folder name is what shows on the tab.
-  const name = ev.cwd?.split("/").filter(Boolean).pop() || T.panelN(ev.panel);
-  // The session changes without Claude exiting (a `/clear`, a `/resume`): the last
-  // event's always wins. The folder is the one from each session's first event — afterwards
-  // Claude may have moved, and `--resume` looks for the session where it was born.
-  const before = leaf.claude;
-  const session = ev.session_id ?? before?.session;
-  const folder = (before?.session === session && before?.folder) || ev.cwd;
-  const transcript = ev.transcript_path ?? (before?.session === session ? before?.transcript : undefined);
-  // The pending question carries across events until it is answered.
-  const question = before?.session === session ? before?.question : undefined;
-  leaf.claude = { name, state: before?.state ?? "idle", session, folder, transcript, question };
-
-  switch (ev.hook_event_name) {
-    case "UserPromptSubmit":
-      leaf.claude.state = "working";
-      if (ev.prompt) rememberPrompts(leaf, [ev.prompt]);
-      // A new prompt: the question that was open was left behind.
-      dropQuestion(leaf);
-      break;
-    case "Stop":
-      // The turn ended. A wait that arrived earlier (a question, a
-      // permission) still stands.
-      if (leaf.claude.state === "working") leaf.claude.state = "idle";
-      break;
-    case "PostToolUse":
-    case "PostToolUseFailure":
-      // The question was answered — in the chat, or in the terminal before it. The hook
-      // still waiting exits quietly, and the card goes away. A session only has one
-      // open question at a time, so the tool name is enough.
-      if (question && ev.tool_name === "AskUserQuestion") {
-        dropQuestion(leaf);
-        if (leaf.claude.state === "waiting") leaf.claude.state = "working";
-        leaf.claude.asks = undefined;
-        leaf.claude.notice = undefined;
-      }
-      break;
-    case "PermissionRequest": {
-      leaf.claude.state = "waiting";
-      // A new question in place of another: the previous one won't come back.
-      if (questionId) dropQuestion(leaf);
-      const questions = ev.tool_name === "AskUserQuestion" ? questionsOf(ev.tool_input) : undefined;
-      if (questionId && questions) {
-        leaf.claude.question = { id: questionId, questions };
-        leaf.claude.asks = "terminal";
-        leaf.claude.notice = T.hasAQuestion;
-        break;
-      }
-      const tool = ev.tool_name ?? T.oneTool;
-      const what = summaryOf(ev.tool_input);
-      leaf.claude.notice = T.asksPermission(tool, what);
-      leaf.claude.asks = ev.tool_name && NEED_TERMINAL.has(ev.tool_name) ? "terminal" : "permission";
-      break;
-    }
-    case "Notification":
-      leaf.claude.state = "waiting";
-      // The permission notification arrives right after `PermissionRequest`, and
-      // says less than it: the request and text already there stay.
-      if (ev.notification_type === "permission_prompt" || /permission/i.test(ev.message ?? "")) {
-        leaf.claude.asks = before?.asks ?? "permission";
-        leaf.claude.notice = (before?.asks && before.notice) || ev.message;
-      } else {
-        leaf.claude.asks = ev.notification_type === "elicitation_dialog" ? "terminal" : undefined;
-        leaf.claude.notice = ev.message;
-      }
-      break;
-    case "SessionEnd":
-      dropQuestion(leaf);
-      leaf.claude = undefined;
-      break;
-  }
-  paint();
-  // The chat button only exists where there is a conversation to show.
-  drawBar(leaf);
-  // The session may have changed under an open chat (`/clear`, `/resume`),
-  // and a new prompt is already in the transcript: read now, without waiting for the pulse.
-  if (leaf.chat?.isOpen) void readChat(leaf);
-  for (const fn of claudeEventListeners) fn(ev.panel, ev);
-}
-
-/// Gives up on the panel's pending question: its hook exits without an answer, and if
-/// it is still open, the terminal is the one that answers.
-function dropQuestion(leaf: Leaf) {
-  const id = leaf.claude?.question?.id;
-  if (!id) return;
-  leaf.claude!.question = undefined;
-  invoke("question_drop", { id }).catch((e) => jlog(`question_drop: ${e}`));
 }
 
 /// Jumps to the next panel that is waiting, in any tab. Repeating the
@@ -1475,7 +1250,7 @@ function goToWaiting() {
   const queue: { tab: Tab; leaf: Leaf }[] = [];
   for (const tab of tabs) {
     for (const f of leaves(tab.root)) {
-      if (f.claude?.state === "waiting") queue.push({ tab, leaf: f });
+      if (statusOf(f) === "waiting") queue.push({ tab, leaf: f });
     }
   }
   if (!queue.length) return;
@@ -1486,852 +1261,9 @@ function goToWaiting() {
   focusLeaf(target.leaf);
 }
 
-// ---------- your prompts, highlighted in the terminal ----------
-
-/// How many prompts the panel remembers. The oldest have already left the scrollback.
-const MAX_PROMPTS = 300;
-/// How often the highlight is redone while the screen changes. It is a frequency
-/// cap, not a wait for silence: Claude working writes nonstop
-/// (the counter, the animation), and waiting for it to go quiet would mean never highlighting.
-const MARKS_MS = 400;
-/// How many lines before the start of the screen are still reread: a prompt may
-/// have started there and continue inside it.
-const MARK_SLACK = 16;
-
-function rememberPrompts(leaf: Leaf, newItems: string[]) {
-  const list = (leaf.prompts ??= []);
-  for (const p of newItems) if (p.trim() && !list.includes(p)) list.push(p);
-  if (list.length > MAX_PROMPTS) list.splice(0, list.length - MAX_PROMPTS);
-  scheduleMarks(leaf);
-}
-
-function scheduleMarks(leaf: Leaf) {
-  if (!leaf.prompts?.length || leaf.waitMarks !== undefined) return;
-  leaf.waitMarks = setTimeout(() => {
-    leaf.waitMarks = undefined;
-    mark(leaf);
-  }, MARKS_MS);
-}
-
-/// Puts a highlight on each screen line that is one of your prompts. Searches again
-/// each time instead of marking at send time: Claude Code rewrites the
-/// whole conversation on a resize, and a mark placed earlier would go away
-/// with the old lines.
-function mark(leaf: Leaf) {
-  if (leaf.dead || !leaf.prompts?.length) return;
-  const { term } = leaf;
-  const buf = term.buffer.active;
-  // On the alternate screen (Claude's full-screen mode) xterm draws no
-  // decorations at all; there the highlight is up to chat mode.
-  if (buf.type !== "normal") return;
-
-  // The scrollback has thousands of lines, and Claude working rewrites the screen
-  // several times per second. But what has already gone into scrollback is immutable:
-  // as long as it only grows, rereading from where the screen started last time is enough.
-  // Shrank (a clear, a resize redraw), changed width or a new prompt
-  // arrived: then reread everything.
-  const v = leaf.seenOnes;
-  const whole = !v || buf.baseY < v.base || v.cols !== term.cols || v.prompts !== leaf.prompts.length;
-  const from = whole ? 0 : Math.max(0, v.base - MARK_SLACK);
-  leaf.seenOnes = { base: buf.baseY, cols: term.cols, prompts: leaf.prompts.length };
-
-  const screen: string[] = [];
-  for (let i = from; i < buf.length; i++) screen.push(buf.getLine(i)?.translateToString(true) ?? "");
-  const want = new Map<string, { line: number; height: number }>();
-  for (const a of promptLines(screen, leaf.prompts)) {
-    want.set(`${a.line + from}:${a.height}:${term.cols}`, { line: a.line + from, height: a.height });
-  }
-
-  // The key keeps the line from when the mark was born, and scrolling moves it:
-  // the map is rebuilt with the line each mark is on now.
-  const oldOnes = leaf.marks ?? new Map<string, IDecoration>();
-  const marks = (leaf.marks = new Map<string, IDecoration>());
-  for (const [key, d] of oldOnes) {
-    const current = `${d.marker.line}:${key.slice(key.indexOf(":") + 1)}`;
-    // Above where the reading started nothing was checked: the mark stays.
-    if (!d.isDisposed && d.marker.line < from) marks.set(current, d);
-    else if (d.isDisposed || !want.has(current) || marks.has(current)) d.dispose();
-    else marks.set(current, d);
-  }
-  for (const [key, a] of want) {
-    if (marks.has(key)) continue;
-    const marker = term.registerMarker(a.line - (buf.baseY + buf.cursorY));
-    const d = marker && term.registerDecoration({ marker, x: 0, width: term.cols, height: a.height });
-    if (!d) continue;
-    d.onRender((el) => el.classList.add("prompt-mark"));
-    marks.set(key, d);
-  }
-}
-
-/// Jumps to your previous or next prompt: in the terminal's scrollback or, in
-/// chat mode, between your bubbles.
-function goToMessage(leaf: Leaf, delta: number) {
-  const chat = leaf.chat;
-  if (chat?.isOpen) {
-    const top = chat.list.scrollTop;
-    const yours = [...chat.list.querySelectorAll<HTMLElement>(".chat-you")].map((el) => el.offsetTop - 12);
-    const target = delta < 0 ? yours.filter((y) => y < top - 1).pop() : yours.find((y) => y > top + 1);
-    chat.list.scrollTo({ top: target ?? (delta < 0 ? 0 : chat.list.scrollHeight) });
-    return;
-  }
-  mark(leaf);
-  const lines = [...(leaf.marks?.values() ?? [])].map((d) => d.marker.line).sort((a, b) => a - b);
-  const top = leaf.term.buffer.active.viewportY;
-  const target = delta < 0 ? lines.filter((l) => l < top).pop() : lines.find((l) => l > top);
-  if (target !== undefined) leaf.term.scrollToLine(target);
-  else if (delta > 0) leaf.term.scrollToBottom();
-}
-
-// ---------- chat mode: the conversation in bubbles ----------
-
-/// A panel's Claude conversation, read from the transcript and drawn over
-/// the terminal. The terminal stays alive below, with the session running: the chat
-/// is another way of seeing the same conversation, and what you write in its field goes
-/// to Claude the same way as the keyboard.
-type Chat = {
-  el: HTMLDivElement;
-  list: HTMLDivElement;
-  notice: HTMLDivElement;
-  noticeText: HTMLSpanElement;
-  /// The Claude question card, and which question is the one drawn:
-  /// redrawing on every `paint` would erase what you already checked.
-  question: HTMLDivElement;
-  questionOf?: string;
-  /// The "working…" line between the conversation and the field, and since when.
-  thinking: HTMLDivElement;
-  thinkingSince?: number;
-  /// Your bubbles already on screen but not yet in the transcript: Claude
-  /// only stores the prompt when it receives it, and waiting for it made sending
-  /// look stuck. They go away, in order, when the real ones arrive.
-  pending: { el: HTMLElement; text: string }[];
-  /// The buttons that answer a permission request without leaving the chat.
-  allow: HTMLButtonElement;
-  deny: HTMLButtonElement;
-  campo: HTMLTextAreaElement;
-  /// The `/commands` list, above the field while typing one.
-  menu: HTMLDivElement;
-  /// The commands from disk (yours, the project's, the plugins') and the ones matching
-  /// what is typed, with the selected one.
-  commands: Command[];
-  findings: Command[];
-  picked: number;
-  /// The sessions to resume, while the `/resume` list is open: then the
-  /// menu shows these, and what is typed in the field filters them.
-  sessions?: SavedSession[];
-  sessionsFound: SavedSession[];
-  /// "Show earlier": the turns left off screen (see `CHAT_WINDOW`).
-  more: HTMLButtonElement;
-  /// The whole conversation, and from which turn it is drawn.
-  messages: Message[];
-  since: number;
-  /// Where the scroll was, to restore it when the browser resets it.
-  top: number;
-  atEnd: boolean;
-  /// Present while the list is being taken to the end (see `restoreScroll`).
-  stick?: number;
-  /// A notice from the chat itself, in the same strip as "Claude is waiting for you".
-  flash?: string;
-  isOpen: boolean;
-  /// The transcript on screen, and up to which byte of it has been read.
-  path?: string;
-  end: number;
-  reading?: boolean;
-  pulse?: ReturnType<typeof setInterval>;
-  /// The thumbnails of the images already pasted into Claude's prompt, waiting for Enter.
-  attachments: HTMLDivElement;
-  /// The fade in or out in progress: toggling midway starts from where it stopped.
-  transition?: Animation;
-};
-
-/// How often the open chat checks whether the transcript grew. Claude
-/// only writes a turn when it ends, so there is nothing to gain by reading
-/// faster — and when closed, the chat reads nothing.
-const CHAT_MS = 700;
-/// How many turns go on screen at a time. A long session has thousands, and
-/// drawing them all makes a huge document the browser redoes entirely on
-/// every change of panel width — splitting, maximizing and switching modes
-/// got heavy in proportion to the conversation.
-const CHAT_WINDOW = 80;
-
-/// The strip above the field: Claude stopped to wait for you, or the chat has
-/// something to say. With neither, it doesn't exist.
-function drawNotice(leaf: Leaf) {
-  const chat = leaf.chat;
-  if (!chat) return;
-  const question = leaf.claude?.question;
-  chat.question.hidden = !question;
-  if (!question) chat.questionOf = undefined;
-  else if (chat.questionOf !== question.id) drawQuestion(leaf, chat, question);
-  // With the card on screen, the strip would only say the same as it.
-  const waiting = leaf.claude?.state === "waiting" && !question;
-  chat.notice.hidden = !waiting && !chat.flash;
-  chat.noticeText.textContent = waiting
-    ? (leaf.claude?.notice ?? T.isWaiting)
-    : (chat.flash ?? "");
-  chat.noticeText.title = chat.noticeText.textContent;
-  const permission = waiting && leaf.claude?.asks === "permission";
-  chat.allow.hidden = chat.deny.hidden = !permission;
-  drawThinking(leaf);
-}
-
-/// "Working… 12s": Claude received it and hasn't finished the turn yet. It is what
-/// the terminal shows with the spinning asterisk; without this, the chat stood still
-/// and there was no way to know whether the message had arrived.
-function drawThinking(leaf: Leaf) {
-  const chat = leaf.chat;
-  if (!chat) return;
-  const working = leaf.claude?.state === "working";
-  chat.thinking.hidden = !working;
-  if (!working) {
-    chat.thinkingSince = undefined;
-    return;
-  }
-  chat.thinkingSince ??= Date.now();
-  const s = Math.floor((Date.now() - chat.thinkingSince) / 1000);
-  const time = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-  chat.thinking.textContent = T.working(time);
-}
-
-/// The card for a Claude question, in steps: one question at a time, with
-/// tabs for all of them on top to go back and forth. In a single-choice question, the
-/// click already answers and moves to the next — and, on the last, sends everything —, like
-/// in the terminal. Multiple choice, "Other…" and options with a preview need the button.
-function drawQuestion(leaf: Leaf, chat: Chat, question: { id: string; questions: QuestionItem[] }) {
-  chat.questionOf = question.id;
-  const { questions } = question;
-  const choices: Choice[] = questions.map(() => ({ labels: [] }));
-  let step = 0;
-  const answered = (i: number) => choiceText(choices[i]) !== undefined;
-
-  const send = () => {
-    const answer = hookAnswer(questions, choices);
-    if (!answer || leaf.claude?.question?.id !== question.id) return;
-    leaf.claude.question = undefined;
-    leaf.claude.asks = undefined;
-    leaf.claude.notice = undefined;
-    leaf.claude.state = "working";
-    invoke("question_answer", { id: question.id, answer: answer }).catch((e) => {
-      // The terminal answered first, or Claude gave up on the question.
-      chat.flash = T.alreadyAnsweredInTerminal;
-      jlog(`question_answer: ${e}`);
-      paint();
-    });
-    paint();
-    keyboard(leaf);
-  };
-  /// Goes to the next unanswered one; with none missing, sends.
-  const advance = () => {
-    const missing = questions.findIndex((_, i) => i > step && !answered(i));
-    const before = questions.findIndex((_, i) => !answered(i));
-    const next = missing >= 0 ? missing : before;
-    if (next < 0) return send();
-    step = next;
-    draw();
-  };
-
-  const draw = () => {
-    const q = questions[step];
-    const e = choices[step];
-    const elements: HTMLElement[] = [];
-
-    // The tabs: with a single question there is nowhere to go.
-    if (questions.length > 1) {
-      const tabs = element("div", "chat-question-tabs");
-      for (const [i, other] of questions.entries()) {
-        const tab = element("button", "chat-question-tab");
-        tab.textContent = `${answered(i) ? "✓" : "○"} ${other.header || T.questionN(i + 1)}`;
-        tab.setAttribute("aria-current", String(i === step));
-        tab.addEventListener("click", () => {
-          step = i;
-          draw();
-        });
-        tabs.append(tab);
-      }
-      elements.push(tabs);
-    } else if (q.header) {
-      const tag = element("span", "chat-question-label");
-      tag.textContent = q.header;
-      elements.push(tag);
-    }
-
-    const text = element("div", "chat-question-text");
-    text.textContent = q.question;
-    if (q.multiSelect) {
-      const hint = element("span", "chat-question-hint");
-      hint.textContent = T.pickAnyNumber;
-      text.append(hint);
-    }
-    const hasPreview = q.options.some((o) => o.preview);
-    const direct = !q.multiSelect && !hasPreview;
-    const options = element("div", "chat-question-options");
-    const preview = element("pre", "chat-question-preview");
-    const chosen = q.options.find((o) => e.labels.includes(o.label) && o.preview);
-    preview.hidden = !chosen;
-    preview.textContent = chosen?.preview ?? "";
-    const other = element("input", "chat-question-other");
-    other.placeholder = T.writeYourAnswer;
-    other.value = e.other ?? "";
-    other.hidden = e.other === undefined;
-
-    for (const o of q.options) {
-      const b = element("button", "chat-option");
-      b.setAttribute("aria-pressed", String(e.labels.includes(o.label)));
-      const label = element("span", "chat-option-label");
-      label.textContent = o.label;
-      b.append(label);
-      if (o.description) {
-        const d = element("span", "chat-option-description");
-        d.textContent = o.description;
-        b.append(d);
-      }
-      b.addEventListener("click", () => {
-        if (q.multiSelect) {
-          e.labels = e.labels.includes(o.label) ? e.labels.filter((l) => l !== o.label) : [...e.labels, o.label];
-        } else {
-          e.labels = [o.label];
-          e.other = undefined;
-        }
-        if (direct) return advance();
-        draw();
-      });
-      options.append(b);
-    }
-    const otherButton = element("button", "chat-option");
-    otherButton.textContent = T.other;
-    otherButton.setAttribute("aria-pressed", String(e.other !== undefined));
-    otherButton.addEventListener("click", () => {
-      // In a single choice, writing your own unchecks the checked one.
-      if (!q.multiSelect) e.labels = [];
-      e.other ??= "";
-      draw();
-      chat.question.querySelector<HTMLInputElement>(".chat-question-other")?.focus();
-    });
-    options.append(otherButton);
-    other.addEventListener("input", () => {
-      e.other = other.value;
-      follow.disabled = !answered(step);
-    });
-    other.addEventListener("keydown", (ev) => {
-      if (ev.key !== "Enter" || ev.isComposing) return;
-      ev.preventDefault();
-      if (answered(step)) advance();
-    });
-
-    const actions = element("div", "chat-question-actions");
-    const terminal = element("button", "chat-question-terminal");
-    terminal.textContent = T.viewInTerminal;
-    terminal.addEventListener("click", () => toggleChat(leaf));
-    const goBack = element("button", "chat-question-terminal");
-    goBack.textContent = T.goBack;
-    goBack.addEventListener("click", () => {
-      step--;
-      draw();
-    });
-    // On the last unanswered one the button already sends; before it, it moves on.
-    const last = questions.every((_, i) => i === step || answered(i));
-    const follow = element("button", "chat-question-answer");
-    follow.textContent = last ? T.reply : T.next;
-    follow.disabled = !answered(step);
-    follow.addEventListener("click", advance);
-    actions.append(terminal);
-    if (step > 0) actions.append(goBack);
-    actions.append(follow);
-
-    elements.push(text, options, other, preview, actions);
-    chat.question.replaceChildren(...elements);
-  };
-  draw();
-}
-
-/// Answers the permission request in the terminal, through its keyboard: the
-/// Enter accepts the top option ("Yes"), esc declines. It is what you would press there.
-function answerPermission(leaf: Leaf, yes: boolean) {
-  const claude = leaf.claude;
-  if (claude?.state !== "waiting" || claude.asks !== "permission") return;
-  invoke("pty_write", { id: leaf.id, data: yes ? "\r" : "\x1b" }).catch((e) => jlog(`permission: ${e}`));
-  // Accepted, Claude keeps working; declined, it stops and waits for you to say
-  // what to do instead — and the chat field sends that.
-  claude.state = yes ? "working" : "idle";
-  claude.asks = undefined;
-  claude.notice = undefined;
-  paint();
-  keyboard(leaf);
-}
-
-/// Puts the chat's scroll back where you left it.
-function restoreScroll(chat: Chat) {
-  const { list } = chat;
-  if (!chat.atEnd) {
-    if (list.scrollTop !== chat.top) list.scrollTop = chat.top;
-    return;
-  }
-  list.scrollTop = list.scrollHeight;
-  // Once isn't enough to reach the end: off-screen turns have a guessed height
-  // (style.css's `content-visibility`), and only get the real one when the
-  // scroll reaches them — then the list grows and the end is somewhere else. It insists for
-  // a few frames, until the height stops changing.
-  if (chat.stick !== undefined) return;
-  let frames = 0;
-  let equal = 0;
-  let before = -1;
-  const step = () => {
-    chat.stick = undefined;
-    if (!chat.isOpen || !chat.atEnd) return;
-    const height = list.scrollHeight;
-    list.scrollTop = height;
-    equal = height === before ? equal + 1 : 0;
-    before = height;
-    if (++frames < 30 && equal < 2) chat.stick = requestAnimationFrame(step);
-  };
-  chat.stick = requestAnimationFrame(step);
-}
-
-/// Draws one more batch of older turns, above the ones already on screen,
-/// without moving what you are reading.
-function showPrevious(chat: Chat) {
-  const to = chat.since;
-  chat.since = Math.max(0, to - CHAT_WINDOW);
-  const height = chat.list.scrollHeight;
-  chat.more.after(...chat.messages.slice(chat.since, to).map(drawMessage));
-  chat.more.hidden = chat.since === 0;
-  chat.list.scrollTop += chat.list.scrollHeight - height;
-}
-
-/// The thumbnails go away along with the message that took them.
-function clearAttachments(chat: Chat) {
-  for (const img of chat.attachments.querySelectorAll("img")) URL.revokeObjectURL(img.src);
-  chat.attachments.replaceChildren();
-  chat.attachments.hidden = true;
-}
-
-/// Who gets the panel's keyboard: the chat field, if it is the one on screen.
-function keyboard(leaf: Leaf) {
-  const v = leaf.viewer;
-  if (leaf.explorer?.isOpen && !leaf.explorer.fixed) leaf.explorer.tree.focus({ preventScroll: true });
-  else if (v?.isOpen && (layoutViewer === "over" || v.withKeyboard)) (v.edit?.area ?? v.body).focus({ preventScroll: true });
-  else if (leaf.chat?.isOpen) leaf.chat.campo.focus();
-  else leaf.term.focus();
-}
-
-function createChat(leaf: Leaf): Chat {
-  const el = element("div", "chat");
-  const list = element("div", "chat-list");
-  list.dataset.empty = T.chatEmpty;
-  const question = element("div", "chat-question");
-  question.hidden = true;
-  const thinking = element("div", "chat-thinking");
-  thinking.hidden = true;
-  const notice = element("div", "chat-notice");
-  const noticeText = element("span", "chat-notice-text");
-  const allow = element("button", "chat-notice-yes");
-  allow.textContent = T.allow;
-  allow.addEventListener("click", () => answerPermission(leaf, true));
-  const deny = element("button", "chat-notice-not");
-  deny.textContent = T.deny;
-  deny.addEventListener("click", () => answerPermission(leaf, false));
-  const view = element("button", "chat-notice-view");
-  view.textContent = T.viewInTerminal;
-  view.addEventListener("click", () => toggleChat(leaf));
-  notice.append(noticeText, allow, deny, view);
-  const more = element("button", "chat-more");
-  more.textContent = T.showPrevious;
-  more.hidden = true;
-  const campo = element("textarea", "chat-field");
-  campo.rows = 1;
-  campo.spellcheck = false;
-  campo.setAttribute("autocorrect", "off");
-  campo.placeholder = T.messageForClaude;
-  const menu = element("div", "chat-commands");
-  menu.hidden = true;
-  const attachments = element("div", "chat-attachments");
-  attachments.hidden = true;
-  el.append(list, thinking, question, notice, menu, attachments, campo);
-  // Inside the terminal's element, not beside it: hiding it would remove the measure
-  // FitAddon computes the grid from, and Claude would get a SIGWINCH on every
-  // mode switch.
-  leaf.el.querySelector(".leaf-screen")?.append(el);
-
-  const grow = () => {
-    campo.style.height = "auto";
-    campo.style.height = `${Math.min(campo.scrollHeight, 160)}px`;
-  };
-  /// Sends the text to Claude. A `/command` goes typed, not pasted: typed
-  /// is how Claude Code recognizes it as a command in every case. The
-  /// rest goes the paste way, like ⌘V — several lines arrive as
-  /// a single block, not as an Enter at each break. Enter goes after, on
-  /// its own: together with the paste Claude would take it as one more line of it.
-  const send = (text: string) => {
-    // `/resume` alone would open the session list in the terminal, where the chat
-    // can't see it. The list is built here, and what goes to Claude is
-    // `/resume` already with the chosen session.
-    if (text === "/resume") return void openSessions(leaf);
-    chat.sessions = undefined;
-    clearAttachments(chat);
-    campo.value = "";
-    grow();
-    drawCommands(chat);
-    const command = /^\/([\w:.-]+)/.exec(text);
-    // The message goes on screen right away, dimmed until the transcript confirms it. A
-    // `/command` doesn't: many don't even become turns, and the bubble would hang there.
-    if (!command) {
-      const balao = drawMessage({ who: "you", text });
-      balao.classList.add("pending");
-      chat.list.append(balao);
-      chat.pending.push({ el: balao, text });
-      chat.atEnd = true;
-      restoreScroll(chat);
-      if (leaf.claude) leaf.claude.state = "working";
-    }
-    if (command && !text.includes("\n")) {
-      invoke("pty_write", { id: leaf.id, data: text }).catch((err) => jlog(`chat command: ${err}`));
-    } else paste(leaf, text);
-    setTimeout(() => {
-      invoke("pty_write", { id: leaf.id, data: "\r" }).catch((err) => jlog(`chat send: ${err}`));
-    }, 80);
-    // What the command opens (the model list, the sessions to resume) shows
-    // in the terminal, and that is where it is answered. The chat doesn't step aside on its own:
-    // it notifies, and the notice's button takes you there.
-    const name = command?.[1];
-    // With an argument the command already says what it wants, and opens no screen.
-    const opensScreen = text === `/${name}` && CLAUDE_COMMANDS.some((c) => c.interactive && c.name === name);
-    chat.flash = opensScreen ? T.openedScreenInTerminal(name ?? "") : undefined;
-    paint();
-  };
-  const completeWith = (c: Command) => {
-    campo.value = `/${c.name} `;
-    grow();
-    drawCommands(chat);
-  };
-
-  campo.addEventListener("input", () => {
-    grow();
-    // Writing the answer is attending, like the first key in the terminal.
-    if (leaf.claude?.state === "waiting" && answerableInChat(leaf)) {
-      leaf.claude.state = "idle";
-      paint();
-    }
-    // Just opened the list: the commands on disk may have changed since the
-    // last time (a new skill, another project).
-    if (campo.value === "/") void loadCommands(leaf);
-    chat.picked = 0;
-    drawCommands(chat);
-  });
-  const resumeSession = (s: SavedSession) => send(`/resume ${s.id}`);
-  const closeSessions = () => {
-    chat.sessions = undefined;
-    campo.value = "";
-    grow();
-    drawCommands(chat);
-  };
-  menu.addEventListener("mousedown", (e) => {
-    // The click doesn't take the keyboard away from the field.
-    e.preventDefault();
-    const item = (e.target as HTMLElement).closest<HTMLElement>(".chat-command");
-    if (!item) return;
-    if (chat.sessions) {
-      const s = chat.sessionsFound[Number(item.dataset.i)];
-      if (s) resumeSession(s);
-      return;
-    }
-    const c = chat.findings[Number(item.dataset.i)];
-    if (c) completeWith(c);
-  });
-  campo.addEventListener("keydown", (e) => {
-    if (ourShortcut(e)) return;
-    if (chat.sessions) {
-      const n = chat.sessionsFound.length;
-      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && n) {
-        e.preventDefault();
-        chat.picked = (chat.picked + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
-        return drawCommands(chat);
-      }
-      if (e.key === "Enter" && !e.isComposing) {
-        e.preventDefault();
-        const s = chat.sessionsFound[chat.picked];
-        if (s) resumeSession(s);
-        return;
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        return closeSessions();
-      }
-      return;
-    }
-    if (!menu.hidden && chat.findings.length) {
-      const n = chat.findings.length;
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        chat.picked = (chat.picked + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
-        return drawCommands(chat);
-      }
-      // Tab completes, for those who will write the arguments; Enter sends right away.
-      if (e.key === "Tab") {
-        e.preventDefault();
-        return completeWith(chat.findings[chat.picked]);
-      }
-      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
-        e.preventDefault();
-        return send(`/${chat.findings[chat.picked].name}`);
-      }
-      // Esc closes the list; only without it does it interrupt Claude.
-      if (e.key === "Escape") {
-        e.preventDefault();
-        menu.hidden = true;
-        return;
-      }
-    }
-    if (e.key === "Escape") {
-      e.preventDefault();
-      // With a permission request open, esc there is the "no": the notice goes along.
-      if (leaf.claude?.state === "waiting" && leaf.claude.asks === "permission") {
-        return answerPermission(leaf, false);
-      }
-      invoke("pty_write", { id: leaf.id, data: "\x1b" }).catch((err) => jlog(`chat esc: ${err}`));
-      // When interrupted, Claude doesn't send `Stop`: "working" goes away here.
-      if (leaf.claude?.state === "working") {
-        leaf.claude.state = "idle";
-        paint();
-      }
-      return;
-    }
-    // Enter in the middle of a composition (accent, IME) confirms the letter, doesn't send.
-    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
-    e.preventDefault();
-    // The marker in the field is only for you to see where the image is: in Claude's
-    // prompt it already went in with ⌃V, and sent again it would become text.
-    const text = campo.value.replace(/\[Image #\d+\] ?/g, "").trim();
-    if (text) send(text);
-    else if (!chat.attachments.hidden) {
-      campo.value = "";
-      grow();
-      invoke("pty_write", { id: leaf.id, data: "\r" }).catch((err) => jlog(`chat send: ${err}`));
-      clearAttachments(chat);
-    }
-  });
-  // Clicking anywhere in the chat is like clicking in the terminal: the keyboard goes
-  // to the field, and you can just start typing. Except when the click was for
-  // something else — a button, a link, another field — or to select text.
-  el.addEventListener("mouseup", (e) => {
-    const target = e.target as HTMLElement;
-    if (target.closest("button, a, input, textarea, select, summary")) return;
-    if (!(getSelection()?.isCollapsed ?? true)) return;
-    campo.focus({ preventScroll: true });
-  });
-  // A link in the answer opens outside, like the terminal's: inside, it would replace the
-  // whole app's page with the link's.
-  list.addEventListener("click", (e) => {
-    // ⌘-click on a `path:line` in the answer opens the file in the viewer.
-    if (referenceClick(leaf, e)) return;
-    const a = (e.target as HTMLElement).closest("a");
-    if (!a) return;
-    e.preventDefault();
-    openLink(e, a.href);
-  });
-  // A pasted image goes to Claude as in the terminal: ⌃V is what makes Claude
-  // Code read the clipboard and attach it to the prompt it is building. The
-  // field's text goes after, along with Enter.
-  campo.addEventListener("paste", (e) => {
-    const file = [...(e.clipboardData?.items ?? [])]
-      .find((i) => i.kind === "file" && i.type.startsWith("image/"))
-      ?.getAsFile();
-    if (!file) return;
-    e.preventDefault();
-    invoke("pty_write", { id: leaf.id, data: "\x16" }).catch((err) => jlog(`chat image: ${err}`));
-    const img = element("img", "chat-attachment");
-    img.src = URL.createObjectURL(file);
-    img.alt = T.attachedImage;
-    img.addEventListener("click", () => expandImage(img.src));
-    attachments.append(img);
-    attachments.hidden = false;
-    // The number Claude Code will give it: it counts across the whole session.
-    const seenOnes = chat.messages.flatMap((f) =>
-      f.who === "you" ? [...f.text.matchAll(/\[Image #(\d+)\]/g)].map((m) => Number(m[1])) : [],
-    );
-    const n = Math.max(0, ...seenOnes) + attachments.childElementCount;
-    campo.setRangeText(`[Image #${n}] `, campo.selectionStart, campo.selectionEnd, "end");
-    grow();
-  });
-
-  const chat: Chat = {
-    el,
-    list,
-    notice,
-    noticeText,
-    question,
-    thinking,
-    pending: [],
-    allow,
-    deny,
-    campo,
-    menu,
-    commands: [],
-    findings: [],
-    picked: 0,
-    attachments,
-    sessionsFound: [],
-    more,
-    messages: [],
-    since: 0,
-    top: 0,
-    atEnd: true,
-    isOpen: false,
-    end: 0,
-  };
-  more.addEventListener("click", () => showPrevious(chat));
-  list.addEventListener(
-    "scroll",
-    () => {
-      // Off screen the list has no height, and what it says about the scroll is zero.
-      // And on the way to the end, the positions passed through aren't your choice.
-      if (!list.clientHeight || chat.stick !== undefined) return;
-      chat.top = list.scrollTop;
-      chat.atEnd = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
-    },
-    { passive: true },
-  );
-  // Scrolled by hand midway: you are in charge.
-  list.addEventListener(
-    "wheel",
-    () => {
-      if (chat.stick === undefined) return;
-      cancelAnimationFrame(chat.stick);
-      chat.stick = undefined;
-    },
-    { passive: true },
-  );
-  return chat;
-}
-
-/// The commands and skills on disk, for the `/` list. The folder is the
-/// session's: it is from there that Claude Code sees the project's `.claude`.
-async function loadCommands(leaf: Leaf) {
-  const chat = leaf.chat;
-  if (!chat) return;
-  try {
-    const fromDisk = await invoke<Command[]>("commands_list", { folder: leaf.claude?.folder ?? null });
-    chat.commands = fromDisk;
-    drawCommands(chat);
-  } catch (e) {
-    jlog(`commands: ${e}`);
-  }
-}
-
-/// The list shows while the field is just a slash and a name with no space yet;
-/// after the space come the arguments, and it gets out of the way.
-function drawCommands(chat: Chat) {
-  if (chat.sessions) return drawSessions(chat);
-  const typed = /^\/([\w:.-]*)$/.exec(chat.campo.value);
-  chat.findings = typed ? filterCommands([...chat.commands, ...CLAUDE_COMMANDS], typed[1]) : [];
-  chat.menu.hidden = !chat.findings.length;
-  if (chat.menu.hidden) return;
-  chat.picked = Math.min(chat.picked, chat.findings.length - 1);
-  chat.menu.replaceChildren(
-    ...chat.findings.map((c, i) => {
-      const item = element("div", "chat-command");
-      item.dataset.i = String(i);
-      item.classList.toggle("selected", i === chat.picked);
-      const name = element("span", "chat-command-name");
-      name.textContent = `/${c.name}`;
-      const description = element("span", "chat-command-description");
-      description.textContent = c.description;
-      item.append(name, description);
-      return item;
-    }),
-  );
-  chat.menu.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
-}
-
-/// A Claude Code session stored on disk, as `claude_sessions` lists it.
-type SavedSession = { id: string; title: string; modified: number };
-
-/// "5 min ago", "3 h ago", "2 d ago": enough to find yesterday's conversation.
-function howLongAgo(ms: number): string {
-  const min = Math.max(0, Math.round((Date.now() - ms) / 60_000));
-  if (min < 1) return T.now;
-  if (min < 60) return T.haMin(min);
-  if (min < 60 * 24) return T.hoursAgo(Math.round(min / 60));
-  return T.daysAgo(Math.round(min / (60 * 24)));
-}
-
-/// The `/resume` list, inside the chat: the stored sessions of the folder this one
-/// was born in, which is where Claude Code looks for them.
-async function openSessions(leaf: Leaf) {
-  const chat = leaf.chat;
-  if (!chat) return;
-  chat.campo.value = "";
-  chat.campo.style.height = "auto";
-  const folder = leaf.claude?.folder ?? (await invoke<string | null>("pty_cwd", { id: leaf.id }).catch(() => null));
-  const every = folder ? await invoke<SavedSession[]>("claude_sessions", { path: folder }).catch(() => []) : [];
-  // The session we are already in isn't one to resume.
-  const others = every.filter((s) => s.id !== leaf.claude?.session);
-  if (!others.length) {
-    chat.flash = T.noOtherSession;
-    return drawNotice(leaf);
-  }
-  chat.flash = undefined;
-  drawNotice(leaf);
-  chat.sessions = others;
-  chat.picked = 0;
-  drawCommands(chat);
-  chat.campo.focus();
-}
-
-/// The menu, in place of the commands: the sessions whose title contains what is in the
-/// field. With the field empty, all of them.
-function drawSessions(chat: Chat) {
-  const q = chat.campo.value.trim().toLowerCase();
-  chat.sessionsFound = (chat.sessions ?? []).filter((s) => s.title.toLowerCase().includes(q));
-  chat.picked = Math.max(0, Math.min(chat.picked, chat.sessionsFound.length - 1));
-  const head = element("div", "chat-commands-head");
-  head.textContent = chat.sessionsFound.length
-    ? T.resumeSession
-    : T.noSessionWithText;
-  chat.menu.hidden = false;
-  chat.menu.replaceChildren(
-    head,
-    ...chat.sessionsFound.map((s, i) => {
-      const item = element("div", "chat-command chat-session");
-      item.dataset.i = String(i);
-      item.classList.toggle("selected", i === chat.picked);
-      const title = element("span", "chat-session-title");
-      title.textContent = s.title;
-      const when = element("span", "chat-session-when");
-      when.textContent = howLongAgo(s.modified);
-      item.append(title, when);
-      return item;
-    }),
-  );
-  chat.menu.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
-}
-
-function drawMessage(f: Message): HTMLElement {
-  if (f.who === "tool") {
-    const el = element("div", "chat-tool");
-    const name = element("span", "chat-tool-name");
-    name.textContent = f.name;
-    const summary = element("span", "chat-tool-summary");
-    summary.textContent = f.summary;
-    el.append(name, summary);
-    return el;
-  }
-  if (f.who === "diff") {
-    const el = element("div", "chat-diffs");
-    el.append(...f.files.map(drawDiff));
-    return el;
-  }
-  const el = element("div", `chat-message chat-${f.who}`);
-  // Your text goes as written; only Claude's answer is markdown.
-  if (f.who === "you") drawYour(el, f.text, f.images ?? []);
-  else {
-    el.innerHTML = markdown(f.text);
-    copyButtons(el);
-  }
-  return el;
-}
-
-/// A copy button on each code block of rendered markdown — a Claude answer, a .md in
-/// the viewer. It copies the block as it is: the command ready to paste. In a frame
-/// around the block, not inside it: the block scrolls sideways, and the button would go along.
+/// A copy button on each code block of rendered markdown — a .md in the viewer. It
+/// copies the block as it is: the command ready to paste. In a frame around the block,
+/// not inside it: the block scrolls sideways, and the button would go along.
 function copyButtons(el: HTMLElement) {
   for (const pre of el.querySelectorAll<HTMLPreElement>("pre:not(.mermaid)")) {
     const outline = element("div", "code-block");
@@ -2360,247 +1292,36 @@ function copyButtons(el: HTMLElement) {
   }
 }
 
-/// How many diff lines go on screen. A `Write` of a whole file
-/// would have thousands; the rest is in the file.
-const DIFF_MAX = 400;
-
-/// Unified or side by side: the same mode as the differ, stored in its
-/// preferences. Switching here switches there, and vice versa.
-let modeDiff: ViewMode = "unified";
-
-/// The file for each diff on screen, to redraw it when the mode changes.
-const diffFileOf = new WeakMap<HTMLElement, FileDiff>();
-
-const ICON_UNIFIED = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M4.5 6h7M4.5 10h7"/></svg>`;
-const ICON_SIDE_SIDE = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M8 2.5v11"/></svg>`;
-
-async function wireDiffMode() {
+/// The blinking of the waiting signals, from Preferences: off, they stay lit and still.
+async function wirePreferences() {
   try {
-    switchModeDiff((await loadSettings()).viewMode);
-    await onSettings(({ viewMode }) => switchModeDiff(viewMode));
+    const apply = ({ blinkOnAttention }: Settings) =>
+      document.documentElement.classList.toggle("no-blink", !blinkOnAttention);
+    apply(await loadSettings());
+    await onSettings(apply);
   } catch (e) {
-    jlog(`diff preferences: ${e}`);
+    jlog(`preferences: ${e}`);
   }
 }
 
-/// Redraws the chat's diffs in the new mode. What was open stays open.
-function switchModeDiff(mode: ViewMode) {
-  if (mode === modeDiff) return;
-  modeDiff = mode;
-  for (const el of document.querySelectorAll<HTMLElement>(".chat-diff")) {
-    const file = diffFileOf.get(el);
-    if (!file) continue;
-    const isOpen = el.querySelector(".chat-collapsible-button") && !el.querySelector(".folded");
-    const fresh = drawDiff(file);
-    if (isOpen) fresh.querySelector<HTMLButtonElement>(".chat-collapsible-button")?.click();
-    el.replaceWith(fresh);
+/// Who gets the panel's keyboard: the explorer, the viewer, a plugin's layer on
+/// screen (the Claude chat's field), or the terminal.
+function keyboard(leaf: Leaf) {
+  const v = leaf.viewer;
+  if (leaf.explorer?.isOpen && !leaf.explorer.fixed) return leaf.explorer.tree.focus({ preventScroll: true });
+  if (v?.isOpen && (layoutViewer === "over" || v.withKeyboard)) return (v.edit?.area ?? v.body).focus({ preventScroll: true });
+  const plugin = layerKeyboard(leaf);
+  if (plugin) plugin.focus({ preventScroll: true });
+  else leaf.term.focus();
+}
+
+/// The keyboard target of a plugin layer that is on screen, if any.
+function layerKeyboard(leaf: Leaf): HTMLElement | undefined {
+  for (const [owner, target] of leaf.keyboards ?? []) {
+    if (leaf.layers?.get(owner)?.hidden === false) return target;
   }
 }
 
-/// What a tool changed in a file, as the terminal shows it: the name, the
-/// count, the numbered lines. As a preview like long messages — the
-/// first lines, and the rest one click away.
-function drawDiff(file: FileDiff): HTMLElement {
-  const { lines, more, less } = diffLines(file);
-  const el = element("div", "chat-diff");
-  diffFileOf.set(el, file);
-  const summary = element("div", "chat-diff-summary");
-  const name = element("span", "chat-diff-file");
-  name.textContent = file.path.split("/").pop() ?? file.path;
-  name.title = file.path;
-  const parts = [more && `+${more}`, less && `−${less}`].filter(Boolean).join(" ");
-  const side = modeDiff === "split";
-  // The icon is the one for the mode the click leads to.
-  const mode = element("button", "chat-diff-mode");
-  mode.innerHTML = side ? ICON_UNIFIED : ICON_SIDE_SIDE;
-  mode.title = side ? T.viewUnified : T.viewSideBySide;
-  mode.addEventListener("mousedown", (e) => e.preventDefault());
-  mode.addEventListener("click", () => {
-    const fresh: ViewMode = side ? "unified" : "split";
-    switchModeDiff(fresh);
-    saveViewMode(fresh).catch((e) => jlog(`save diff mode: ${e}`));
-  });
-  summary.append(name, ` ${parts}`, mode);
-  // The numbers column is as wide as the largest of them.
-  const width = String(Math.max(0, ...lines.map((l) => l.num ?? 0))).length;
-  const cls = (l?: LineDiff) =>
-    !l ? "empty" : l.kind === "+" ? "more" : l.kind === "-" ? "less" : l.kind === "…" ? "jump" : "";
-  const pre = element("pre", side ? "chat-diff-lines side-by-side" : "chat-diff-lines");
-  let total: number;
-  if (side) {
-    const pairs = sideBySide(lines);
-    total = pairs.length;
-    const half = (l?: LineDiff) => {
-      const c = element("div", `chat-diff-line ${cls(l)}`);
-      c.textContent = l ? `${String(l.num ?? "").padStart(width)} ${l.text}` : "";
-      return c;
-    };
-    for (const p of pairs.slice(0, DIFF_MAX)) {
-      if (p.jump) {
-        const line = element("div", "chat-diff-line jump whole");
-        line.textContent = "⋯";
-        pre.append(line);
-      } else pre.append(half(p.before), half(p.after));
-    }
-  } else {
-    total = lines.length;
-    for (const l of lines.slice(0, DIFF_MAX)) {
-      const line = element("div", `chat-diff-line ${cls(l)}`);
-      line.textContent =
-        l.kind === "…" ? "⋯" : `${String(l.num ?? "").padStart(width)} ${l.kind} ${l.text}`;
-      pre.append(line);
-    }
-  }
-  const shown = Math.min(total, DIFF_MAX);
-  el.append(summary, inPreview(pre, shown, shown > LONG_LINES));
-  if (total > DIFF_MAX) {
-    const note = element("div", "chat-diff-summary");
-    note.textContent = T.moreLines(total - DIFF_MAX);
-    el.append(note);
-  }
-  return el;
-}
-
-/// From how many lines (or characters, for whoever pastes one huge
-/// line) a text starts collapsed. A pasted log took the whole screen and
-/// pushed the answer far away.
-const LONG_LINES = 10;
-const LONG_CHARS = 900;
-
-/// Your bubble: what you typed, what you pasted (without the `<pasted_content>` tags
-/// Claude Code puts around it) and the images, each where the text cites it.
-function drawYour(el: HTMLElement, text: string, images: string[]) {
-  for (const p of partsOfYour(text, images.length)) {
-    if (p.kind === "image") {
-      const img = element("img", "chat-image");
-      img.src = images[p.index];
-      img.alt = T.imageN(p.index + 1);
-      img.addEventListener("click", () => expandImage(img.src));
-      el.append(img);
-    } else if (p.kind === "pasted") {
-      const box = element("div", "chat-pasted");
-      const lines = p.text.split("\n").length;
-      const title = element("div", "chat-pasted-title");
-      title.textContent = T.pastedText(lines);
-      box.append(title, collapsible(p.text));
-      el.append(box);
-    } else el.append(collapsible(p.text));
-  }
-}
-
-/// A text that, when long, starts collapsed to a few lines with a button to
-/// open it. Short, it is just the text.
-function collapsible(text: string): HTMLElement {
-  const body = element("div", "");
-  body.textContent = text;
-  const lines = text.split("\n").length;
-  return inPreview(body, lines, lines > LONG_LINES || text.length > LONG_CHARS);
-}
-
-/// The same for any content (an edit's diff): `long` says whether it
-/// starts collapsed with the button, and `lines` is what the button counts.
-function inPreview(body: HTMLElement, lines: number, long: boolean): HTMLElement {
-  const el = element("div", "chat-collapsible");
-  body.classList.add("chat-collapsible-body");
-  el.append(body);
-  if (!long) return el;
-  const button = element("button", "chat-collapsible-button");
-  const label = () => {
-    button.textContent = el.classList.contains("folded") ? T.showAll(lines) : T.collapse;
-  };
-  button.addEventListener("click", () => {
-    el.classList.toggle("folded");
-    label();
-    // Collapsed from the middle (the button floats), the start of the text would be up
-    // there, off screen: bring it back so you don't lose your place.
-    if (el.classList.contains("folded")) el.scrollIntoView({ block: "nearest" });
-  });
-  el.classList.add("folded");
-  el.append(button);
-  label();
-  return el;
-}
-
-/// The image at screen size, over everything. Click or esc closes it.
-function expandImage(src: string) {
-  const background = element("div", "chat-image-enlarged");
-  const img = element("img", "");
-  img.src = src;
-  background.append(img);
-  const close = () => {
-    background.remove();
-    removeEventListener("keydown", esc, true);
-  };
-  const esc = (e: KeyboardEvent) => {
-    if (e.key !== "Escape") return;
-    e.preventDefault();
-    e.stopPropagation();
-    close();
-  };
-  background.addEventListener("click", close);
-  addEventListener("keydown", esc, true);
-  document.body.append(background);
-}
-
-type Snippet = { text: string; end: number; from_start: boolean; truncated: boolean };
-
-/// Reads what the transcript gained and adds it to the end of the conversation.
-async function readChat(leaf: Leaf) {
-  const chat = leaf.chat;
-  if (!chat || chat.reading || leaf.dead) return;
-  // The session ended: the last conversation stays on screen, it just doesn't grow anymore.
-  const path = leaf.claude?.transcript ?? chat.path;
-  if (!path) return;
-  const other = path !== chat.path;
-  chat.reading = true;
-  try {
-    const t = await invoke<Snippet>("transcript_read", { path: path, since: other ? 0 : chat.end });
-    const messages = readMessages(t.text);
-    const fromScratch = other || t.from_start;
-    if (fromScratch) {
-      chat.list.replaceChildren(chat.more);
-      chat.pending = [];
-      if (t.truncated) {
-        const note = element("div", "chat-note");
-        note.textContent = T.startInTerminal;
-        chat.list.prepend(note);
-      }
-      chat.messages = [];
-      // Of the conversation that already existed, only the end goes on screen.
-      chat.since = Math.max(0, messages.length - CHAT_WINDOW);
-      chat.more.hidden = chat.since === 0;
-      chat.atEnd = true;
-    }
-    chat.path = path;
-    chat.end = t.end;
-    if (!messages.length) return;
-    const first = Math.max(chat.since - chat.messages.length, 0);
-    chat.messages.push(...messages);
-    // Each of your turns that arrives takes the place of its provisional bubble.
-    for (const f of messages) {
-      if (f.who !== "you") continue;
-      const n = provisionalResolved(
-        chat.pending.map((p) => p.text),
-        f.text,
-      );
-      for (const p of chat.pending.splice(0, n)) p.el.remove();
-    }
-    chat.list.append(...messages.slice(first).map(drawMessage));
-    // Only those already at the end follow it: whoever scrolled up to reread isn't
-    // pulled back on every new turn.
-    if (chat.isOpen) restoreScroll(chat);
-    // A resumed conversation brings prompts the hook didn't see go by.
-    rememberPrompts(leaf, messages.flatMap((f) => (f.who === "you" ? [f.text] : [])));
-  } catch (e) {
-    // Claude only creates the file on the first turn: until then, there is nothing to read.
-    if (!String(e).includes("No such file")) jlog(`chat: ${e}`);
-  } finally {
-    chat.reading = false;
-  }
-}
-
-/// Switches the panel between the terminal and the conversation in bubbles. It is per panel: with the
-/// screen split, one may be in chat and the neighbor in the terminal.
 /// ⌘ or ⌃ click opens the link in the browser; a plain click is left for
 /// selecting and positioning, like in iTerm.
 function openLink(e: MouseEvent, url: string) {
@@ -2609,16 +1330,16 @@ function openLink(e: MouseEvent, url: string) {
 }
 
 /// Shorter than maximize's: it is a layer appearing, not the layout moving.
-const CHAT_DURATION = 180;
+const LAYER_DURATION = 180;
 
-/// The chat comes in or goes out over the terminal: fades with a slight slide. On the
-/// way out it only vanishes at the end, and meanwhile it doesn't hold clicks — the
-/// terminal below is already the panel.
-function transitionChat(chat: { el: HTMLElement; isOpen: boolean; transition?: Animation }) {
-  const { el, isOpen } = chat;
-  const meio = chat.transition?.playState === "running" ? chat.transition.currentTime : null;
-  chat.transition?.cancel();
-  chat.transition = undefined;
+/// A layer comes in or goes out over the terminal (the viewer): fades with a slight
+/// slide. On the way out it only vanishes at the end, and meanwhile it doesn't hold
+/// clicks — the terminal below is already the panel.
+function transitionLayer(layer: { el: HTMLElement; isOpen: boolean; transition?: Animation }) {
+  const { el, isOpen } = layer;
+  const meio = layer.transition?.playState === "running" ? layer.transition.currentTime : null;
+  layer.transition?.cancel();
+  layer.transition = undefined;
   el.style.pointerEvents = isOpen ? "" : "none";
   if (isOpen) el.hidden = false;
   if (reducedMotion.matches) {
@@ -2630,66 +1351,17 @@ function transitionChat(chat: { el: HTMLElement; isOpen: boolean; transition?: A
     { opacity: 1, transform: "none" },
   ];
   const t = el.animate(isOpen ? frames : frames.reverse(), {
-    duration: CHAT_DURATION,
+    duration: LAYER_DURATION,
     easing: isOpen ? "cubic-bezier(0.2, 0.7, 0.3, 1)" : "ease-in",
   });
   // Turning around midway starts from the mirrored point, without a jump.
-  if (typeof meio === "number") t.currentTime = Math.max(0, CHAT_DURATION - meio);
-  chat.transition = t;
+  if (typeof meio === "number") t.currentTime = Math.max(0, LAYER_DURATION - meio);
+  layer.transition = t;
   t.onfinish = () => {
-    if (chat.transition !== t) return;
-    chat.transition = undefined;
-    if (!chat.isOpen) el.hidden = true;
+    if (layer.transition !== t) return;
+    layer.transition = undefined;
+    if (!layer.isOpen) el.hidden = true;
   };
-}
-
-function toggleChat(leaf: Leaf) {
-  if (leaf.chat?.isOpen) {
-    const chat = leaf.chat;
-    chat.isOpen = false;
-    transitionChat(chat);
-    chat.flash = undefined;
-    chat.sessions = undefined;
-    drawCommands(chat);
-    clearInterval(chat.pulse);
-    chat.pulse = undefined;
-  } else {
-    // With no Claude session in the panel, the button opens one: the chat is the way to
-    // start a conversation in that folder, not only to see one that already exists.
-    if (!leaf.claude) return void openClaudeInChat(leaf);
-    const chat = (leaf.chat ??= createChat(leaf));
-    chat.isOpen = true;
-    transitionChat(chat);
-    void loadCommands(leaf);
-    // Escondida, a list perdeu a scrollPos.
-    restoreScroll(chat);
-    void readChat(leaf);
-    chat.pulse = setInterval(() => {
-      void readChat(leaf);
-      drawThinking(leaf);
-    }, CHAT_MS);
-  }
-  drawBar(leaf);
-  drawNotice(leaf);
-  if (tabOf(leaf)?.focus === leaf) keyboard(leaf);
-}
-
-/// Opens Claude Code in the panel's shell, in the folder it is in, and goes straight
-/// into chat mode. The conversation shows up when the `SessionStart` hook says which
-/// transcript is its own.
-async function openClaudeInChat(leaf: Leaf) {
-  // With another program in front of the shell, `claude` would be typed inside
-  // it — in a vim, in a running server.
-  if (await invoke<boolean>("pty_busy", { id: leaf.id }).catch(() => false)) {
-    return notify(leaf, T.programRunning);
-  }
-  // O clique repetido enquanto a question up ia e voltava.
-  if (leaf.dead || leaf.claude || leaf.chat?.isOpen) return;
-  await invoke("pty_write", { id: leaf.id, data: "claude\r" }).catch((e) => jlog(`open claude: ${e}`));
-  // Marked right away: it is what makes the second click close the chat instead of
-  // typing `claude` again. The rest arrives with the session's first event.
-  leaf.claude = { name: leaf.title, state: "idle" };
-  toggleChat(leaf);
 }
 
 // ---------- the viewer: a file inside the panel ----------
@@ -3030,7 +1702,7 @@ type Explorer = {
   outside?: (e: MouseEvent) => void;
 };
 
-/// A drawer from the left, over the terminal, the chat and the viewer — it pushes nothing
+/// A drawer from the left, over the terminal, the plugins' layers and the viewer — it pushes nothing
 /// aside. Choosing a file opens it in the viewer and closes the drawer.
 function createExplorer(leaf: Leaf): Explorer {
   const el = element("div", "explorer");
@@ -3275,9 +1947,9 @@ function toggleViewer(leaf: Leaf, scroll = false) {
   const v = leaf.viewer;
   if (!v?.history.length) return;
   v.isOpen = !v.isOpen;
-  // When opening split, the keyboard stays where it was: in the chat, in the terminal.
+  // When opening split, the keyboard stays where it was: in a plugin's layer, in the terminal.
   if (v.isOpen) v.withKeyboard = false;
-  if (layoutViewer === "over") transitionChat(v);
+  if (layoutViewer === "over") transitionLayer(v);
   else {
     // Split, the terminal changes size along with it: no animation, which would get it
     // measured midway.
@@ -3635,7 +2307,7 @@ function drawViewer(leaf: Leaf, scroll: boolean) {
   if (!lines) return;
 
   if (md && v.rendered) {
-    const html = element("div", "viewer-md chat-claude");
+    const html = element("div", "viewer-md markdown");
     html.innerHTML = markdown(lines.join("\n"), 0, p.ref ? "view" : "mark", true);
     const markedOnes = markBlocks(html, p.line, p.to);
     copyButtons(html);
@@ -4053,7 +2725,7 @@ function panelFolder(leaf: Leaf): Promise<string | null> {
   if (stored && Date.now() - stored.at < 3000) return stored.folder;
   const folder = invoke<string | null>("pty_cwd", { id: leaf.id })
     .catch(() => null)
-    .then((p) => p ?? leaf.claude?.folder ?? leaf.bar?.folder ?? null);
+    .then((p) => p ?? leaf.bar?.folder ?? null);
   folders.set(leaf, { at: Date.now(), folder });
   return folder;
 }
@@ -4179,17 +2851,19 @@ function markReceiving(f?: Leaf) {
   receiving?.el.classList.add("receiving");
 }
 
-/// Dropped paths go where you would type next: in the chat's field when the chat is
-/// on screen — the terminal is hidden behind it —, otherwise on the terminal's line.
-/// Dropping on a panel also picks it.
+/// Dropped paths go where you would type next: in the field of a plugin layer on
+/// screen (the Claude chat's) — the terminal is hidden behind it —, otherwise on the
+/// terminal's line. Dropping on a panel also picks it.
 function releasePaths(leaf: Leaf, paths: string[]) {
   if (!paths.length) return;
   focusLeaf(leaf);
-  const campo = leaf.chat?.isOpen ? leaf.chat.campo : undefined;
+  const target = layerKeyboard(leaf);
+  const campo = target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement ? target : undefined;
   if (!campo) return paste(leaf, lineOf(paths));
-  const before = campo.value.slice(0, campo.selectionStart);
+  const from = campo.selectionStart ?? campo.value.length;
+  const before = campo.value.slice(0, from);
   const space = before && !/\s$/.test(before) ? " " : "";
-  campo.setRangeText(space + lineOf(paths), campo.selectionStart, campo.selectionEnd, "end");
+  campo.setRangeText(space + lineOf(paths), from, campo.selectionEnd ?? from, "end");
   // The field grows and the `/` menu follows what was typed, as with the keyboard.
   campo.dispatchEvent(new Event("input"));
   campo.focus();
@@ -4277,7 +2951,6 @@ type Bar = {
   name: HTMLSpanElement;
   choose: HTMLButtonElement;
   diff: HTMLButtonElement;
-  chat: HTMLButtonElement;
   viewer: HTMLButtonElement;
   explore: HTMLButtonElement;
   maximize: HTMLButtonElement;
@@ -4314,7 +2987,6 @@ const ICON_CLOSE_TAB = `<svg width="12" height="12" viewBox="0 0 12 12" aria-hid
 const ICON_CLOSE = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 2.5v11M2.5 8h11" transform="rotate(45 8 8)"/></svg>`;
 const ICON_MAXIMIZE = stroke("M9.5 2.5h4v4M13.5 2.5 9 7M6.5 13.5h-4v-4M2.5 13.5 7 9");
 const ICON_COLLAPSE = stroke("M13.5 2.5 9 7M9 3.5V7h3.5M2.5 13.5 7 9M7 12.5V9H3.5");
-const ICON_CHAT = stroke("M3 3.5h10a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H8l-3 2.5v-2.5H3a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z");
 const ICON_COPY = stroke("M5.5 5.5h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1ZM2.5 10.5V3a1 1 0 0 1 1-1h7.5");
 const ICON_COPIED = stroke("M3 8.5l3.2 3L13 4.5");
 const ICON_EYE = stroke("M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8s-2.4 4.5-6.5 4.5S1.5 8 1.5 8ZM8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z");
@@ -4371,7 +3043,6 @@ function createBar(): Bar {
   groupPlay.append(play, choose);
   const diff = buttonTask("task-diff", ICON_DIFF);
   diff.title = T.thisPanelDiff;
-  const chat = buttonTask("task-chat", ICON_CHAT);
   // Only shows after the first file is opened: before that there is nothing to show.
   const viewer = buttonTask("task-viewer", ICON_FILE);
   viewer.hidden = true;
@@ -4382,7 +3053,7 @@ function createBar(): Bar {
   close.title = T.closePanel;
   // Like maximize: `drawMaximize` shows it once the leaf has a tab.
   close.hidden = true;
-  controls.append(actions, drawer, stop, groupPlay, diff, chat, viewer, maximize, close);
+  controls.append(actions, drawer, stop, groupPlay, diff, viewer, maximize, close);
   const branchChip = createBranchChip("task-branch");
   // On the left, like the drawer it opens.
   const explore = buttonTask("task-explore", ICON_FOLDER);
@@ -4405,7 +3076,6 @@ function createBar(): Bar {
     name,
     choose,
     diff,
-    chat,
     viewer,
     explore,
     maximize,
@@ -4432,7 +3102,6 @@ function wireBar(leaf: Leaf) {
   // The diff is of a repository, and the panel knows which one: each has its own
   // directory — with the screen split into three projects, each panel says its own.
   b.diff.addEventListener("click", () => void openDiff(leaf));
-  b.chat.addEventListener("click", () => toggleChat(leaf));
   b.viewer.addEventListener("click", () => toggleViewer(leaf));
   b.maximize.addEventListener("click", () => toggleMaximize(leaf));
   b.close.addEventListener("click", () => closeLeaf(leaf));
@@ -4496,17 +3165,6 @@ function drawBar(leaf: Leaf) {
   b.diff.title = inDiffNow
     ? T.openInDiff
     : T.thisPanelDiff;
-
-  // Always at hand: with a Claude session it switches modes; without one, it opens one
-  // in this folder, already in chat.
-  const inChat = leaf.chat?.isOpen === true;
-  b.chat.hidden = false;
-  b.chat.classList.toggle("on", inChat);
-  b.chat.title = inChat
-    ? T.backToTerminalChat
-    : leaf.claude
-      ? T.viewInChatMode
-      : T.openClaudeInChat;
 
   const exploring = leaf.explorer?.isOpen === true;
   b.explore.hidden = !(b.repo ?? b.folder);
@@ -4633,7 +3291,7 @@ function buildMenu() {
   // out: it toggles on its own.
   document.addEventListener("mousedown", (e) => {
     const target = e.target as Element;
-    if (!menuEl.hidden && !menuEl.contains(target) && !target.closest?.(".task-choose, .task-claude-option")) closeMenu();
+    if (!menuEl.hidden && !menuEl.contains(target) && !target.closest?.(".task-choose")) closeMenu();
   });
 }
 
@@ -4708,21 +3366,6 @@ function openMenu(leaf: Leaf, ancora: HTMLElement) {
   menuEl.querySelector(".chosen")?.scrollIntoView({ block: "nearest" });
   menuOf = leaf;
   menuAncora = ancora;
-}
-
-/// Types a command into the panel's Claude and presses Enter. `busy` is the notice for
-/// when it is working.
-function sendToClaude(leaf: Leaf, command: string, busy: string) {
-  const owner = leaf.owner ?? leaf;
-  if (!owner.claude) return;
-  if (owner.claude.state === "working") {
-    notify(owner, busy);
-    return;
-  }
-  invoke("pty_write", { id: owner.id, data: command }).catch((e) => jlog(`${command}: ${e}`));
-  setTimeout(() => {
-    invoke("pty_write", { id: owner.id, data: "\r" }).catch((e) => jlog(`${command}: ${e}`));
-  }, 80);
 }
 
 /// A short message on the bar, beside the title: a play that couldn't run says why.
@@ -4983,10 +3626,10 @@ function receiveProgress(raw: SocketPlan) {
   drawProgress();
 }
 
-/// Where the task is: the session's folder, the panel's branch and its tab's number.
+/// Where the task is: the panel's folder, its branch and its tab's number.
 function whereIs(leaf: Leaf) {
   const owner = leaf.owner ?? leaf;
-  const folder = leaf.claude?.name ?? owner.bar?.folder?.split("/").filter(Boolean).pop() ?? T.panelN(leaf.id);
+  const folder = owner.bar?.folder?.split("/").filter(Boolean).pop() ?? T.panelN(leaf.id);
   const tab = tabOf(leaf);
   return { folder, branch: owner.bar?.branch ?? null, tab: tab ? tabs.indexOf(tab) + 1 : 0 };
 }
@@ -5222,8 +3865,6 @@ const SHORTCUTS: { group: string; items: [string | string[], string][] }[] = [
       ["⌘⌥ ← ↑ → ↓", T.scPanelInDirection],
       ["⌘⇧A", T.scPanelWaiting],
       ["⌘⇧↩", T.scMaximizePanel],
-      ["⌘⇧C", T.scToggleChat],
-      [["⌘⇧↑", "⌘⇧↓"], T.scPreviousNextMessage],
       // ⌃D is end of input: the shell exits, and the panel goes along with it.
       [["⌘W", "⌃D"], T.scClosePanel],
     ],
@@ -5315,7 +3956,11 @@ function setPluginShortcuts(rows: [string, string][]) {
 
 /// Who wants to know the user typed in a panel: plugins, through
 /// `ctx.terminal.onUserInput` (dictation cancels its auto-Enter on it).
-const userInputListeners = new Set<() => void>();
+const userInputListeners = new Set<(id: number, data: string) => void>();
+/// Who wants to know a panel got the keyboard (`ctx.terminal.onFocus`).
+const focusListeners = new Set<(id: number) => void>();
+/// Who wants back what it saved in restored panels, by plugin.
+const restoredListeners = new Map<string, Set<(id: number, saved: string) => void>>();
 
 /// The panels plugins can see — every one with a header bar — and who wants to know
 /// when one opens or closes (the host, for the `panelHeader` slots).
@@ -5323,22 +3968,93 @@ const pluginPanels = new Map<number, Leaf>();
 const panelOpened = new Set<(id: number) => void>();
 const panelClosed = new Set<(id: number) => void>();
 
-/// Claude Code's events and status lines, for the Claude Code plugin. The last status
-/// of each panel is kept: a plugin turned on later draws at once, without waiting
-/// for Claude to speak again.
-const claudeEventListeners = new Set<(panel: number, event: Record<string, unknown>) => void>();
-const claudeStatusListeners = new Set<(panel: number, status: Record<string, unknown>) => void>();
-const lastStatus = new Map<number, Record<string, unknown>>();
+/// Who hears the socket's messages, by the plugin they are addressed to.
+const socketListeners = new Map<string, Set<(panel: number, message: unknown, replyId?: string) => void>>();
 
 /// A panel as plugin `owner` sees it.
 function pluginPanel(leaf: Leaf, owner: string): Panel {
   return {
     id: leaf.id,
+    get title() {
+      return leaf.title;
+    },
+    xterm: leaf.term,
     write: (text) => void invoke("pty_write", { id: leaf.id, data: text }).catch((e) => jlog(`plugin pty_write: ${e}`)),
+    paste: (text) => paste(leaf, text),
     isAlive: () => !leaf.dead,
+    cwd: () => invoke<string | null>("pty_cwd", { id: leaf.id }).catch(() => null),
+    isBusy: () => invoke<boolean>("pty_busy", { id: leaf.id }).catch(() => false),
+    focus: () => {
+      const tab = tabOf(leaf);
+      if (!tab || leaf.dead) return;
+      if (tab !== active) activate(tab);
+      focusLeaf(leaf);
+    },
     notify: (text) => notify(leaf, text),
     setAlert: (on) => setAlert(leaf, owner, on),
+    setStatus: (status) => {
+      // Plugins report on every change they hear (a status line every few seconds):
+      // only a different status redraws the tabs.
+      leaf.statuses ??= new Map();
+      if (leaf.statuses.get(owner) === status) return;
+      if (status) leaf.statuses.set(owner, status);
+      else leaf.statuses.delete(owner);
+      paint();
+    },
+    layer: () => {
+      let layer = leaf.layers?.get(owner);
+      if (layer) return layer;
+      layer = element("div", "plugin-layer");
+      layer.dataset.plugin = owner;
+      layer.hidden = true;
+      // Inside the terminal's element, not beside it: hiding the terminal would remove
+      // the measure FitAddon computes the grid from, and the program would get a
+      // SIGWINCH on every switch.
+      leaf.el.querySelector(".leaf-screen")?.append(layer);
+      (leaf.layers ??= new Map()).set(owner, layer);
+      return layer;
+    },
+    setKeyboard: (target) => {
+      leaf.keyboards ??= new Map();
+      if (target) leaf.keyboards.set(owner, target);
+      else leaf.keyboards.delete(owner);
+      if (tabOf(leaf)?.focus === leaf) keyboard(leaf);
+    },
+    setSaved: (value) => {
+      leaf.saved ??= {};
+      if (leaf.saved[owner] === value) return;
+      if (value === undefined) delete leaf.saved[owner];
+      else leaf.saved[owner] = value;
+      scheduleSave();
+    },
   };
+}
+
+/// Takes back what plugin `owner` left on the panels when it is turned off.
+function clearPanels(owner: string) {
+  for (const leaf of pluginPanels.values()) {
+    setAlert(leaf, owner, false);
+    if (leaf.statuses?.delete(owner)) paint();
+    leaf.layers?.get(owner)?.remove();
+    leaf.layers?.delete(owner);
+    if (leaf.keyboards?.delete(owner) && tabOf(leaf)?.focus === leaf) keyboard(leaf);
+  }
+}
+
+/// Restored panels whose plugin hadn't started yet: plugins start after the tabs.
+const pendingRestored = new Map<number, Record<string, string>>();
+
+/// What a restored panel brought back for each plugin, delivered to it now if it is
+/// listening, or kept until it starts.
+function deliverRestored(leaf: Leaf, saved: Record<string, string>) {
+  leaf.saved = { ...saved };
+  const pending: Record<string, string> = {};
+  for (const [owner, value] of Object.entries(saved)) {
+    const listeners = restoredListeners.get(owner);
+    if (listeners?.size) for (const fn of listeners) fn(leaf.id, value);
+    else pending[owner] = value;
+  }
+  if (Object.keys(pending).length) pendingRestored.set(leaf.id, pending);
 }
 
 function setAlert(leaf: Leaf, owner: string, on: boolean) {
@@ -5389,32 +4105,56 @@ const plugins = createPluginHost({
   panelHeader: (id) => pluginPanels.get(id)?.bar?.plugins,
   onPanelOpened: (fn) => void panelOpened.add(fn),
   onPanelClosed: (fn) => void panelClosed.add(fn),
-  clearAlerts: (owner) => {
-    for (const leaf of pluginPanels.values()) setAlert(leaf, owner, false);
+  onFocus: (fn) => listenerSet(focusListeners, fn),
+  onRestored(owner, fn) {
+    for (const [id, saved] of pendingRestored) {
+      if (owner in saved && pluginPanels.has(id)) {
+        fn(id, saved[owner]);
+        delete saved[owner];
+      }
+    }
+    const set = restoredListeners.get(owner) ?? new Set();
+    restoredListeners.set(owner, set);
+    return listenerSet(set, fn);
   },
+  clearPanels,
   menu: pluginMenu,
-  claude: {
-    onEvent: (fn) => listenerSet(claudeEventListeners, fn),
-    onStatus(fn) {
-      for (const [panel, status] of lastStatus) fn(panel, status);
-      return listenerSet(claudeStatusListeners, fn);
-    },
-    session(panel) {
-      const c = pluginPanels.get(panel)?.claude;
-      return c && { state: c.state, session: c.session, folder: c.folder };
-    },
-    send(panel, command, busy) {
-      const leaf = pluginPanels.get(panel);
-      if (leaf) sendToClaude(leaf, command, busy);
-    },
-    hooks: {
-      state: () => invoke<"no-claude" | "missing" | "outdated" | "installed">("hooks_state"),
-      install: () => invoke<void>("hooks_install"),
-    },
+  onSocket(owner, fn) {
+    const set = socketListeners.get(owner) ?? new Set();
+    socketListeners.set(owner, set);
+    return listenerSet(set, fn);
   },
-  onUserInput: (listener) => {
-    userInputListeners.add(listener);
-    return { dispose: () => void userInputListeners.delete(listener) };
+  socketReply: (id, answer) => invoke<void>("socket_reply", { id, answer }),
+  socketDrop: (id) => void invoke("socket_drop", { id }).catch((e) => jlog(`socket_drop: ${e}`)),
+  onUserInput: (listener) => listenerSet(userInputListeners, listener),
+  openLink,
+  openReference: (id, e) => {
+    const leaf = pluginPanels.get(id);
+    return !!leaf && referenceClick(leaf, e);
+  },
+  isShortcut: ourShortcut,
+  differServe(name, handler) {
+    differServices.set(name, handler);
+    return {
+      dispose() {
+        if (differServices.get(name) === handler) differServices.delete(name);
+      },
+    };
+  },
+  differPublish(topic, value) {
+    differTopics.set(topic, value);
+    flash({ termiauTopic: { topic, value } });
+  },
+  differExtend(owner, main) {
+    differExtensions.set(owner, main);
+    announceExtensions();
+    return {
+      dispose() {
+        if (differExtensions.get(owner) !== main) return;
+        differExtensions.delete(owner);
+        announceExtensions();
+      },
+    };
   },
   log: (m) => void jlog(m),
   restoreFocus: () => {
@@ -5466,10 +4206,11 @@ helpEl.addEventListener("keydown", (e) => {
 
 // ---------- session: the tabs that come back ----------
 
-/// A panel's snapshot: where it was and, if a Claude was running in it,
-/// which session. It is what goes to disk and what ⌘⇧T keeps of a closed tab.
+/// A panel's snapshot: where it was and what each plugin wants back in it (the Claude
+/// Code plugin: which session to resume). It is what goes to disk and what ⌘⇧T keeps
+/// of a closed tab.
 type SavedNode =
-  | { kind: "leaf"; cwd: string | null; claude?: string }
+  | { kind: "leaf"; cwd: string | null; plugins?: Record<string, string> }
   | { kind: "split"; axis: Axis; fraction: number; children: [SavedNode, SavedNode] };
 
 type SavedTab = {
@@ -5508,10 +4249,6 @@ function savedClosed(x: unknown): Closed | undefined {
   return { panel, axis: f.axis === "below" ? "below" : "side", fraction };
 }
 
-/// The id ends up on a command line typed into the shell, and came from a socket
-/// any of the user's processes can write to: only what looks like an id gets through.
-const ID_SESSION = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
-
 function snapshot(no: TreeNode): SavedNode {
   if (no.kind === "split") {
     return {
@@ -5521,9 +4258,8 @@ function snapshot(no: TreeNode): SavedNode {
       children: [snapshot(no.children[0]), snapshot(no.children[1])],
     };
   }
-  // The session's folder before the shell's: with Claude in front, the two
-  // are usually the same, but the session's is what `--resume` requires.
-  return { kind: "leaf", cwd: no.claude?.folder ?? no.bar?.folder ?? null, claude: no.claude?.session };
+  const plugins = no.saved && Object.keys(no.saved).length ? { ...no.saved } : undefined;
+  return { kind: "leaf", cwd: no.bar?.folder ?? null, plugins };
 }
 
 function snapshotTab(tab: Tab): SavedTab {
@@ -5538,11 +4274,12 @@ function savedNode(x: unknown): SavedNode | undefined {
   const n = x as Partial<Record<string, unknown>> | null;
   if (!n || typeof n !== "object") return;
   if (n.kind === "leaf") {
-    return {
-      kind: "leaf",
-      cwd: typeof n.cwd === "string" ? n.cwd : null,
-      claude: typeof n.claude === "string" && ID_SESSION.test(n.claude) ? n.claude : undefined,
-    };
+    const cwd = typeof n.cwd === "string" ? n.cwd : null;
+    const plugins: Record<string, string> = {};
+    if (n.plugins && typeof n.plugins === "object") {
+      for (const [k, v] of Object.entries(n.plugins)) if (typeof v === "string") plugins[k] = v;
+    }
+    return { kind: "leaf", cwd, plugins: Object.keys(plugins).length ? plugins : undefined };
   }
   if (n.kind !== "split" || !Array.isArray(n.children)) return;
   const a = savedNode(n.children[0]);
@@ -5605,26 +4342,13 @@ function firstLeaf(no: SavedNode): Extract<SavedNode, { kind: "leaf" }> {
   return no.kind === "leaf" ? no : firstLeaf(no.children[0]);
 }
 
-/// Puts the panel back where it was. If there is a Claude session, the
-/// `--resume` line is typed into the shell, as play types its own: that is how
-/// `claude` comes from your .zshrc's PATH. The shell is still starting — the line
-/// waits in the terminal and it reads it when it reaches the prompt.
+/// Puts the panel back where it was, and hands each plugin what it saved there (the
+/// Claude Code plugin types its `--resume`).
 function resume(leaf: Leaf, savedItem: Extract<SavedNode, { kind: "leaf" }>) {
   // Until `loadProject` responds: quitting before that must not save the
   // panel without a folder.
   if (leaf.bar && savedItem.cwd) leaf.bar.folder ??= savedItem.cwd;
-  if (!savedItem.claude) return;
-  // Marked right away, not only when the hook reports: quitting before the resumed
-  // session's first event must not forget it.
-  leaf.claude = {
-    name: savedItem.cwd?.split("/").filter(Boolean).pop() || "claude",
-    state: "idle",
-    session: savedItem.claude,
-    folder: savedItem.cwd ?? undefined,
-  };
-  invoke("pty_write", { id: leaf.id, data: `claude --resume ${savedItem.claude}\r` }).catch((e) =>
-    jlog(`resume: ${e}`),
-  );
+  if (savedItem.plugins) deliverRestored(leaf, savedItem.plugins);
 }
 
 /// Rebuilds the saved tree from a panel: each split divides the panel, the
@@ -5644,7 +4368,7 @@ async function build(tab: Tab, leaf: Leaf, savedItem: SavedNode, doneOnes: Leaf[
 }
 
 /// Brings a tab back: the panels in the folders they were in, the layout as it
-/// was, and the Claude sessions resumed.
+/// was, and what the plugins saved in them.
 async function reopen(saved: SavedTab): Promise<Tab | undefined> {
   const tab = await newTab(firstLeaf(saved.root).cwd);
   if (!tab) return;
@@ -5660,7 +4384,7 @@ async function reopen(saved: SavedTab): Promise<Tab | undefined> {
 }
 
 /// ⌘⇧T: the last closed tab or panel comes back, like in the browser. A panel
-/// reopens beside the one with the keyboard, split the way it was, its Claude resumed.
+/// reopens beside the one with the keyboard, split the way it was, with what its plugins saved.
 async function reopenClosed() {
   const saved = closed.pop();
   if (!saved) return;
@@ -5817,14 +4541,9 @@ async function quit() {
 async function askQuit() {
   if (leaving) return;
   const panels = tabs.flatMap((a) => [...leaves(a.root)]);
-  const withClaude = panels.filter((f) => f.claude?.session).length;
+  const resuming = panels.filter((f) => f.saved && Object.keys(f.saved).length).length;
   const howMany = T.tabCloses(tabs.length);
-  const restores = await invoke<boolean>("restore_enabled").catch(() => false);
-  const back = !restores
-    ? T.dontComeBack
-    : withClaude === 0
-      ? T.comeBackInFolders
-      : T.comeBackWithSessions(withClaude);
+  const back = resuming === 0 ? T.comeBackInFolders : T.comeBackResuming(resuming);
   const yes = await ask("quit", {
     title: T.quitTermiau,
     text: T.quitText(howMany, back),
@@ -5832,42 +4551,6 @@ async function askQuit() {
     cancel: T.cancel,
   });
   if (yes) await quit();
-}
-
-// ---------- hooks: the link to Claude Code ----------
-
-async function installHooks(): Promise<boolean> {
-  try {
-    await invoke("hooks_install");
-    return true;
-  } catch (e) {
-    await ask("hooks", {
-      title: T.couldNotConnect,
-      text: String(e),
-      confirm: T.ok,
-    });
-    return false;
-  }
-}
-
-/// TermIAu ▸ Restore Tabs on Open was just turned on or off. Turning it on
-/// brings the hooks along: without them the tabs come back, but without knowing which Claude
-/// session was in each panel.
-async function restoreChanged(on: boolean) {
-  if (!on) return;
-  // What is already open counts from now on.
-  await saveSession();
-  const state = await invoke<string>("hooks_state").catch(() => "no-claude");
-  const installed = state === "missing" || state === "outdated" ? await installHooks() : false;
-  await ask("restore", {
-    title: T.tabsComeBack,
-    text: installed
-      ? T.tabsComeBackInstalled
-      : state === "no-claude"
-        ? T.tabsComeBackNoClaude
-        : T.tabsComeBackWithSessions,
-    confirm: T.ok,
-  });
 }
 
 // ---------- keyboard ----------
@@ -5925,17 +4608,13 @@ window.addEventListener("message", (e) => {
     termiau?: Shortcut;
     termiauPronto?: boolean;
     termiauRepoOpen?: string | null;
-    termiauWantsSessions?: boolean;
-    termiauAskInSession?: { id: string; panel: number; text: string };
+    termiauWantsTopics?: boolean;
+    termiauCall?: { id: string; name: string; args?: Record<string, unknown> };
     termiauGoToPanel?: number;
   } | null;
 
-  if (given?.termiauWantsSessions) return notifySessions(true);
-  if (given?.termiauAskInSession) {
-    const { id, panel, text } = given.termiauAskInSession;
-    flash({ termiauRequestDone: { id, error: askInSession(panel, text) } });
-    return;
-  }
+  if (given?.termiauWantsTopics) return publishTopics();
+  if (given?.termiauCall) return void differCall(given.termiauCall);
   if (typeof given?.termiauGoToPanel === "number") {
     const leaf = leafByPanel(given.termiauGoToPanel);
     const tab = leaf && tabOf(leaf);
@@ -5991,19 +4670,19 @@ async function wireEvents() {
     });
   });
 
-  // Claude Code's hooks come in here, via a unix socket (see listen_hooks
-  // in Rust and hooks/termiau-event.sh).
-  await listen<string>("claude://event", (e) => {
+  // What runs in the panels talks to the app here, via a unix socket (see
+  // listen_socket in Rust).
+  await listen<string>("socket://message", (e) => {
     try {
       const raw = JSON.parse(e.payload);
       // `termiau view` uses the same socket as the hooks (see hooks/termiau).
       if (raw && typeof raw === "object" && "view" in raw) receiveView(raw as SocketViewRequest);
-      else if (raw && typeof raw === "object" && "status" in raw) receiveStatus(raw as SocketStatus);
       // `termiau progress`, already checked by Rust (see progress.rs).
       else if (raw && typeof raw === "object" && "progress" in raw) receiveProgress(raw as SocketPlan);
-      else receive(raw as ClaudeEvent);
+      else if (raw && typeof raw === "object" && typeof raw.panel === "number" && typeof raw.plugin === "string")
+        receive(raw as SocketMessage);
     } catch (err) {
-      jlog(`unreadable claude event: ${err}`);
+      jlog(`unreadable socket message: ${err}`);
     }
   });
 
@@ -6019,7 +4698,6 @@ async function wireEvents() {
   await listen("menu://new-tab", () => newTab());
   await listen("menu://reopen-tab", () => reopenClosed());
   await listen("menu://quit", () => askQuit());
-  await listen<boolean>("menu://restore", (e) => restoreChanged(e.payload));
   // The red button and "Close Window" also quit the app: they go through the
   // same question. What really quits is `quit`, which doesn't ask to close the
   // window — it ends the process.
@@ -6035,14 +4713,8 @@ async function wireEvents() {
   await listen("menu://close", () => {
     if (active && !inDiff) closeLeaf(active.focus);
   });
-  await listen("menu://chat", () => {
-    if (active && !inDiff) toggleChat(active.focus.owner ?? active.focus);
-  });
   await listen("menu://viewer", () => {
     if (active && !inDiff) toggleViewer(active.focus.owner ?? active.focus);
-  });
-  await listen<number>("menu://message", (e) => {
-    if (active && !inDiff) goToMessage(active.focus.owner ?? active.focus, e.payload);
   });
   await listen("menu://paste-path", () => pastePath());
   await listen("menu://preferences", () => openPreferences());
@@ -6089,4 +4761,4 @@ start({
   after: afterTabs,
   activatePlugins: () => void plugins.start(),
 });
-void wireDiffMode();
+void wirePreferences();

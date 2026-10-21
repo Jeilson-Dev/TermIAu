@@ -44,8 +44,9 @@ window.addEventListener("message", (e) => {
     termiauRepo?: string;
     termiauChanged?: string;
     termiauVisible?: boolean;
-    termiauLiveSessions?: unknown[];
-    termiauRequestDone?: { id: string; error: string | null };
+    termiauTopic?: { topic: string; value: unknown };
+    termiauReply?: { id: string; value?: unknown; error?: string };
+    termiauExtensions?: { id: string; main: string }[];
   } | null;
   if (typeof given?.termiauRepo === "string") {
     window.dispatchEvent(new CustomEvent("termiau:repo", { detail: given.termiauRepo }));
@@ -54,12 +55,16 @@ window.addEventListener("message", (e) => {
   if (typeof given?.termiauVisible === "boolean") {
     window.dispatchEvent(new CustomEvent("termiau:visible", { detail: given.termiauVisible }));
   }
-  // The Claude sessions open in TermIAu's panels, and the answer to a request sent to one of them.
-  if (Array.isArray(given?.termiauLiveSessions)) {
-    window.dispatchEvent(new CustomEvent("termiau:sessions", { detail: given.termiauLiveSessions }));
+  // What the plugins offer here (see lib/plugins.ts): their topics and the answer to a call.
+  if (given?.termiauTopic) {
+    window.dispatchEvent(new CustomEvent("termiau:topic", { detail: given.termiauTopic }));
   }
-  if (given?.termiauRequestDone) {
-    window.dispatchEvent(new CustomEvent("termiau:request", { detail: given.termiauRequestDone }));
+  if (given?.termiauReply) {
+    window.dispatchEvent(new CustomEvent("termiau:reply", { detail: given.termiauReply }));
+  }
+  // The plugins' scripts for this page (see lib/extensions.ts).
+  if (Array.isArray(given?.termiauExtensions)) {
+    window.dispatchEvent(new CustomEvent("termiau:extensions", { detail: given.termiauExtensions }));
   }
   if (typeof given?.termiauChanged === "string") {
     window.dispatchEvent(new CustomEvent("termiau:changed", { detail: given.termiauChanged }));

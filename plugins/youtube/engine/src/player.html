@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TermIAu YouTube</title>
+<style>html, body { margin: 0; background: #000; }</style>
+</head>
+<body>
+<div id="player"></div>
+<script>
+  // The YouTube Radio's player, served by the plugin's engine on 127.0.0.1 and
+  // loaded by the plugin in a 1px iframe. The plugin sends commands with
+  // `postMessage` and hears back the same way, both under the `termiauYoutube` key.
+  //
+  // In:  {cmd:"load", video, start?} | {cmd:"load", playlist, index?, start?} | {cmd:"play"}
+  //      | {cmd:"pause"} | {cmd:"next"} | {cmd:"volume", value}
+  // Out: {ready} | {state, video, list, title, live, index, count, time} | {error} | {apiFailed}
+  // While playing, the state is reported again every few seconds: it is how the
+  // plugin knows where you are, to resume there.
+  const tell = (message) => parent.postMessage({ termiauYoutube: message }, "*");
+
+  let player;
+  /// Commands that arrived before the API was ready run when it is.
+  const pending = [];
+
+  function run(c) {
+    switch (c.cmd) {
+      case "load":
+        if (c.playlist) player.loadPlaylist({ list: c.playlist, listType: "playlist", index: c.index || 0, startSeconds: c.start || 0 });
+        else player.loadVideoById({ videoId: c.video, startSeconds: c.start || 0 });
+        break;
+      case "play":
+        player.playVideo();
+        break;
+      case "pause":
+        player.pauseVideo();
+        break;
+      case "next":
+        player.nextVideo();
+        break;
+      case "volume":
+        player.setVolume(c.value);
+        break;
+    }
+  }
+
+  window.addEventListener("message", (e) => {
+    if (e.source !== parent) return;
+    const c = e.data && e.data.termiauYoutube;
+    if (!c) return;
+    if (player) run(c);
+    else pending.push(c);
+  });
+
+  function report(state) {
+    const data = player.getVideoData ? player.getVideoData() : {};
+    const list = player.getPlaylist ? player.getPlaylist() : null;
+    tell({
+      state,
+      video: (data && data.video_id) || undefined,
+      list: (player.getPlaylistId && player.getPlaylistId()) || undefined,
+      title: (data && data.title) || undefined,
+      live: !!(data && data.isLive),
+      index: player.getPlaylistIndex ? player.getPlaylistIndex() : -1,
+      count: list ? list.length : 0,
+      time: player.getCurrentTime ? player.getCurrentTime() : 0,
+    });
+  }
+
+  setInterval(() => {
+    if (player && player.getPlayerState && player.getPlayerState() === 1) report(1);
+  }, 5000);
+
+  window.onYouTubeIframeAPIReady = () => {
+    new YT.Player("player", {
+      playerVars: { autoplay: 1, controls: 0, disablekb: 1, playsinline: 1 },
+      events: {
+        onReady: (e) => {
+          player = e.target;
+          tell({ ready: true });
+          for (const c of pending.splice(0)) run(c);
+        },
+        onStateChange: (e) => report(e.data),
+        onError: (e) => tell({ error: e.data }),
+      },
+    });
+  };
+  const script = document.createElement("script");
+  script.src = "https://www.youtube.com/iframe_api";
+  script.onerror = () => tell({ apiFailed: true });
+  document.head.appendChild(script);
+</script>
+</body>
+</html>

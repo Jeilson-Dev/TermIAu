@@ -1,10 +1,10 @@
 // The Claude sessions running in TermIAu's panels. Unlike the stored ones the question
 // mentions (and runs in a throwaway copy of), these are alive: a request sent to one goes
 // into its panel as if typed there, and it edits the repository while the review goes on.
-// The list comes from the top document, which is where the panels live.
+// The list comes from the Claude Code plugin, through the top document (see the differ's
+// lib/plugins.ts).
 
-import { useSyncExternalStore } from "react";
-import { T } from "../../i18n/differ";
+import { call, useTopic } from "../../../src/differ/lib/plugins";
 
 export interface LiveSession {
   /** The panel it runs in: what the request is addressed to. */
@@ -20,44 +20,20 @@ export interface LiveSession {
 }
 
 const inFrame = window.parent !== window;
-let sessions: LiveSession[] = [];
-const listeners = new Set<() => void>();
-
-window.addEventListener("termiau:sessions", (e) => {
-  sessions = (e as CustomEvent<LiveSession[]>).detail;
-  for (const l of listeners) l();
-});
-
-const pending = new Map<string, (error: string | null) => void>();
-window.addEventListener("termiau:request", (e) => {
-  const { id, error } = (e as CustomEvent<{ id: string; error: string | null }>).detail;
-  pending.get(id)?.(error);
-  pending.delete(id);
-});
-
-function subscribe(l: () => void) {
-  listeners.add(l);
-  // The first one to look asks for the list; afterwards it arrives on its own whenever it changes.
-  if (listeners.size === 1 && inFrame) window.parent.postMessage({ termiauWantsSessions: true }, "*");
-  return () => listeners.delete(l);
-}
+const none: LiveSession[] = [];
 
 /** The session is in this repository: started at its root or in a folder inside it. */
 const inRepo = (s: LiveSession, root: string) => s.folder === root || s.folder.startsWith(root.replace(/\/$/, "") + "/");
 
+/** The Claude Code plugin publishes them; with it off, there are none. */
 export function useLiveSessions(root: string): LiveSession[] {
-  const all = useSyncExternalStore(subscribe, () => sessions);
+  const all = useTopic<LiveSession[]>("claude.liveSessions") ?? none;
   return all.filter((s) => inRepo(s, root));
 }
 
 /** Sends the text to the session's panel. Resolves with the reason when it couldn't. */
 export function sendToSession(panel: number, text: string): Promise<string | null> {
-  if (!inFrame) return Promise.resolve(T.onlyInsideTermiau);
-  const id = `${panel}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
-  return new Promise((resolve) => {
-    pending.set(id, resolve);
-    window.parent.postMessage({ termiauAskInSession: { id, panel, text } }, "*");
-  });
+  return call<string | null>("claude.askInSession", { panel, text }).catch((e) => String(e));
 }
 
 export function goToPanel(panel: number) {

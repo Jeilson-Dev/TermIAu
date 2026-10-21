@@ -11,7 +11,6 @@
 mod diff;
 mod error;
 mod git;
-mod ask;
 mod review;
 
 use std::path::{Path, PathBuf};
@@ -23,7 +22,6 @@ use tauri::{AppHandle, Emitter, Manager};
 use error::{Error, Result};
 use review::{RepoInfo, ReviewDiff};
 
-pub use ask::RunningAsks;
 
 /// Git calls block, and the async runtime has few threads: a `git diff` on a
 /// large repository would hold up the rest of the app with it.
@@ -174,45 +172,4 @@ pub async fn read_blob_bytes(path: PathBuf, oid: String) -> Result<tauri::ipc::R
 pub async fn read_worktree_bytes(path: PathBuf, file: String) -> Result<tauri::ipc::Response> {
     let bytes = blocking(move || review::read_worktree_bytes(&path, &file)).await?;
     Ok(tauri::ipc::Response::new(bytes))
-}
-
-/// The Claude Code sessions open in this repository, so a question can mention
-/// one of them and be answered knowing what was already discussed there.
-#[tauri::command]
-pub async fn claude_sessions(path: PathBuf) -> Result<Vec<ask::Session>> {
-    blocking(move || ask::sessions(&path)).await
-}
-
-/// Asks Claude about a snippet, without opening a session or saving anything. `id`
-/// comes from the webview: it is how `cancel_ask` finds the process. Conversation
-/// only, unless `allow_edits` permits editing the repository's files.
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn ask_claude(
-    app: AppHandle,
-    path: PathBuf,
-    id: String,
-    question: String,
-    context: String,
-    model: Option<String>,
-    session: Option<String>,
-    allow_edits: bool,
-) -> Result<ask::Answer> {
-    blocking(move || {
-        let pids = app.state::<RunningAsks>();
-        ask::ask(&path, &pids, &id, &question, &context, model.as_deref(), session.as_deref(), allow_edits)
-    })
-    .await
-}
-
-/// Restores the files a question changed to what they were. Returns the ones
-/// that couldn't be restored — those someone changed again after it.
-#[tauri::command]
-pub async fn undo_ask(path: PathBuf, changes: Vec<ask::FileChange>) -> Result<Vec<String>> {
-    blocking(move || ask::undo(&path, &changes)).await
-}
-
-#[tauri::command]
-pub fn cancel_ask(app: AppHandle, id: String) {
-    ask::cancel(&app.state::<RunningAsks>(), &id);
 }

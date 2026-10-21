@@ -1579,10 +1579,6 @@ tr.annotation td {
   color: var(--pink);
 }
 
-.comment-selection .ask-pick .icon {
-  color: var(--orange);
-}
-
 .comment-selection .sep {
   width: 1px;
   margin: 4px 1px;
@@ -1608,205 +1604,10 @@ tr.gap {
   user-select: none;
 }
 
-/* ---------- Asking Claude ---------- */
-
-.bookmark.ask {
-  border-left-color: var(--orange);
-}
-
-.bookmark.ask .bookmark-head > .icon:first-child {
-  color: var(--orange);
-}
-
-.bookmark.ask .badge {
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ask-note {
-  color: var(--fg-dim);
-}
-
-.ask-label {
-  margin-top: 12px;
-  color: var(--fg-dim);
-  font-size: 12px;
-}
-
-.ask-label + textarea {
-  margin-top: 4px;
-}
-
-.ask-turn {
-  margin-top: 10px;
-}
-
-.ask-question {
-  color: var(--orange);
-  font-weight: 600;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.ask-answer {
-  margin-top: 4px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.ask-answer code {
-  padding: 0 4px;
-  border-radius: 3px;
-  background: var(--bg-darker);
-  font-family: var(--mono);
-  font-size: 0.92em;
-}
-
-.ask-waiting,
-.ask-error {
-  display: flex;
-  gap: 10px;
-  margin-top: 4px;
-  font-size: 12px;
-}
-
-.ask-waiting {
-  color: var(--fg-dim);
-}
-
-.ask-error {
-  color: var(--red);
-  white-space: pre-wrap;
-}
-
-.ask-actions {
-  flex-wrap: wrap;
-}
-
-.orphan-asks {
+/* Boxes a plugin pinned to lines that left the diff: at the top of the file. */
+.orphan-boxes {
   padding: 8px 12px;
   border-bottom: 1px solid var(--bg-darker);
-}
-
-.ask-changes {
-  margin-top: 8px;
-  padding: 6px 8px;
-  border: 1px solid var(--selection);
-  border-radius: 6px;
-  background: var(--bg-dark);
-}
-
-.ask-changes.undone {
-  opacity: 0.6;
-}
-
-.ask-changes-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--fg-dim);
-  font-size: 12px;
-}
-
-.ask-changes-head .btn {
-  height: 24px;
-  padding: 0 8px;
-  font-size: 12px;
-}
-
-.ask-change {
-  margin-top: 6px;
-}
-
-.ask-change-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 2px 0;
-  border: 0;
-  background: none;
-  color: var(--fg);
-  font-size: 12px;
-  text-align: left;
-}
-
-.ask-change-path {
-  overflow: hidden;
-  font-family: var(--mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ask-change-stat {
-  margin-left: auto;
-  font-family: var(--mono);
-  white-space: nowrap;
-}
-
-.ask-patch {
-  max-height: 360px;
-  margin: 4px 0 0;
-  padding: 4px 0;
-  overflow: auto;
-  border-radius: 4px;
-  background: var(--bg-darker);
-  font-family: var(--mono);
-  font-size: 11.5px;
-  line-height: 1.5;
-}
-
-.ask-patch > div {
-  padding: 0 8px;
-  white-space: pre;
-}
-
-.ask-patch-add {
-  background: var(--add-num);
-}
-
-.ask-patch-del {
-  background: var(--del-num);
-}
-
-.ask-patch-hunk {
-  color: var(--purple);
-}
-
-.ask-patch-ctx {
-  color: var(--fg-dim);
-}
-
-.ask-question .badge {
-  margin-left: 8px;
-  font-weight: 500;
-}
-
-.ask-edits {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--fg-dim);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.ask-edits.on {
-  color: var(--orange);
-  font-weight: 600;
-}
-
-.ask-actions select {
-  max-width: 260px;
-  height: 26px;
-  padding: 0 6px;
-  border: 1px solid var(--selection);
-  border-radius: 6px;
-  background: var(--bg);
-  font-size: 12px;
 }
 
 .bookmark-note {
@@ -2207,6 +2008,19 @@ tr.gap {
 
 .prefs-field + .prefs-field {
   margin-top: 18px;
+}
+
+.prefs-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.prefs-field .prefs-check input[type="checkbox"] {
+  width: auto;
+  margin: 0;
 }
 
 .prefs-help code {

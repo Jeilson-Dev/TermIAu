@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ClaudeSession, RepoInfo, ReviewDiff } from "./types";
+import type { RepoInfo, ReviewDiff } from "./types";
 
 export const openRepo = (path: string) => invoke<RepoInfo>("open_repo", { path });
 
@@ -42,41 +42,3 @@ export const readBlobBytes = (path: string, oid: string) =>
 
 export const readWorktreeBytes = (path: string, file: string) =>
   invoke<ArrayBuffer>("read_worktree_bytes", { path, file });
-
-/** The Claude Code sessions open in this repository, newest first. */
-export const claudeSessions = (path: string) => invoke<ClaudeSession[]>("claude_sessions", { path });
-
-/**
- * Asks Claude (`claude -p`) without saving any session. `context` goes through stdin; `session`
- * makes the question run in a copy of that session, knowing what was already discussed in it. Conversation
- * only: editing the repository's files only with `allowEdits`.
- */
-export const askClaude = (
-  path: string,
-  id: string,
-  question: string,
-  context: string,
-  model: string | null,
-  session: string | null,
-  allowEdits = false,
-) => invoke<AskResult>("ask_claude", { path, id, question, context, model, session, allowEdits });
-
-/** A file Claude touched: how it was and how it ended up (`null`: didn't exist / was deleted). */
-export interface AskChange {
-  path: string;
-  before: string | null;
-  after: string | null;
-  /** Can be restored to `before`. Without it (binary, ignored by git), we only know it was touched. */
-  undoable: boolean;
-}
-
-export interface AskResult {
-  answer: string;
-  /** Only with edits allowed; empty when it touched nothing. */
-  changes: AskChange[];
-}
-
-/** Restores the files to what they were before the question; returns the ones it couldn't (changed again since). */
-export const undoAsk = (path: string, changes: AskChange[]) => invoke<string[]>("undo_ask", { path, changes });
-
-export const cancelAsk = (id: string) => invoke<void>("cancel_ask", { id });

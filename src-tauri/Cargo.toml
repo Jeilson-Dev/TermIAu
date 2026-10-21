@@ -21,9 +21,7 @@ serde = { version = "1", features = ["derive"] }
 # The differ (the pinned tab with the branch's diff). It talks to the command-line
 # `git`, so no git library comes in; the store is the JSON that
 # remembers each repository's target branch and what has already been reviewed.
-# `preserve_order`: the app rewrites Claude Code's settings.json when installing the
-# hooks, and without this the user's keys would come back in alphabetical order.
-serde_json = { version = "1", features = ["preserve_order"] }
+serde_json = "1"
 tauri-plugin-store = "2"
 # Watcher for .git, so the diff tab redoes itself on every commit.
 notify = "8"

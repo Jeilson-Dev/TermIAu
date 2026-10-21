@@ -1,0 +1,24 @@
+[package]
+name = "termiau-claude"
+version = "1.1.0"
+edition = "2021"
+description = "The Claude Code plugin's engine: the hook, Claude Code's files and `claude -p`"
+
+# A binary the plugin ships (see termiau.json `binaries`). The app runs it and
+# speaks newline-delimited JSON with it over stdin/stdout (see src/main.rs).
+[[bin]]
+name = "termiau-claude"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+# `preserve_order`: installing the hook rewrites Claude Code's settings.json, and
+# without this the user's keys would come back in alphabetical order.
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+strip = true

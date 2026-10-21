@@ -10,85 +10,13 @@ const pt = {
   noRepository: "Nenhum repositório aberto — use o botão de diff de um painel",
   titleDiff: "Diff — TermIAu",
 
-  // Claude sessions
-  hasAQuestion: "O Claude tem uma pergunta para você.",
-  asksPermission: (tool: string, what: string) =>
-    `O Claude pede permissão para usar ${tool}${what ? `: ${what}` : "."}`,
-  oneTool: "uma ferramenta",
-
-  // chat mode
-  chatEmpty: "Nenhuma mensagem ainda. Escreva abaixo para começar.",
-  isWaiting: "O Claude está esperando por você.",
-  working: (time: string) => `Trabalhando… ${time} · esc interrompe`,
-  alreadyAnsweredInTerminal: "A pergunta já tinha sido respondida no terminal.",
-  questionN: (n: number) => `Pergunta ${n}`,
-  pickAnyNumber: " · marque quantas quiser",
-  writeYourAnswer: "Escreva a sua resposta e tecle ↩",
-  other: "Outra…",
-  viewInTerminal: "Ver no terminal",
-  goBack: "Voltar",
-  reply: "Responder",
-  next: "Próxima",
-  allow: "Permitir",
-  deny: "Negar",
-  showPrevious: "Mostrar mensagens anteriores",
-  messageForClaude: "Mensagem para o Claude — ↩ envia, ⇧↩ quebra a linha, / comandos, esc interrompe",
-  openedScreenInTerminal: (name: string) => `O /${name} abriu uma tela no terminal.`,
-  now: "agora",
-  haMin: (n: number) => `há ${n} min`,
-  hoursAgo: (n: number) => `há ${n} h`,
-  daysAgo: (n: number) => `há ${n} d`,
-  noOtherSession: "Não há outra sessão guardada nesta pasta.",
+  // task progress, in the footer
   progressHint: (title: string, done: number, total: number) => `${title}\n${done} de ${total} blocos feitos — clique para ver os detalhes`,
   blocksDone: (done: number, total: number) => `${done} de ${total} blocos`,
   tabN: (n: number) => `aba ${n}`,
   panelN: (n: number) => `painel ${n}`,
-  imageN: (n: number) => `imagem ${n}`,
   goToPanel: "Ir ao painel",
   removeFromFooter: "Tirar do rodapé",
-  sessionNoLongerOpen: "Essa sessão não está mais aberta em nenhum painel.",
-  sessionWaitingForYou: (name: string) => `A sessão em ${name} está esperando uma resposta sua no painel — responda lá e envie de novo.`,
-  resumeSession: "Retomar uma sessão — ↑↓ escolhe, ↩ retoma, esc cancela, digite para filtrar",
-  noSessionWithText: "Nenhuma sessão com esse texto — esc cancela",
-  viewUnified: "Ver unificado (vale para todos os diffs)",
-  viewSideBySide: "Ver lado a lado (vale para todos os diffs)",
-  moreLines: (n: number) => `… mais ${n} linhas`,
-  pastedText: (n: number) => `Texto colado · ${n} ${n === 1 ? "linha" : "linhas"}`,
-  showAll: (n: number) => `Mostrar tudo · ${n} linhas`,
-  collapse: "Recolher",
-  startInTerminal: "O começo desta conversa ficou no terminal: aqui está só a parte mais recente.",
-  programRunning: "Há um programa rodando neste painel: o Claude não foi aberto",
-
-  // Claude Code commands
-  cmdClear: "Começa uma conversa nova",
-  cmdCompact: "Resume a conversa para liberar contexto",
-  cmdInit: "Cria o CLAUDE.md do projeto",
-  cmdReview: "Revisa um pull request",
-  cmdCodeReview: "Revisa o diff atual",
-  cmdSecurityReview: "Revisão de segurança das mudanças pendentes",
-  cmdAddDir: "Acrescenta uma pasta de trabalho",
-  cmdFast: "Liga ou desliga o modo rápido",
-  cmdModel: "Escolhe o modelo",
-  cmdResume: "Retoma uma conversa anterior",
-  cmdRewind: "Volta a conversa ou o código a um ponto anterior",
-  cmdContext: "Mostra o uso do contexto",
-  cmdUsage: "Mostra o uso e os limites do plano",
-  cmdCost: "Mostra o custo da sessão",
-  cmdStatus: "Versão, modelo, conta e conexões",
-  cmdConfig: "Abre as configurações",
-  cmdPermissions: "Regras de permissão das ferramentas",
-  cmdMemory: "Edita os arquivos de memória",
-  cmdMcp: "Servidores MCP",
-  cmdAgents: "Gerencia os subagentes",
-  cmdHooks: "Gerencia os hooks",
-  cmdPlugin: "Gerencia os plugins",
-  cmdSkills: "Lista as skills disponíveis",
-  cmdExport: "Exporta a conversa",
-  cmdTheme: "Troca o tema",
-  cmdDoctor: "Confere a instalação do Claude Code",
-  cmdHelp: "Ajuda e comandos disponíveis",
-  cmdLogin: "Troca de conta",
-  cmdExit: "Encerra o Claude Code",
 
   // file viewer
   layoutSide: "Lado a lado",
@@ -143,9 +71,6 @@ const pt = {
   stop: (name: string) => `Parar ${name}`,
   actionHint: (label: string, keyOf: string) => `${label} — o mesmo que apertar ${keyOf} no terminal do app`,
   openInDiff: "Este projeto está aberto na aba do diff",
-  backToTerminalChat: "Voltar ao terminal (⌘⇧C)",
-  viewInChatMode: "Ver a conversa em modo chat (⌘⇧C)",
-  openClaudeInChat: "Abrir o Claude nesta pasta, em modo chat (⌘⇧C)",
   hideFile: "Esconder o arquivo (⌘⇧O)",
   showFile: "Mostrar o arquivo (⌘⇧O)",
   restart: (name: string) => `Reiniciar ${name}`,
@@ -167,8 +92,6 @@ const pt = {
   backgroundTask: (name: string) => `a tarefa "${name}" roda em segundo plano, o que ainda não é suportado`,
   taskType: (name: string, kind: string) => `a tarefa "${name}" é do tipo "${kind}", que ainda não é suportado`,
 
-  // Claude usage in the footer
-
   // footer and dialogs
   branch: (name: string) => `Branch ${name}`,
   closeEsc: "Fechar (esc)",
@@ -188,8 +111,6 @@ const pt = {
   scPanelInDirection: "Ir para o painel naquela direção",
   scPanelWaiting: "Ir para o painel que espera por você",
   scMaximizePanel: "Maximizar o painel ou recolher de volta",
-  scToggleChat: "Alternar entre o chat e o terminal do Claude",
-  scPreviousNextMessage: "Ir para a sua mensagem anterior ou seguinte",
   scClosePanel: "Fechar o painel (o último fecha a aba)",
   scTerminal: "Terminal",
   scClearScreen: "Limpar a tela",
@@ -230,27 +151,19 @@ const pt = {
 
   // dialogs
   tabCloses: (n: number) => (n === 1 ? "A aba aberta fecha" : `As ${n} abas abertas fecham`),
-  dontComeBack: "Elas não voltam na próxima abertura — TermIAu ▸ Restaurar Abas ao Abrir liga isso.",
   comeBackInFolders: "Na próxima abertura elas voltam, nas mesmas pastas.",
-  comeBackWithSessions: (n: number) =>
+  comeBackResuming: (n: number) =>
     n === 1
-      ? "Na próxima abertura elas voltam, e a sessão do Claude é retomada."
-      : `Na próxima abertura elas voltam, e as ${n} sessões do Claude são retomadas.`,
+      ? "Na próxima abertura elas voltam, e um painel retoma o que rodava."
+      : `Na próxima abertura elas voltam, e ${n} painéis retomam o que rodavam.`,
   quitTermiau: "Sair do TermIAu?",
   quitText: (howMany: string, back: string) => `${howMany} e o que estiver rodando nelas para. ${back}`,
   quit: "Sair",
   cancel: "Cancelar",
   ok: "Ok",
-  couldNotConnect: "Não consegui ligar ao Claude Code",
-  tabsComeBack: "As abas voltam na próxima abertura",
-  tabsComeBackInstalled:
-    "Liguei também o TermIAu ao Claude Code (um hook em ~/.claude/hooks, registrado no settings.json, com backup): é por ele que as sessões são retomadas. Vale para os Claudes abertos a partir de agora.",
-  tabsComeBackNoClaude:
-    "Cada painel volta na pasta em que estava. Não achei o Claude Code (~/.claude), então não há sessões para retomar.",
-  tabsComeBackWithSessions: "Cada painel volta na pasta em que estava, e as sessões do Claude são retomadas.",
+  serviceUnavailable: "nenhum plugin oferece isso agora",
 
   // page
-  attachedImage: "imagem anexada",
   newTabHint: "Nova aba (⌘T)",
   newTab: "Nova aba",
 };
@@ -263,84 +176,13 @@ const en: typeof pt = {
   noRepository: "No repository open — use a panel's diff button",
   titleDiff: "Diff — TermIAu",
 
-  // Claude sessions
-  hasAQuestion: "Claude has a question for you.",
-  asksPermission: (tool, what) => `Claude asks permission to use ${tool}${what ? `: ${what}` : "."}`,
-  oneTool: "a tool",
-
-  // chat mode
-  chatEmpty: "No messages yet. Write below to start.",
-  isWaiting: "Claude is waiting for you.",
-  working: (time) => `Working… ${time} · esc interrupts`,
-  alreadyAnsweredInTerminal: "The question had already been answered in the terminal.",
-  questionN: (n) => `Question ${n}`,
-  pickAnyNumber: " · pick as many as you like",
-  writeYourAnswer: "Type your answer and press ↩",
-  other: "Other…",
-  viewInTerminal: "Show in terminal",
-  goBack: "Back",
-  reply: "Answer",
-  next: "Next",
-  allow: "Allow",
-  deny: "Deny",
-  showPrevious: "Show earlier messages",
-  messageForClaude: "Message Claude — ↩ sends, ⇧↩ new line, / commands, esc interrupts",
-  openedScreenInTerminal: (name) => `/${name} opened a screen in the terminal.`,
-  now: "now",
-  haMin: (n) => `${n} min ago`,
-  hoursAgo: (n) => `${n} h ago`,
-  daysAgo: (n) => `${n} d ago`,
-  noOtherSession: "There is no other session saved in this folder.",
+  // task progress, in the footer
   progressHint: (title, done, total) => `${title}\n${done} of ${total} blocks done — click for the details`,
   blocksDone: (done, total) => `${done} of ${total} blocks`,
   tabN: (n) => `tab ${n}`,
   panelN: (n) => `panel ${n}`,
-  imageN: (n) => `image ${n}`,
   goToPanel: "Go to panel",
   removeFromFooter: "Remove from the footer",
-  sessionNoLongerOpen: "That session is no longer open in any panel.",
-  sessionWaitingForYou: (name) => `The session in ${name} is waiting for your answer in its panel — answer there and send again.`,
-  resumeSession: "Resume a session — ↑↓ picks, ↩ resumes, esc cancels, type to filter",
-  noSessionWithText: "No session with that text — esc cancels",
-  viewUnified: "Show unified (applies to every diff)",
-  viewSideBySide: "Show side by side (applies to every diff)",
-  moreLines: (n) => `… ${n} more lines`,
-  pastedText: (n) => `Pasted text · ${n} ${n === 1 ? "line" : "lines"}`,
-  showAll: (n) => `Show all · ${n} lines`,
-  collapse: "Collapse",
-  startInTerminal: "The beginning of this conversation stayed in the terminal: only the most recent part is here.",
-  programRunning: "A program is running in this panel: Claude was not opened",
-
-  // Claude Code commands
-  cmdClear: "Start a new conversation",
-  cmdCompact: "Summarize the conversation to free up context",
-  cmdInit: "Create the project's CLAUDE.md",
-  cmdReview: "Review a pull request",
-  cmdCodeReview: "Review the current diff",
-  cmdSecurityReview: "Security review of the pending changes",
-  cmdAddDir: "Add a working directory",
-  cmdFast: "Toggle fast mode",
-  cmdModel: "Choose the model",
-  cmdResume: "Resume a previous conversation",
-  cmdRewind: "Rewind the conversation or the code to an earlier point",
-  cmdContext: "Show context usage",
-  cmdUsage: "Show plan usage and limits",
-  cmdCost: "Show the session cost",
-  cmdStatus: "Version, model, account and connections",
-  cmdConfig: "Open the settings",
-  cmdPermissions: "Tool permission rules",
-  cmdMemory: "Edit the memory files",
-  cmdMcp: "MCP servers",
-  cmdAgents: "Manage subagents",
-  cmdHooks: "Manage hooks",
-  cmdPlugin: "Manage plugins",
-  cmdSkills: "List the available skills",
-  cmdExport: "Export the conversation",
-  cmdTheme: "Change the theme",
-  cmdDoctor: "Check the Claude Code installation",
-  cmdHelp: "Help and available commands",
-  cmdLogin: "Switch accounts",
-  cmdExit: "Quit Claude Code",
 
   // file viewer
   layoutSide: "Side by side",
@@ -395,9 +237,6 @@ const en: typeof pt = {
   stop: (name) => `Stop ${name}`,
   actionHint: (label, keyOf) => `${label} — same as pressing ${keyOf} in the app terminal`,
   openInDiff: "This project is open in the diff tab",
-  backToTerminalChat: "Back to the terminal (⌘⇧C)",
-  viewInChatMode: "Show the conversation in chat mode (⌘⇧C)",
-  openClaudeInChat: "Open Claude in this folder, in chat mode (⌘⇧C)",
   hideFile: "Hide the file (⌘⇧O)",
   showFile: "Show the file (⌘⇧O)",
   restart: (name) => `Restart ${name}`,
@@ -419,8 +258,6 @@ const en: typeof pt = {
   backgroundTask: (name) => `the task "${name}" runs in the background, which is not supported yet`,
   taskType: (name, kind) => `the task "${name}" is of type "${kind}", which is not supported yet`,
 
-  // Claude usage in the footer
-
   // footer and dialogs
   branch: (name) => `Branch ${name}`,
   closeEsc: "Close (esc)",
@@ -440,8 +277,6 @@ const en: typeof pt = {
   scPanelInDirection: "Go to the panel in that direction",
   scPanelWaiting: "Go to the panel waiting for you",
   scMaximizePanel: "Maximize the panel or restore it",
-  scToggleChat: "Toggle between Claude's chat and terminal",
-  scPreviousNextMessage: "Go to your previous or next message",
   scClosePanel: "Close the panel (the last one closes the tab)",
   scTerminal: "Terminal",
   scClearScreen: "Clear the screen",
@@ -482,27 +317,19 @@ const en: typeof pt = {
 
   // dialogs
   tabCloses: (n) => (n === 1 ? "The open tab closes" : `The ${n} open tabs close`),
-  dontComeBack: "They won't come back next launch — TermIAu ▸ Restore Tabs on Launch turns that on.",
   comeBackInFolders: "They come back next launch, in the same folders.",
-  comeBackWithSessions: (n) =>
+  comeBackResuming: (n) =>
     n === 1
-      ? "They come back next launch, and the Claude session is resumed."
-      : `They come back next launch, and the ${n} Claude sessions are resumed.`,
+      ? "They come back next launch, and one panel resumes what it was running."
+      : `They come back next launch, and ${n} panels resume what they were running.`,
   quitTermiau: "Quit TermIAu?",
   quitText: (howMany, back) => `${howMany} and whatever is running in them stops. ${back}`,
   quit: "Quit",
   cancel: "Cancel",
   ok: "OK",
-  couldNotConnect: "Couldn't connect to Claude Code",
-  tabsComeBack: "Tabs will come back next launch",
-  tabsComeBackInstalled:
-    "I also connected TermIAu to Claude Code (a hook in ~/.claude/hooks, registered in settings.json, with a backup): that's how sessions are resumed. It applies to Claudes opened from now on.",
-  tabsComeBackNoClaude:
-    "Each panel comes back in the folder it was in. Claude Code (~/.claude) wasn't found, so there are no sessions to resume.",
-  tabsComeBackWithSessions: "Each panel comes back in the folder it was in, and the Claude sessions are resumed.",
+  serviceUnavailable: "no plugin offers that right now",
 
   // page
-  attachedImage: "attached image",
   newTabHint: "New tab (⌘T)",
   newTab: "New tab",
 };

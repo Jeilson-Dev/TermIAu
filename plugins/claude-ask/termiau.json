@@ -1,0 +1,12 @@
+{
+  "id": "termiau.claude-ask",
+  "name": "Claude in the Diff",
+  "version": "1.0.0",
+  "author": "TermIAu",
+  "description": "Ask Claude about a passage of the diff tab, let it change the files and undo, send the request to a session open in a panel, and turn the decision into a bookmark.",
+  "engines": { "termiau": ">=0.1.0" },
+  "main": "main.js",
+  "icon": "icon.svg",
+  "activationEvents": ["onStartupFinished"],
+  "dependencies": ["termiau.claude"]
+}

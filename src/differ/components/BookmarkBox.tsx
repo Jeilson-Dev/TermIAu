@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { T } from "../../i18n/differ";
 import { rangeLabel } from "../lib/bookmarks";
+import type { PassageTool } from "../lib/extensions";
 import type { FixStatus } from "../lib/fixes";
 import type { Bookmark } from "../types";
 import { Icon } from "./Icons";
@@ -116,7 +117,8 @@ export function BookmarkBox({
   onEdit,
   onRemove,
   onToggleResolved,
-  onAsk,
+  tools,
+  onTool,
 }: {
   bookmark: Bookmark;
   reference: string;
@@ -124,8 +126,9 @@ export function BookmarkBox({
   onEdit(): void;
   onRemove(): void;
   onToggleResolved(): void;
-  /** Clear up a doubt with Claude before deciding what the bookmark says. */
-  onAsk?(): void;
+  /** What plugins offer for the bookmark's passage. */
+  tools: PassageTool[];
+  onTool(tool: PassageTool): void;
 }) {
   return (
     <div className={bookmark.resolved ? "bookmark resolved" : "bookmark"}>
@@ -136,11 +139,11 @@ export function BookmarkBox({
         <span className="spacer" />
         <ResolveButton resolved={!!bookmark.resolved} onToggle={onToggleResolved} />
         <CopyReferenceButton reference={reference} />
-        {onAsk && (
-          <button className="icon-btn" title={T.askAboutSnippet} onClick={onAsk}>
-            <Icon name="sparkle" />
+        {tools.map((tool) => (
+          <button key={tool.id} className={`icon-btn tool-${tool.id}`} title={tool.titles.bookmark} onClick={() => onTool(tool)}>
+            <Icon name={tool.icon} />
           </button>
-        )}
+        ))}
         <button className="icon-btn" title={T.editBookmark} onClick={onEdit}>
           <Icon name="edit" />
         </button>
@@ -160,7 +163,8 @@ export function BookmarkEditor({
   initial = "",
   onSave,
   onCancel,
-  onAsk,
+  tools = [],
+  onTool,
 }: {
   label: string;
   /** The selected passage the note is about, if it's not about whole lines. */
@@ -168,8 +172,10 @@ export function BookmarkEditor({
   initial?: string;
   onSave(note: string): void | Promise<void>;
   onCancel(): void;
-  /** Instead of writing a note, ask Claude — taking what was already written as the question. */
-  onAsk?(text: string): void;
+  /** Instead of saving the note, hand the passage to a plugin's tool — with what was
+   *  already written. ⌘⇧↩ is the first one. */
+  tools?: PassageTool[];
+  onTool?(tool: PassageTool, text: string): void;
 }) {
   const [note, setNote] = useState(initial);
   const [saving, setSaving] = useState(false);
@@ -199,9 +205,9 @@ export function BookmarkEditor({
         placeholder={quote ? T.improvementInSnippet : T.improvementHere}
         onChange={(e) => setNote(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && e.shiftKey && (e.metaKey || e.ctrlKey) && onAsk) {
+          if (e.key === "Enter" && e.shiftKey && (e.metaKey || e.ctrlKey) && tools[0] && onTool) {
             e.preventDefault();
-            onAsk(note.trim());
+            onTool(tools[0], note.trim());
           } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
             submit();
@@ -216,12 +222,13 @@ export function BookmarkEditor({
         <button className="btn" onClick={onCancel}>
           {T.cancel}
         </button>
-        {onAsk && (
-          <button className="btn" title={T.askBeforeHint} onClick={() => onAsk(note.trim())}>
-            <Icon name="sparkle" size={13} />
-            {T.askToClaude}
-          </button>
-        )}
+        {onTool &&
+          tools.map((tool) => (
+            <button key={tool.id} className={`btn tool-${tool.id}`} title={tool.titles.note} onClick={() => onTool(tool, note.trim())}>
+              <Icon name={tool.icon} size={13} />
+              {tool.label}
+            </button>
+          ))}
         <button className="btn primary" disabled={!note.trim() || saving} onClick={submit}>
           {initial ? T.save : T.addBookmark}
         </button>

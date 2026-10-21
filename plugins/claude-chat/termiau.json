@@ -1,0 +1,24 @@
+{
+  "id": "termiau.claude-chat",
+  "name": "Claude Chat",
+  "version": "1.0.0",
+  "author": "TermIAu",
+  "description": "A panel's Claude conversation in bubbles over the terminal: questions and permissions answered with buttons, /commands, /resume, the diffs of each edit and pasted images.",
+  "engines": { "termiau": ">=0.1.0" },
+  "main": "main.js",
+  "style": "style.css",
+  "icon": "icon.svg",
+  "activationEvents": ["onStartupFinished"],
+  "dependencies": ["termiau.claude"],
+  "contributes": {
+    "regions": [{ "region": "panelHeader", "id": "chat", "priority": 50 }],
+    "commands": [
+      {
+        "id": "toggle",
+        "title": { "en": "Toggle Chat and Terminal", "pt": "Alternar entre Chat e Terminal" },
+        "keybinding": "CmdOrCtrl+Shift+C",
+        "menu": { "en": "Claude Code", "pt": "Claude Code" }
+      }
+    ]
+  }
+}

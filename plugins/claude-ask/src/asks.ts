@@ -3,26 +3,18 @@
 // changes the disk. If the conversation lived in the component, it would vanish (and the process
 // would die) in the middle of the very change one wanted to see.
 
-import { T } from "../../i18n/differ";
-import { useSyncExternalStore } from "react";
-import { askClaude, cancelAsk, undoAsk, type AskChange } from "../api";
-import type { FileDiff, Side } from "../types";
-import { getBlob } from "./blobs";
-import { rangeLabel } from "./bookmarks";
+import { getBlob } from "../../../src/differ/lib/blobs";
+import { rangeLabel } from "../../../src/differ/lib/bookmarks";
+import type { Passage, PassageBox } from "../../../src/differ/lib/extensions";
+import type { FileDiff } from "../../../src/differ/types";
+import { askClaude, cancelAsk, undoAsk, type AskChange } from "./api";
+import { T } from "./i18n";
 import { sendToSession } from "./liveSessions";
 
-/** Where the question is pinned and where it came from. */
-export interface Ask {
+/** Where the question is pinned and where it came from. From a bookmark, the decision
+ *  rewrites its comment, and the comment goes into the context. */
+export interface Ask extends Passage {
   id: string;
-  path: string;
-  side: Side;
-  start: number;
-  end: number;
-  quote?: string;
-  /** A question asked from a bookmark: the decision rewrites its comment. */
-  bookmarkId?: string;
-  /** The bookmark's comment, which goes into the context. */
-  note?: string;
 }
 
 export interface Turn {
@@ -65,36 +57,32 @@ const DIFF_MAX_LINES = 600;
 
 let asks: AskState[] = [];
 const listeners = new Set<() => void>();
-const byPath = new Map<string, AskState[]>();
+const byPath = new Map<string, PassageBox[]>();
 
 function emit() {
   byPath.clear();
   for (const l of listeners) l();
 }
 
-function subscribe(l: () => void) {
+export function subscribe(l: () => void) {
   listeners.add(l);
-  return () => listeners.delete(l);
+  return () => void listeners.delete(l);
 }
 
-const NONE: AskState[] = [];
+const NONE: PassageBox[] = [];
 
-/** A file's questions; the same list as long as nothing in them changes. */
-function asksOf(path: string): AskState[] {
+/** A file's questions, as the diff tab places them; the same list as long as nothing in them changes. */
+export function boxesOf(path: string): PassageBox[] {
   let list = byPath.get(path);
   if (!list) {
-    list = asks.filter((a) => a.path === path);
+    list = asks.filter((a) => a.path === path).map((a) => ({ key: a.id, passage: a }));
     if (!list.length) list = NONE;
     byPath.set(path, list);
   }
   return list;
 }
 
-export function useAsks(path: string): AskState[] {
-  return useSyncExternalStore(subscribe, () => asksOf(path));
-}
-
-const get = (id: string) => asks.find((a) => a.id === id);
+export const get = (id: string) => asks.find((a) => a.id === id);
 
 export function update(id: string, patch: Partial<AskState>) {
   if (!get(id)) return;
@@ -140,6 +128,13 @@ export function open(ask: Omit<Ask, "id">, question = "") {
       noteError: null,
     },
   ];
+  emit();
+}
+
+/** The plugin was turned off: every box goes, and what was running dies. */
+export function closeAll() {
+  for (const a of asks) if (a.running) cancelAsk(a.running).catch(() => {});
+  asks = [];
   emit();
 }
 

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- The Claude chat plugin's icon: two bubbles, yours in pink on the right and
+       Claude's with its orange spark, on the same dark tile as the other plugins. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#343746"/>
+      <stop offset="1" stop-color="#21222c"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <path d="M20 30a10 10 0 0 1 10-10h44a10 10 0 0 1 10 10v24a10 10 0 0 1-10 10H42l-14 12V64a10 10 0 0 1-8-10Z" fill="#44475a"/>
+  <g transform="translate(52 42)" stroke="#d97757" stroke-width="5" stroke-linecap="round">
+    <path d="M0 -12 V12 M-12 0 H12 M-8.5 -8.5 L8.5 8.5 M-8.5 8.5 L8.5 -8.5"/>
+  </g>
+  <path d="M108 74a10 10 0 0 0-10-10H64a10 10 0 0 0-10 10v16a10 10 0 0 0 10 10h22l12 10v-10.5a10 10 0 0 0 10-9.5Z" fill="#ff79c6"/>
+  <path d="M66 78h30M66 88h20" stroke="#21222c" stroke-width="5" stroke-linecap="round"/>
+</svg>

@@ -11,18 +11,23 @@ import { Icon } from "./Icons";
 /// The target branch guess is here because it is the only thing that doesn't belong
 /// to a repository: each one's target is stored with it, and picking by hand in the
 /// bar's selector still outweighs this. The editor is the one for the "Open in
-/// editor" button in the terminal's file viewer.
+/// editor" button in the terminal's file viewer. The blinking is the waiting panel's
+/// orange outline and its tab's dot.
 export function Prefs({
   defaultTarget,
   onDefaultTarget,
   editor,
   onEditor,
+  blink,
+  onBlink,
   onClose,
 }: {
   defaultTarget: string;
   onDefaultTarget(branch: string): void;
   editor: string;
   onEditor(command: string): void;
+  blink: boolean;
+  onBlink(on: boolean): void;
   onClose(): void;
 }) {
   const campo = useRef<HTMLInputElement>(null);
@@ -106,6 +111,15 @@ export function Prefs({
               <span className="prefs-help"><Snippets from={T.editorHelp} /></span>
             </label>
 
+            <div className="prefs-field">
+              <span className="prefs-name">{T.attention}</span>
+              <label className="prefs-check">
+                <input type="checkbox" checked={blink} onChange={(e) => onBlink(e.target.checked)} />
+                {T.blinkOnAttention}
+              </label>
+              <span className="prefs-help">{T.blinkOnAttentionHelp}</span>
+            </div>
+
           </div>
         )}
       </div>
@@ -146,6 +160,8 @@ export function PrefsFloating() {
       onDefaultTarget={(defaultTarget) => mudar({ defaultTarget })}
       editor={s.editor}
       onEditor={(editor) => mudar({ editor })}
+      blink={s.blinkOnAttention}
+      onBlink={(blinkOnAttention) => mudar({ blinkOnAttention })}
       onClose={() => window.parent.postMessage({ termiauPrefsClosed: true }, "*")}
     />
   );

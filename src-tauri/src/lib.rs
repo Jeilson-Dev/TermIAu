@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use base64::Engine;
 use language::tr;
 use portable_pty::{Child, ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
-use tauri::menu::{AboutMetadata, CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Everything we need to keep from a live PTY session — one per tab.
@@ -123,9 +123,9 @@ fn shell(cwd: Option<String>, id: u64, cfg: &Config) -> CommandBuilder {
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERM_PROGRAM", "TermIAu");
 
-    // How the Claude Code hook knows who it is talking to. It runs as a grandchild
-    // of this shell, so it inherits both — and outside TermIAu they don't exist, which
-    // is what keeps the same hook quiet in another terminal.
+    // How whatever runs in the panel (`termiau`, a plugin's hook) knows who it is
+    // talking to. It inherits both from this shell — and outside TermIAu they don't
+    // exist, which is what keeps the same hook quiet in another terminal.
     cmd.env("TERMIAU_PANEL", id.to_string());
     cmd.env("TERMIAU_SOCK", &cfg.socket);
     cmd
@@ -361,335 +361,40 @@ fn is_flutter_project(folder: String) -> bool {
         .unwrap_or(false)
 }
 
-/// A chunk of a Claude Code session transcript.
-#[derive(serde::Serialize)]
-struct TranscriptChunk {
-    text: String,
-    /// How far this chunk went, in bytes: it is the next read's `since`.
-    end: u64,
-    /// The start was left out (file too large), or the file shrank and the
-    /// read started over: what the screen already showed is no longer valid.
-    from_start: bool,
-    truncated: bool,
-}
-
-/// The full transcript of a long session exceeds tens of MB, almost all of it
-/// tool results. The conversation that matters is its end.
-const MAX_TRANSCRIPT_BYTES: u64 = 6 * 1024 * 1024;
-
-/// What the transcript gained since `since`. Whole lines only: the last one, if
-/// Claude is still writing it, waits for the next read.
-///
-/// The path comes from the hook, but the webview delivers it — so only a
-/// `.jsonl` inside `~/.claude` is accepted, not any file on disk.
-#[tauri::command]
-fn transcript_read(path: String, since: u64) -> Result<TranscriptChunk, String> {
-    use std::io::{Seek, SeekFrom};
-
-    let base = claude_dir().ok_or("no Claude Code folder")?;
-    let base = base.canonicalize().map_err(|e| e.to_string())?;
-    let file = PathBuf::from(&path).canonicalize().map_err(|e| e.to_string())?;
-    if !file.starts_with(&base) || file.extension().is_none_or(|e| e != "jsonl") {
-        return Err(tr("não é um transcript do Claude Code", "not a Claude Code transcript").into());
-    }
-
-    let mut f = std::fs::File::open(&file).map_err(|e| e.to_string())?;
-    let size = f.metadata().map_err(|e| e.to_string())?.len();
-    // Smaller than what was already read: the file was rewritten. Start over.
-    let mut from_start = since > size;
-    let mut start = if from_start { 0 } else { since };
-    let truncated = size - start > MAX_TRANSCRIPT_BYTES;
-    if truncated {
-        start = size - MAX_TRANSCRIPT_BYTES;
-        from_start = true;
-    }
-
-    f.seek(SeekFrom::Start(start)).map_err(|e| e.to_string())?;
-    let mut bytes = Vec::new();
-    f.take(size - start).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-    // Jumped into the middle of the file: the first line came in half.
-    let skip = if truncated { bytes.iter().position(|b| *b == b'\n').map_or(bytes.len(), |p| p + 1) } else { 0 };
-    let until = bytes.iter().rposition(|b| *b == b'\n').map_or(skip, |p| (p + 1).max(skip));
-    // Almost all of the file's weight is tool results (a file read, a
-    // command's output), which the chat doesn't show. It stays here: sending it to the
-    // webview and making it parse megabytes of JSON froze the screen.
-    let mut text = String::new();
-    for line in String::from_utf8_lossy(&bytes[skip..until]).lines() {
-        let is_message = line.contains(r#""type":"user""#) || line.contains(r#""type":"assistant""#);
-        if !is_message {
-            continue;
-        }
-        if !line.contains(r#""tool_use_id""#) {
-            text.push_str(line);
-            text.push('\n');
-        } else if let Some(diff) = diff_from_result(line).or_else(|| diff_from_hook(&file, line)) {
-            text.push_str(&diff);
-            text.push('\n');
-        }
-    }
-    Ok(TranscriptChunk {
-        text,
-        end: start + until as u64,
-        from_start,
-        truncated,
-    })
-}
-
-/// The diff Claude Code stored in a tool result, already trimmed:
-/// `{"type":"diff","files":[{"path","hunks"}]}`. It is the same one the terminal
-/// draws, with the file's line numbers. It comes from two places: the
-/// `structuredPatch` of an Edit or Write, and the `bashEditDiff` of a command
-/// (a `sed -i`, a script) that changed a file. The rest of the result — the
-/// whole previous file, in an Edit — stays here.
-fn diff_from_result(line: &str) -> Option<String> {
-    use serde_json::{json, Value};
-    if !line.contains(r#""structuredPatch""#) && !line.contains(r#""bashEditDiff""#) {
-        return None;
-    }
-    let v: Value = serde_json::from_str(line).ok()?;
-    if v.get("isSidechain").and_then(Value::as_bool) == Some(true) {
-        return None;
-    }
-    let r = v.get("toolUseResult")?;
-    let hunks = |h: &Value| -> Vec<Value> {
-        h.as_array()
-            .into_iter()
-            .flatten()
-            .map(|h| json!({ "oldStart": h["oldStart"], "newStart": h["newStart"], "lines": h["lines"] }))
-            .collect()
-    };
-    let mut files = Vec::new();
-    if let Some(edits) = r.pointer("/bashEditDiff/files").and_then(Value::as_array) {
-        for f in edits {
-            files.push(json!({ "path": f["filePath"], "hunks": hunks(&f["hunks"]) }));
-        }
-    } else if let Some(path) = r.get("filePath") {
-        let mut h = hunks(&r["structuredPatch"]);
-        // New file: Write brings no patch, only the content.
-        if h.is_empty() && r.get("type").and_then(Value::as_str) == Some("create") {
-            if let Some(c) = r.get("content").and_then(Value::as_str) {
-                let lines: Vec<String> = c.lines().map(|l| format!("+{l}")).collect();
-                h.push(json!({ "oldStart": 0, "newStart": 1, "lines": lines }));
-            }
-        }
-        files.push(json!({ "path": path, "hunks": h }));
-    }
-    files.retain(|a| a["hunks"].as_array().is_some_and(|h| !h.is_empty()));
-    if files.is_empty() {
-        return None;
-    }
-    Some(json!({ "type": "diff", "files": files }).to_string())
-}
-
-/// The diff our hook took from a Bash, for when Claude Code didn't
-/// store one (a command that changed a file and ended with an error). It lives in
-/// `~/.termiau/diffs/<session>/<tool_use_id>.patch`; the session is the
-/// transcript's name.
-fn diff_from_hook(transcript: &std::path::Path, line: &str) -> Option<String> {
-    let id = line.split(r#""tool_use_id":""#).nth(1)?.split('"').next()?;
-    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
-        return None;
-    }
-    let session = transcript.file_stem()?.to_str()?;
-    let patch = PathBuf::from(dirs_home()?).join(".termiau/diffs").join(session).join(format!("{id}.patch"));
-    let text = std::fs::read_to_string(patch).ok()?;
-    let files = files_from_patch(&text);
-    if files.is_empty() {
-        return None;
-    }
-    Some(serde_json::json!({ "type": "diff", "files": files }).to_string())
-}
-
-/// A `git diff` into files and hunks, in the same format as Claude Code's
-/// `structuredPatch`. The first line, `# root <folder>`, is from the hook: it is what
-/// turns git's `a/…` and `b/…` paths absolute. A binary file has no
-/// hunk and is left out.
-fn files_from_patch(text: &str) -> Vec<serde_json::Value> {
-    use serde_json::json;
-    let mut lines = text.lines();
-    let root = lines.next().and_then(|l| l.strip_prefix("# root ")).unwrap_or("");
-    let mut files: Vec<serde_json::Value> = Vec::new();
-    let mut path: Option<String> = None;
-    let mut hunks: Vec<serde_json::Value> = Vec::new();
-    let mut current: Option<(u64, u64, Vec<String>)> = None;
-    let close_hunk = |current: &mut Option<(u64, u64, Vec<String>)>, hunks: &mut Vec<serde_json::Value>| {
-        if let Some((old, new, ls)) = current.take() {
-            hunks.push(json!({ "oldStart": old, "newStart": new, "lines": ls }));
-        }
-    };
-    let close_file =
-        |path: &mut Option<String>, hunks: &mut Vec<serde_json::Value>, files: &mut Vec<serde_json::Value>| {
-            if let Some(c) = path.take() {
-                if !hunks.is_empty() {
-                    files.push(json!({ "path": c, "hunks": std::mem::take(hunks) }));
-                }
-            }
-            hunks.clear();
-        };
-    // The start of a hunk: `@@ -old[,n] +new[,n] @@`.
-    let start = |l: &str| -> Option<(u64, u64)> {
-        let mut parts = l.strip_prefix("@@ ")?.split(' ');
-        let num = |p: &str| p.split(',').next().and_then(|n| n.parse::<u64>().ok());
-        Some((num(parts.next()?.strip_prefix('-')?)?, num(parts.next()?.strip_prefix('+')?)?))
-    };
-    for l in lines {
-        if l.starts_with("diff --git ") {
-            close_hunk(&mut current, &mut hunks);
-            close_file(&mut path, &mut hunks, &mut files);
-        } else if current.is_none() && (l.starts_with("--- ") || l.starts_with("+++ ")) {
-            // `+++ b/…` gives the name; for a deleted file it is /dev/null, and
-            // the `--- a/…` that came before counts.
-            if let Some(p) = l[4..].strip_prefix("a/").or_else(|| l[4..].strip_prefix("b/")) {
-                path = Some(format!("{}/{}", root.trim_end_matches('/'), p));
-            }
-        } else if let Some((old, new)) = start(l) {
-            close_hunk(&mut current, &mut hunks);
-            current = Some((old, new, Vec::new()));
-        } else if let Some((_, _, ls)) = current.as_mut() {
-            if l.starts_with([' ', '+', '-', '\\']) {
-                ls.push(l.to_string());
-            } else {
-                close_hunk(&mut current, &mut hunks);
-            }
-        }
-    }
-    close_hunk(&mut current, &mut hunks);
-    close_file(&mut path, &mut hunks, &mut files);
-    files
-}
-
-/// A `/command` Claude Code accepts beyond its built-in ones: the user's,
-/// the project's and the installed plugins' commands and skills.
-#[derive(serde::Serialize)]
-struct SlashCommand {
-    name: String,
-    description: String,
-}
-
-/// The `description:` in a command's or skill's header. Only the start of the
-/// file is read, and only its first line matters: it is what fits in the list.
-fn description_of(file: &std::path::Path) -> String {
-    let mut text = String::new();
-    let Ok(f) = std::fs::File::open(file) else { return text };
-    let _ = f.take(16 * 1024).read_to_string(&mut text);
-    let mut lines = text.lines();
-    if lines.next().map(str::trim) != Some("---") {
-        return String::new();
-    }
-    lines
-        .take_while(|l| l.trim() != "---")
-        .find_map(|l| l.strip_prefix("description:"))
-        .map(|d| d.trim().trim_matches(['"', '\'']).chars().take(160).collect())
-        .unwrap_or_default()
-}
-
-/// The `.md` files of a commands folder. A subfolder becomes a prefix, like in Claude
-/// Code: `commands/git/commit.md` is `/git:commit`.
-fn commands_in_folder(dir: &std::path::Path, prefix: &str, depth: u8, out: &mut Vec<SlashCommand>) {
-    let Ok(items) = std::fs::read_dir(dir) else { return };
-    for item in items.flatten() {
-        let path = item.path();
-        let Some(name) = path.file_stem().and_then(|n| n.to_str()) else { continue };
-        if path.is_dir() {
-            if depth > 0 {
-                commands_in_folder(&path, &format!("{prefix}{name}:"), depth - 1, out);
-            }
-        } else if path.extension().is_some_and(|e| e == "md") {
-            out.push(SlashCommand { name: format!("{prefix}{name}"), description: description_of(&path) });
-        }
-    }
-}
-
-/// The skills of a folder: each subfolder with a `SKILL.md` is one.
-fn skills_in_folder(dir: &std::path::Path, prefix: &str, out: &mut Vec<SlashCommand>) {
-    let Ok(items) = std::fs::read_dir(dir) else { return };
-    for item in items.flatten() {
-        let skill = item.path().join("SKILL.md");
-        let Some(name) = item.file_name().to_str().map(str::to_owned) else { continue };
-        if skill.is_file() {
-            out.push(SlashCommand { name: format!("{prefix}{name}"), description: description_of(&skill) });
-        }
-    }
-}
-
-/// What can be called with `/` in the session running in `folder`, besides
-/// Claude Code's built-in commands (the webview already knows those). The project
-/// comes before the user, and the user before plugins: it is the order the
-/// list shows, and the project's are the most used in it.
-#[tauri::command]
-fn commands_list(folder: Option<String>) -> Vec<SlashCommand> {
-    let mut out = Vec::new();
-    if let Some(folder) = folder {
-        // Going up from the session's folder, as Claude Code does: a session
-        // opened in a subfolder still sees the project root's `.claude`.
-        for dir in std::path::Path::new(&folder).ancestors() {
-            let claude = dir.join(".claude");
-            // `~/.claude` is the user's, and comes right below.
-            if claude_dir().is_some_and(|d| d == claude) {
-                break;
-            }
-            commands_in_folder(&claude.join("commands"), "", 3, &mut out);
-            skills_in_folder(&claude.join("skills"), "", &mut out);
-        }
-    }
-    let Some(base) = claude_dir() else { return out };
-    commands_in_folder(&base.join("commands"), "", 3, &mut out);
-    skills_in_folder(&base.join("skills"), "", &mut out);
-
-    // Each installed plugin brings its own, called as `/plugin:name`.
-    let plugins = std::fs::read_to_string(base.join("plugins/installed_plugins.json"))
-        .ok()
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
-    if let Some(map) = plugins.as_ref().and_then(|p| p["plugins"].as_object()) {
-        for (key, installs) in map {
-            let plugin = key.split('@').next().unwrap_or(key);
-            for inst in installs.as_array().into_iter().flatten() {
-                let Some(root) = inst["installPath"].as_str().map(PathBuf::from) else { continue };
-                let prefix = format!("{plugin}:");
-                commands_in_folder(&root.join("commands"), &prefix, 3, &mut out);
-                skills_in_folder(&root.join("skills"), &prefix, &mut out);
-            }
-        }
-    }
-    out
-}
-
-/// Claude's questions (`AskUserQuestion`) waiting for an answer from chat mode:
-/// the hook's connection stays open here, under a number given to it on arrival (the
-/// `PermissionRequest` doesn't carry the `tool_use_id`), until the chat answers
-/// (`question_answer`) or gives it up (`question_drop`).
+/// Messages that wait for an answer: the sender's connection stays open here, under a
+/// number given to it on arrival, until its plugin answers (`socket_reply`) or gives
+/// it up (`socket_drop`).
 #[derive(Default)]
-struct PendingQuestions(Mutex<HashMap<String, std::os::unix::net::UnixStream>>);
+struct PendingReplies(Mutex<HashMap<String, std::os::unix::net::UnixStream>>);
 
-/// Returns to the hook the decision the chat built, and closes the connection: what is
-/// written here is the hook's output, and Claude Code reads it as the answer.
+/// Writes the plugin's answer to the waiting sender and closes the connection: what is
+/// written here is what the sender reads back.
 #[tauri::command]
-fn question_answer(pending: State<'_, PendingQuestions>, id: String, answer: String) -> Result<(), String> {
+fn socket_reply(pending: State<'_, PendingReplies>, id: String, answer: String) -> Result<(), String> {
     let Some(mut stream) = pending.0.lock().unwrap().remove(&id) else {
-        return Err(tr("a pergunta já foi respondida", "the question was already answered").into());
+        return Err(tr("já foi respondida", "it was already answered").into());
     };
     stream.write_all(answer.as_bytes()).map_err(|e| e.to_string())
 }
 
-/// Closes the connection without an answer: the hook exits quietly and the question stays with the
-/// terminal. That is what happens when it was answered there.
+/// Closes the connection without an answer: the sender reads nothing.
 #[tauri::command]
-fn question_drop(pending: State<'_, PendingQuestions>, id: String) {
+fn socket_drop(pending: State<'_, PendingReplies>, id: String) {
     pending.0.lock().unwrap().remove(&id);
 }
 
-/// Listens to the events Claude Code's hooks send and hands them to the webview.
-/// A unix socket, one connection per event: the hook writes a JSON and closes. The
-/// exception is Claude's question: it arrives with `"wait":true` and a trailing
-/// newline, and the connection stays open waiting for the answer (see
-/// `PendingQuestions`).
+/// Listens to what runs in the panels — `termiau view`/`progress` and the plugins'
+/// hooks (`{"panel":…,"plugin":…,"message":…}`) — and hands it to the webview.
+/// A unix socket, one connection per message: the sender writes a JSON and closes. The
+/// exception is a message with `"wait":true` and a trailing newline: the connection
+/// stays open waiting for the answer (see `PendingReplies`).
 ///
 /// Why a socket and not an escape sequence through the panel's own output: the
-/// latter would be more elegant (the panel's identity would come for free), but the
-/// hook and Claude Code write to the same tty at the same time, and a `delta` of
-/// a few KB exceeds the size at which writes stop being atomic — the risk is
-/// chopping one of Claude's own sequences and garbling the screen.
-fn listen_hooks(app: AppHandle, path: PathBuf) {
+/// latter would be more elegant (the panel's identity would come for free), but a
+/// hook and the program in front write to the same tty at the same time, and a
+/// message of a few KB exceeds the size at which writes stop being atomic — the risk
+/// is chopping one of the program's own sequences and garbling the screen.
+fn listen_socket(app: AppHandle, path: PathBuf) {
     let _ = std::fs::remove_file(&path);
     clean_orphan_sockets(&path);
     let listener = match UnixListener::bind(&path) {
@@ -715,38 +420,38 @@ fn listen_hooks(app: AppHandle, path: PathBuf) {
                     return;
                 }
                 // `termiau progress` waits for the answer: a plan that doesn't hold up goes
-                // back to Claude as the command's error, for it to fix.
+                // back as the command's error, for whoever sent it to fix.
                 if let Some(checked) = progress::from_socket(&text) {
                     let mut stream = stream;
                     let _ = match checked {
                         Ok(event) => {
-                            let _ = app.emit("claude://event", event);
+                            let _ = app.emit("socket://message", event);
                             stream.write_all(b"ok\n")
                         }
                         Err(e) => writeln!(stream, "error: {e}"),
                     };
                     return;
                 }
-                // The question gets a number, which goes along to the webview: it is
-                // how the answer comes back to this connection.
-                let text = match waiting_question(&text) {
+                // A waiting message gets a number, which goes along to the webview: it
+                // is how the answer comes back to this connection.
+                let text = match waiting(&text) {
                     Some(mut v) => {
                         static NEXT: AtomicU64 = AtomicU64::new(1);
-                        let id = format!("question-{}", NEXT.fetch_add(1, Ordering::Relaxed));
-                        v["question_id"] = id.clone().into();
-                        app.state::<PendingQuestions>().0.lock().unwrap().insert(id, stream);
+                        let id = format!("reply-{}", NEXT.fetch_add(1, Ordering::Relaxed));
+                        v["reply_id"] = id.clone().into();
+                        app.state::<PendingReplies>().0.lock().unwrap().insert(id, stream);
                         v.to_string()
                     }
                     None => text,
                 };
-                let _ = app.emit("claude://event", text);
+                let _ = app.emit("socket://message", text);
             });
         }
     });
 }
 
-/// The event, already read, if it is a question that expects an answer.
-fn waiting_question(text: &str) -> Option<serde_json::Value> {
+/// The message, already read, if it expects an answer.
+fn waiting(text: &str) -> Option<serde_json::Value> {
     let v: serde_json::Value = serde_json::from_str(text.trim()).ok()?;
     (v["wait"].as_bool() == Some(true)).then_some(v)
 }
@@ -1097,181 +802,6 @@ fn editor_command(command: &str, path: &str, line: u32) -> String {
     }
 }
 
-// ---------- hooks: installing them from inside the app ----------
-
-/// The hook ships inside the binary: someone who downloaded only the app doesn't have the
-/// repository to run `hooks/install.sh` from. That script still works and does
-/// the same as `hooks_install` here.
-const HOOK: &str = include_str!("../../hooks/termiau-event.sh");
-const HOOK_EVENTS: &[&str] = &[
-    "SessionStart",
-    "UserPromptSubmit",
-    "PermissionRequest",
-    "Notification",
-    "SessionEnd",
-    "Stop",
-    "PreToolUse",
-    "PostToolUse",
-    "PostToolUseFailure",
-];
-
-/// How our hook is registered on each event.
-///
-/// Tool events only matter for Bash — the snapshot before and after a
-/// command, for the diff Claude Code doesn't store (see `diff_do_bash` in the
-/// hook) — and, after it, for Claude's question: it is the notice that it was
-/// answered in the terminal and the chat card can go. Without the matcher, the hook
-/// would run on every Read.
-///
-/// `PermissionRequest` has an hour: on a Claude question, the hook keeps
-/// waiting for the chat's answer (see `PendingQuestions`). On other requests it
-/// returns right away, like the rest.
-fn group_for_event(event: &str, command: &str) -> serde_json::Value {
-    let timeout = if event == "PermissionRequest" { 3600 } else { 5 };
-    let mut group = serde_json::json!({
-        "hooks": [{ "type": "command", "command": command, "timeout": timeout }]
-    });
-    match event {
-        "PreToolUse" => group["matcher"] = "Bash".into(),
-        "PostToolUse" | "PostToolUseFailure" => group["matcher"] = "Bash|AskUserQuestion".into(),
-        _ => {}
-    }
-    group
-}
-
-fn claude_dir() -> Option<PathBuf> {
-    dirs_home().map(|h| PathBuf::from(h).join(".claude"))
-}
-
-/// The script's name today. `termiau-evento.sh` is the one earlier versions installed:
-/// still ours, so an update replaces its entries instead of adding a second hook.
-const HOOK_FILE: &str = "termiau-event.sh";
-
-fn hook_is_ours(h: &serde_json::Value) -> bool {
-    h["command"].as_str().is_some_and(|c| c.contains("termiau-event.sh") || c.contains("termiau-evento"))
-}
-
-fn hook_is_current(h: &serde_json::Value) -> bool {
-    h["command"].as_str().is_some_and(|c| c.contains(HOOK_FILE))
-}
-
-/// `statusLine` goes through the same hook, with the `status` argument: it is how
-/// the app gets the session's context and Claude's usage (see the start of
-/// termiau-event.sh). A status line that isn't ours stays where it is —
-/// whoever put it there wanted something else.
-fn status_line_current(settings: &serde_json::Value) -> bool {
-    let s = &settings["statusLine"];
-    s.is_object() && !hook_is_ours(s) || hook_is_current(s) && s["command"].as_str().is_some_and(|c| c.ends_with(" status"))
-}
-
-fn status_line(command: &str) -> serde_json::Value {
-    serde_json::json!({ "type": "command", "command": format!("{command} status"), "padding": 0 })
-}
-
-/// settings.json already calls our hook on every event, and the way
-/// this version registers it: a changed matcher or timeout also calls for
-/// reinstalling.
-fn hooks_registered(settings: &serde_json::Value) -> bool {
-    status_line_current(settings) && HOOK_EVENTS.iter().all(|e| {
-        settings["hooks"][*e].as_array().is_some_and(|groups| {
-            groups.iter().any(|g| {
-                let Some(ours) = g["hooks"].as_array().and_then(|hs| hs.iter().find(|h| hook_is_current(h))) else {
-                    return false;
-                };
-                let expected = group_for_event(e, ours["command"].as_str().unwrap_or(""));
-                g["matcher"] == expected["matcher"] && ours["timeout"] == expected["hooks"][0]["timeout"]
-            })
-        })
-    })
-}
-
-/// Where the Claude Code link stands: `no-claude` (no `~/.claude`),
-/// `missing` (never installed), `outdated` (installed by an earlier
-/// version of the app) or `installed`.
-#[tauri::command]
-fn hooks_state() -> &'static str {
-    let Some(dir) = claude_dir().filter(|d| d.is_dir()) else { return "no-claude" };
-    let script = dir.join("hooks").join(HOOK_FILE);
-    if !script.exists() {
-        // Only the old script: installed, by a version from before the rename.
-        return if dir.join("hooks/termiau-evento.sh").exists() { "outdated" } else { "missing" };
-    }
-    let script_current = std::fs::read_to_string(&script).is_ok_and(|s| s == HOOK);
-    let registered = std::fs::read_to_string(dir.join("settings.json"))
-        .ok()
-        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
-        .is_some_and(|s| hooks_registered(&s));
-    if script_current && registered { "installed" } else { "outdated" }
-}
-
-/// Copies the hook to `~/.claude/hooks` and registers it in Claude Code's
-/// settings.json. Idempotent, and settings gets a backup beside it before being touched.
-#[tauri::command]
-fn hooks_install() -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let dir = claude_dir().ok_or(tr("não achei a pasta do usuário", "couldn't find the user folder"))?;
-    let target = dir.join("hooks").join(HOOK_FILE);
-    std::fs::create_dir_all(dir.join("hooks")).map_err(|e| e.to_string())?;
-    std::fs::write(&target, HOOK).map_err(|e| e.to_string())?;
-    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755))
-        .map_err(|e| e.to_string())?;
-
-    let path = dir.join("settings.json");
-    let text = match std::fs::read_to_string(&path) {
-        Ok(t) => Some(t),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(e.to_string()),
-    };
-    // A settings.json that can't be read isn't rewritten: better to go without the
-    // hook than to erase someone's configuration.
-    let mut settings: serde_json::Value = match text.as_deref().map(str::trim) {
-        None | Some("") => serde_json::json!({}),
-        Some(t) => serde_json::from_str(t)
-            .map_err(|e| format!("{}: {e}", tr("o settings.json do Claude Code está ilegível", "Claude Code's settings.json is unreadable")))?,
-    };
-    if hooks_registered(&settings) {
-        return Ok(());
-    }
-    settings
-        .as_object_mut()
-        .ok_or(tr("o settings.json do Claude Code não é um objeto", "Claude Code's settings.json is not an object"))?
-        .entry("hooks")
-        .or_insert_with(|| serde_json::json!({}));
-
-    let command = format!("bash {}", target.display());
-    if !status_line_current(&settings) {
-        settings["statusLine"] = status_line(&command);
-    }
-    let hooks = settings["hooks"].as_object_mut().ok_or(tr("o \"hooks\" do settings.json do Claude Code não é um objeto", "the \"hooks\" in Claude Code's settings.json is not an object"))?;
-    for event in HOOK_EVENTS {
-        // Any previous registration of our hook goes out, a new one goes in at the end.
-        let mut groups =
-            hooks.get(*event).and_then(|v| v.as_array()).cloned().unwrap_or_default();
-        for g in &mut groups {
-            if let Some(hs) = g.get_mut("hooks").and_then(|h| h.as_array_mut()) {
-                hs.retain(|h| !hook_is_ours(h));
-            }
-        }
-        groups.retain(|g| g["hooks"].as_array().is_some_and(|hs| !hs.is_empty()));
-        groups.push(group_for_event(event, &command));
-        hooks.insert(event.to_string(), serde_json::Value::Array(groups));
-    }
-
-    if text.is_some() {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        std::fs::copy(&path, dir.join(format!("settings.json.bak-{now}")))
-            .map_err(|e| e.to_string())?;
-    }
-    let new_text = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
-    // Direct write, no rename: the settings.json of dotfiles users
-    // is a link, and a `rename` over it would put a file in its place.
-    std::fs::write(&path, new_text + "\n").map_err(|e| e.to_string())
-}
-
 /// One socket is left over per run that died without exiting cleanly (a `kill`, a crash).
 /// Since the name carries the pid, we can tell which ones no longer have an owner.
 fn clean_orphan_sockets(current: &PathBuf) {
@@ -1298,7 +828,7 @@ fn clean_orphan_sockets(current: &PathBuf) {
     }
 }
 
-/// The app's data folder: the session file and the "restore tabs" flag live there.
+/// The app's data folder: the session file lives there.
 fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_data_dir().map_err(|e| format!("{}: {e}", tr("sem diretório de dados", "no data directory")))
 }
@@ -1306,49 +836,15 @@ fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
 // ---------- session: the tabs that come back on the next launch ----------
 
 /// A single file, in the app's data folder: the open tabs, each one's
-/// layout and each panel's Claude session. The webview builds and reads it —
+/// layout and what the plugins saved in each panel. The webview builds and reads it —
 /// only text goes in and out here. In a file, not localStorage: the webview
 /// writes its own whenever it pleases, and may not flush it before the app quits.
 fn session_file(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(data_dir(app)?.join("session.json"))
 }
 
-/// Coming back with the tabs is the user's choice (TermIAu ▸ Restore Tabs on
-/// Open), and starts off. The choice is this file's existence: the menu is
-/// built here in Rust, before the webview exists to say anything.
-fn restore_marker(app: &AppHandle) -> Option<PathBuf> {
-    Some(data_dir(app).ok()?.join("restore-tabs"))
-}
-
-#[tauri::command]
-fn restore_enabled(app: AppHandle) -> bool {
-    restore_marker(&app).is_some_and(|m| m.exists())
-}
-
-/// The click on the menu item. macOS itself toggles the checkmark; from here go the
-/// flag on disk and the notice to the webview.
-fn toggle_restore(app: &AppHandle) {
-    let Some(marker) = restore_marker(app) else { return };
-    let enabled = !marker.exists();
-    let done = if enabled {
-        marker.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(&marker, ""))
-    } else {
-        std::fs::remove_file(&marker)
-    };
-    if let Err(e) = done {
-        eprintln!("[termiau] couldn't save the restore-tabs choice: {e}");
-    }
-    let _ = app.emit("menu://restore", marker.exists());
-}
-
-/// Off, there is nothing to bring back: the webview opens a new tab. The session
-/// keeps being saved just the same — turning it on midday already counts for the
-/// next launch.
 #[tauri::command]
 fn session_read(app: AppHandle) -> Option<String> {
-    if !restore_enabled(app.clone()) {
-        return None;
-    }
     std::fs::read_to_string(session_file(&app).ok()?).ok()
 }
 
@@ -1387,16 +883,6 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<()> {
             // ⌘, is where every macOS app keeps this — and, being a menu item,
             // the key never even reaches the webview: the menu takes it first.
             &MenuItem::with_id(app, "preferences", tr("Preferências…", "Preferences…"), true, Some("CmdOrCtrl+,"))?,
-            // Turning it on also installs Claude Code's hooks, which is where the
-            // session to resume in each panel comes from.
-            &CheckMenuItem::with_id(
-                app,
-                "restore",
-                tr("Restaurar Abas ao Abrir", "Restore Tabs on Launch"),
-                true,
-                restore_enabled(app.clone()),
-                None::<&str>,
-            )?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::services(app, Some(tr("Serviços", "Services")))?,
             &PredefinedMenuItem::separator(app)?,
@@ -1417,7 +903,7 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         &[
             &MenuItem::with_id(app, "new-tab", tr("Nova Aba", "New Tab"), true, Some("CmdOrCtrl+T"))?,
             // Like in the browser: brings back the last closed tab (or panel), with its
-            // layout and Claude sessions resumed.
+            // layout and what its plugins saved.
             &MenuItem::with_id(
                 app,
                 "reopen-tab",
@@ -1469,44 +955,17 @@ pub(crate) fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         ],
     )?;
 
-    // How the focused panel's Claude session is shown: its terminal or the
-    // conversation in bubbles. And the jumps between what you wrote, which work in
-    // both modes — ⌘⇧↑ and ⌘⇧↓ are iTerm2's mark jumps.
     let view_menu = Submenu::with_items(
         app,
         tr("Exibir", "View"),
         true,
-        &[
-            &MenuItem::with_id(
-                app,
-                "chat",
-                tr("Alternar entre Chat e Terminal", "Toggle Chat and Terminal"),
-                true,
-                Some("CmdOrCtrl+Shift+C"),
-            )?,
-            &MenuItem::with_id(
-                app,
-                "viewer",
-                tr("Mostrar ou Esconder o Arquivo", "Show or Hide File"),
-                true,
-                Some("CmdOrCtrl+Shift+O"),
-            )?,
-            &PredefinedMenuItem::separator(app)?,
-            &MenuItem::with_id(
-                app,
-                "previous-message",
-                tr("Sua Mensagem Anterior", "Your Previous Message"),
-                true,
-                Some("CmdOrCtrl+Shift+Up"),
-            )?,
-            &MenuItem::with_id(
-                app,
-                "next-message",
-                tr("Sua Próxima Mensagem", "Your Next Message"),
-                true,
-                Some("CmdOrCtrl+Shift+Down"),
-            )?,
-        ],
+        &[&MenuItem::with_id(
+            app,
+            "viewer",
+            tr("Mostrar ou Esconder o Arquivo", "Show or Hide File"),
+            true,
+            Some("CmdOrCtrl+Shift+O"),
+        )?],
     )?;
 
     let window_menu = Submenu::with_items(
@@ -1548,12 +1007,11 @@ pub fn run() {
         .register_uri_scheme_protocol(plugins::SCHEME, |ctx, request| plugins::serve(ctx.app_handle(), request))
         .setup(|app| {
             let cfg = Config::default();
-            listen_hooks(app.handle().clone(), cfg.socket.clone());
+            listen_socket(app.handle().clone(), cfg.socket.clone());
             app.manage(cfg);
             app.manage(Ptys::default());
-            app.manage(PendingQuestions::default());
+            app.manage(PendingReplies::default());
             app.manage(differ::RepoWatcher::default());
-            app.manage(differ::RunningAsks::default());
             app.manage(window::Last::default());
             app.manage(plugins::Opened::default());
             app.manage(plugin_process::Processes::default());
@@ -1575,7 +1033,6 @@ pub fn run() {
             "new-tab" => { let _ = app.emit("menu://new-tab", ()); }
             "reopen-tab" => { let _ = app.emit("menu://reopen-tab", ()); }
             "quit" => { let _ = app.emit("menu://quit", ()); }
-            "restore" => toggle_restore(app),
             "split-right" => { let _ = app.emit("menu://split-right", ()); }
             "split-down" => { let _ = app.emit("menu://split-down", ()); }
             "maximize" => { let _ = app.emit("menu://maximize", ()); }
@@ -1583,10 +1040,7 @@ pub fn run() {
             "paste-path" => { let _ = app.emit("menu://paste-path", ()); }
             "preferences" => { let _ = app.emit("menu://preferences", ()); }
             "shortcuts" => { let _ = app.emit("menu://shortcuts", ()); }
-            "chat" => { let _ = app.emit("menu://chat", ()); }
             "viewer" => { let _ = app.emit("menu://viewer", ()); }
-            "previous-message" => { let _ = app.emit("menu://message", -1); }
-            "next-message" => { let _ = app.emit("menu://message", 1); }
             id => { plugins::on_menu(app, id); }
         })
         .invoke_handler(tauri::generate_handler![
@@ -1611,16 +1065,11 @@ pub fn run() {
             pty_signal,
             session_read,
             session_save,
-            restore_enabled,
-            hooks_state,
-            hooks_install,
-            question_answer,
-            question_drop,
+            socket_reply,
+            socket_drop,
             quit,
             launch_read,
             is_flutter_project,
-            transcript_read,
-            commands_list,
             clipboard::clipboard_paste,
             differ::open_repo,
             differ::load_diff,
@@ -1637,10 +1086,6 @@ pub fn run() {
             differ::unstage,
             differ::commit,
             differ::watch_repo,
-            differ::claude_sessions,
-            differ::ask_claude,
-            differ::cancel_ask,
-            differ::undo_ask,
             plugins::plugins_list,
             plugins::plugins_install,
             plugins::plugins_remove,
@@ -1675,49 +1120,14 @@ pub fn run() {
 
 #[cfg(test)]
 mod patch_tests {
-    use super::{files_from_patch, waiting_question};
+    use super::waiting;
 
     #[test]
-    fn only_a_waiting_question_keeps_the_connection() {
-        let wait = r#"{"panel":1,"event":{"tool_name":"AskUserQuestion"},"wait":true}"#;
-        assert!(waiting_question(&format!("{wait}\n")).is_some());
-        assert!(waiting_question(r#"{"panel":1,"event":{"tool_name":"AskUserQuestion"}}"#).is_none());
-        assert!(waiting_question("junk").is_none());
-    }
-
-    #[test]
-    fn reads_the_hook_patch() {
-        let patch = "# root /repo\n\
-diff --git a/new.txt b/new.txt\n\
-new file mode 100644\n\
---- /dev/null\n\
-+++ b/new.txt\n\
-@@ -0,0 +1 @@\n\
-+new\n\
-diff --git a/x.txt b/x.txt\n\
---- a/x.txt\n\
-+++ b/x.txt\n\
-@@ -1,3 +1,3 @@\n\
- a\n\
--b\n\
-+B\n\
-@@ -40 +40 @@\n\
---- old\n\
-+++ new\n\
-diff --git a/deleted.txt b/deleted.txt\n\
---- a/deleted.txt\n\
-+++ /dev/null\n\
-@@ -1 +0,0 @@\n\
--x\n\
-diff --git a/img.png b/img.png\n\
-Binary files a/img.png and b/img.png differ\n";
-        let a = files_from_patch(patch);
-        let paths: Vec<_> = a.iter().map(|f| f["path"].as_str().unwrap()).collect();
-        assert_eq!(paths, ["/repo/new.txt", "/repo/x.txt", "/repo/deleted.txt"]);
-        assert_eq!(a[0]["hunks"][0]["newStart"], 1);
-        // Inside a hunk, `--- old` is a removed line, not a header.
-        assert_eq!(a[1]["hunks"][1]["lines"], serde_json::json!(["--- old", "+++ new"]));
-        assert_eq!(a[1]["hunks"][0]["oldStart"], 1);
+    fn only_a_waiting_message_keeps_the_connection() {
+        let wait = r#"{"panel":1,"plugin":"p","message":{},"wait":true}"#;
+        assert!(waiting(&format!("{wait}\n")).is_some());
+        assert!(waiting(r#"{"panel":1,"plugin":"p","message":{}}"#).is_none());
+        assert!(waiting("junk").is_none());
     }
 }
 

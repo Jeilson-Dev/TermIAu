@@ -14,14 +14,17 @@ use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
 
-use super::error::{Error, Result};
-use super::git::Repo;
+use crate::git::Repo;
 use crate::language::tr;
 
-/// The pid of each question in progress, by the id the webview gave it. It is
+type Result<T> = std::result::Result<T, String>;
+
+/// The pid of each question in progress, by the id the diff tab gave it. It is
 /// what lets the cancel button kill the right process.
-#[derive(Default)]
-pub struct RunningAsks(pub Mutex<HashMap<String, u32>>);
+fn running() -> &'static Mutex<HashMap<String, u32>> {
+    static RUNNING: OnceLock<Mutex<HashMap<String, u32>>> = OnceLock::new();
+    RUNNING.get_or_init(Default::default)
+}
 
 /// How many sessions the list offers: the most recent ones are what matter.
 const MAX_SESSIONS: usize = 20;
@@ -101,7 +104,7 @@ fn claude_binary() -> Result<&'static Path> {
             .map(PathBuf::from)
     })
     .as_deref()
-    .ok_or_else(|| Error::Claude(tr("não encontrei o `claude` instalado nesta máquina.", "couldn't find `claude` installed on this machine.").into()))
+    .ok_or_else(|| tr("não encontrei o `claude` instalado nesta máquina.", "couldn't find `claude` installed on this machine.").into())
 }
 
 /// Where Claude Code keeps the sessions started in this folder: the path becomes
@@ -323,7 +326,6 @@ fn change_of(repo: &Repo, snapshot: &Snapshot, name: String) -> FileChange {
 #[allow(clippy::too_many_arguments)]
 pub fn ask(
     root: &Path,
-    pids: &RunningAsks,
     id: &str,
     question: &str,
     context: &str,
@@ -359,8 +361,8 @@ pub fn ask(
         cmd.args(["--resume", s, "--fork-session"]);
     }
 
-    let mut child = cmd.spawn().map_err(|err| Error::Claude(format!("{}: {err}", tr("não deu para rodar o `claude`", "couldn't run `claude`"))))?;
-    pids.0.lock().unwrap().insert(id.to_owned(), child.id());
+    let mut child = cmd.spawn().map_err(|err| format!("{}: {err}", tr("não deu para rodar o `claude`", "couldn't run `claude`")))?;
+    running().lock().unwrap().insert(id.to_owned(), child.id());
 
     // On a separate thread: a large context fills the pipe before claude starts
     // reading, and writing it all from here would block waiting for the output.
@@ -373,8 +375,8 @@ pub fn ask(
     });
 
     let output = child.wait_with_output();
-    let cancelled = pids.0.lock().unwrap().remove(id).is_none();
-    let output = output?;
+    let cancelled = running().lock().unwrap().remove(id).is_none();
+    let output = output.map_err(|e| e.to_string())?;
 
     let lines: Vec<serde_json::Value> = String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -404,7 +406,7 @@ pub fn ask(
             if error.is_empty() { format!("{} {}", tr("o `claude` saiu com", "`claude` exited with"), output.status) } else { error }
         };
         if changes.is_empty() {
-            return Err(Error::Claude(reason));
+            return Err(reason);
         }
         return Ok(Answer { answer: format!("⚠︎ {reason}"), changes });
     }
@@ -416,7 +418,7 @@ pub fn ask(
 /// undoing would erase that work — it stays, and comes back in the list of failures.
 pub fn undo(root: &Path, changes: &[FileChange]) -> Result<Vec<String>> {
     let repo = Repo::open(root)?;
-    let root_dir = repo.root().canonicalize()?;
+    let root_dir = repo.root().canonicalize().map_err(|e| e.to_string())?;
     let mut kept = Vec::new();
     for a in changes.iter().filter(|a| a.undoable) {
         let path = repo.root().join(&a.path);
@@ -442,8 +444,8 @@ pub fn undo(root: &Path, changes: &[FileChange]) -> Result<Vec<String>> {
 
 /// Kills the question in progress. Removing the pid from the map first is what
 /// tells `ask` that the empty output was a cancellation, not a failure.
-pub fn cancel(pids: &RunningAsks, id: &str) {
-    if let Some(pid) = pids.0.lock().unwrap().remove(id) {
+pub fn cancel(id: &str) {
+    if let Some(pid) = running().lock().unwrap().remove(id) {
         unsafe {
             libc::kill(pid as libc::pid_t, libc::SIGTERM);
         }

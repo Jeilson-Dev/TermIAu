@@ -35,7 +35,8 @@ icon="$(field icon)"
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 cp "$dir/termiau.json" "$stage/"
-cp "$dir/dist/$(field main)" "$stage/"
+# Every module the build made: `main`, and any the plugin loads elsewhere (the diff tab's).
+cp "$dir/dist/"*.js "$stage/"
 [[ -n "$style" ]] && cp "$dir/$style" "$stage/"
 if [[ -n "$icon" ]]; then
   mkdir -p "$stage/$(dirname "$icon")"

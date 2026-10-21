@@ -1,0 +1,13 @@
+/* The Claude Code plugin's styles: only the highlight of your prompts in the
+   terminal (an xterm decoration). */
+
+/* The decoration xterm puts over each line you sent to Claude. It sits
+   over the text, so it is a thin veil and a bar in the margin — enough
+   for the eye to find your lines in the scrollback without hiding what is written. The
+   click goes through: selecting the text below still works. */
+.xterm .xterm-decoration.prompt-mark {
+  box-sizing: border-box;
+  border-left: 2px solid var(--pink);
+  background: rgba(255, 121, 198, 0.13);
+  pointer-events: none;
+}

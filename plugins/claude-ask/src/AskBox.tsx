@@ -1,13 +1,13 @@
 import { structuredPatch } from "diff";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { T } from "../../i18n/differ";
-import { claudeSessions, type AskChange } from "../api";
-import * as asks from "../lib/asks";
-import type { AskState } from "../lib/asks";
-import { rangeLabel } from "../lib/bookmarks";
-import { goToPanel, useLiveSessions, type LiveSession } from "../lib/liveSessions";
-import type { ClaudeSession, FileDiff } from "../types";
-import { Icon } from "./Icons";
+import { Icon } from "../../../src/differ/components/Icons";
+import { rangeLabel } from "../../../src/differ/lib/bookmarks";
+import type { FileDiff } from "../../../src/differ/types";
+import { claudeSessions, type AskChange, type ClaudeSession } from "./api";
+import * as asks from "./asks";
+import type { AskState } from "./asks";
+import { T } from "./i18n";
+import { goToPanel, useLiveSessions, type LiveSession } from "./liveSessions";
 
 const MODELS = [
   { id: "", label: T.modelDefault },

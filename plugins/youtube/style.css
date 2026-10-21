@@ -1,0 +1,183 @@
+/* The YouTube Radio's styles, the Radio plugin's with its own prefix. The buttons are
+   the core's `.footer-btn` and the playlist is the core's dialog shell (src/style.css);
+   here only what is the plugin's. The slot is `.youtube`, with `.playing` /
+   `.loading` while it is on air. */
+
+.youtube.playing .youtube-play {
+  color: var(--purple);
+}
+
+.youtube.loading .youtube-play {
+  color: var(--purple);
+  animation: youtube-pulse 1s ease-in-out infinite;
+}
+
+@keyframes youtube-pulse {
+  50% { opacity: 0.35; }
+}
+
+.youtube-volume .ring {
+  stroke: var(--purple);
+  transition: stroke-dashoffset 140ms ease-out;
+}
+
+/* The player: YouTube's official iframe, 1px and almost transparent in the corner.
+   Not `display: none` nor zero size — a hidden player is throttled or refuses to
+   play. */
+.youtube-frame {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  border: 0;
+  opacity: 0.01;
+  pointer-events: none;
+}
+
+.youtube-spectrum {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 14px;
+  margin-left: 8px;
+  opacity: 0;
+  transition: opacity 140ms linear;
+}
+
+.youtube.playing .youtube-spectrum {
+  opacity: 1;
+}
+
+.youtube-spectrum-col {
+  position: relative;
+  width: 3px;
+  height: 100%;
+}
+
+.youtube-spectrum-level,
+.youtube-spectrum-peak {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: linear-gradient(to top, var(--purple) 0%, var(--purple) 52%, var(--pink) 100%);
+  background-size: 100% 14px;
+  background-position: bottom;
+  background-repeat: no-repeat;
+  -webkit-mask-image: repeating-linear-gradient(to top, #000 0 2px, transparent 2px 3px);
+  mask-image: repeating-linear-gradient(to top, #000 0 2px, transparent 2px 3px);
+}
+
+.youtube-spectrum-peak {
+  height: 2px;
+  background-image: none;
+  background-color: var(--fg);
+  -webkit-mask-image: none;
+  mask-image: none;
+  opacity: 0.9;
+}
+
+/* A fixed width, like the Radio's: a playlist changes the title on every video,
+   and a box that followed it would push the buttons around. */
+.youtube-title {
+  flex: none;
+  width: 100px;
+  overflow: hidden;
+}
+
+.youtube-title-text {
+  display: inline-block;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+/* The playlist. `flex-basis: auto` for the same reason as the Radio's list: with a
+   zero basis it is born with zero height and the box shows up empty. */
+.youtube-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 50vh;
+}
+
+.youtube-empty {
+  margin: 4px 8px 8px;
+  color: var(--comment);
+}
+
+.youtube-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 5px;
+}
+
+.youtube-row:hover {
+  background: var(--bg-lighter);
+}
+
+.youtube-row.current .youtube-name {
+  color: var(--purple);
+}
+
+.youtube-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.youtube-kind {
+  flex: none;
+  padding-right: 6px;
+  color: var(--comment);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* ↑ and ✕ only show on the row under the pointer: on every row at once they
+   would be a column of noise next to the names. */
+.youtube-row .youtube-row-btn {
+  opacity: 0;
+}
+
+.youtube-row:hover .youtube-row-btn:not(:disabled) {
+  opacity: 1;
+}
+
+.youtube-field {
+  margin-top: 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--selection);
+  border-radius: 5px;
+  background: var(--bg-dark);
+  color: var(--fg);
+  font: inherit;
+}
+
+.youtube-field:focus {
+  outline: none;
+  border-color: var(--purple);
+}
+
+/* Reserved height: the message comes and goes with each link pasted, and without it
+   the whole box would move along. */
+.youtube-message {
+  min-height: 16px;
+  margin-top: 6px;
+  color: var(--comment);
+  font-size: 11px;
+}

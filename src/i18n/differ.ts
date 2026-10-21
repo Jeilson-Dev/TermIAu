@@ -63,6 +63,10 @@ const pt = {
     { code: "{file}" },
     ", o caminho vai no fim. Vazio abre no VS Code.",
   ] as Snippet[],
+  attention: "Atenção",
+  blinkOnAttention: "Piscar quando um painel precisa de você",
+  blinkOnAttentionHelp:
+    "O contorno laranja do painel que espera sua resposta, e o ponto e o anel da aba dele. Desligado, eles ficam acesos, parados.",
 
   // preferences: the plugins tab
   prefsTabTermiau: "TermIAu",
@@ -112,15 +116,12 @@ const pt = {
   copyAllHint: "Copiar todos os comentários da revisão, na ordem da lista, para colar num prompt",
   copiedOnes: "Copiados",
   copyAll: (n: number) => `Copiar todos (${n})`,
-  askAboutSnippet: "Perguntar ao Claude sobre este trecho",
   editBookmark: "Editar marcador",
   removeBookmark: "Remover marcador",
   improvementInSnippet: "O que merece melhoria neste trecho?",
   improvementHere: "O que merece melhoria aqui?",
   saveCancels: "⌘↩ salva · Esc cancela",
   cancel: "Cancelar",
-  askBeforeHint: "Tirar a dúvida antes de anotar (⌘⇧↩)",
-  askToClaude: "Perguntar ao Claude",
   save: "Salvar",
   addBookmark: "Adicionar marcador",
 
@@ -171,92 +172,8 @@ const pt = {
   resolved: "resolvido",
   unreadableImage: "Não foi possível exibir esta imagem.",
 
-  // the context of the question to Claude
-  versionPreviousBefore: "versão anterior (antes da mudança)",
-  versionNew: "versão nova",
-  fileVersion: (path: string, version: string) => `Arquivo: ${path} — ${version}`,
-  snippetSelected: "Trecho selecionado:",
-  commentAlreadyDone: "Comentário de revisão já feito neste trecho:",
-  diffOfFile: "Diff do arquivo:",
-  diffTooLarge: "(O diff do arquivo é grande demais para vir junto; leia o arquivo se precisar.)",
-  question: "Pergunta:",
-  answer: "Resposta:",
-  changesUndone: (files: string) => `(Alterações em ${files} — desfeitas pelo revisor.)`,
-  changedIt: (files: string) => `(Alterou: ${files}.)`,
-  conversationSoFar: "Conversa até aqui sobre este trecho:",
-  requestOfBookmark: (decision: string) => `O revisor terminou de tirar a dúvida sobre este trecho (a conversa está no stdin) e decidiu:
-
-${decision}
-
-Escreva o comentário de revisão que vai para o agente que vai implementar a mudança. Siga exatamente o \
-que o revisor decidiu — a conversa serve só para dar precisão (o que mudar, onde e por quê). Não reabra \
-a discussão, não traga alternativas que o revisor não escolheu e não cite a conversa. Texto curto, no \
-imperativo, em português, sem título. Responda só com o comentário.`,
-  modelWithoutText: "O modelo não devolveu texto nenhum.",
-
-  // questions to Claude
-  modelDefault: "Modelo padrão",
-  haikuFast: "Haiku — rápido",
-  opusCareful: "Opus — mais cuidadoso",
-  now: "agora",
-  haMin: (n: number) => `há ${n} min`,
-  hoursAgo: (n: number) => `há ${n} h`,
-  daysAgo: (n: number) => `há ${n} d`,
-  binaryWithoutSnapshot: "binário ou sem foto — não dá para mostrar",
-  changesUndoneTitle: "Alterações desfeitas",
-  changedFiles: (n: number) => (n === 1 ? "Alterou 1 arquivo" : `Alterou ${n} arquivos`),
-  undoHint: "Volta os arquivos a como estavam antes deste pedido. Arquivo mexido de novo depois disso fica como está.",
-  undo: "Desfazer",
-  notUndone: (files: string) => `Não desfeitos, porque mudaram de novo depois deste pedido: ${files}`,
-  copyOfSessionHint: "As perguntas rodam numa cópia desta sessão, que continua intacta",
-  closeAndCancel: "Fechar e cancelar a pergunta",
-  closeQuestion: "Fechar pergunta",
-  changesAllowed: "alterações liberadas",
-  changing: "Alterando…",
-  askingWithSession: "Perguntando, com a sessão como contexto…",
-  asking: "Perguntando…",
-  bookmarkForAgent: "Marcador que vai para o agente — revise antes de salvar",
-  saveBackDecision: "⌘↩ salva · Esc volta à decisão",
-  redo: "Refazer",
-  rewriteBookmark: "Reescrever marcador",
-  createBookmark: "Criar marcador",
-  whatWasDecided: "O que você decidiu? O modelo escreve o marcador a partir da conversa.",
-  exampleDecision: "Ex.: vamos pela segunda opção, mas sem mexer na API pública",
-  writingBookmark: "Escrevendo o marcador…",
-  elaborateBack: "⌘↩ elabora · Esc volta",
-  goBack: "Voltar",
-  elaborateBookmark: "Elaborar marcador",
-  whatToChange: "O que o Claude deve alterar? Dá para ver e desfazer depois.",
-  continueConversation: "Continuar a conversa… (ou ajustar o que ele alterou)",
-  whatToKnow: "O que você quer saber sobre este trecho?",
-  answeringModel: "Modelo que responde",
-  mentionSessionHint:
-    "Mencionar uma sessão: a resposta sabe do que foi conversado nela. Mais lento e mais caro — carrega a conversa inteira.",
-  noSession: "Sem sessão — rápido",
-  loadingSessions: "Carregando sessões…",
-  allowChangesHint:
-    "Desligado, o Claude só conversa: não tem nem as ferramentas de edição. Ligado, pode editar os arquivos do repositório — e o que ele mudar aparece aqui para ver e desfazer.",
-  allowChanges: "Permitir alterações",
-  sendsShortcut: "⌘↩ envia",
-  questionShortcut: "⌘↩ pergunta",
-  recordDecision: "Registrar decisão",
-  askChange: "Pedir alteração",
-  ask: "Perguntar",
-  askInSession: "Pedir alterações a uma sessão",
-  askInSessionHint:
-    "Envia o pedido direto para uma sessão do Claude aberta num painel, como se você digitasse lá. Ela altera os arquivos com as permissões que já tem, e o diff acompanha conforme o disco muda.",
-  editingSession: "Sessão que recebe o pedido",
-  noSessionOpen: "Nenhuma sessão do Claude aberta neste repositório",
-  working: "trabalhando",
-  waitingForYou: "esperando você",
-  whatToChangeInSession: "O que a sessão deve alterar? Vai junto o arquivo e as linhas deste trecho.",
-  sendForSession: "Enviar à sessão",
-  sentForSession: (name: string) => `Enviado à sessão em ${name} — a resposta e as alterações acontecem lá.`,
-  goToPanel: "Ir ao painel",
+  // the plugins
   onlyInsideTermiau: "Só dá para enviar a uma sessão de dentro do TermIAu.",
-  reviewingIn: (file: string, lines: string, version: string) =>
-    `[Revisão no diff do TermIAu] ${file}, ${lines} (${version}):`,
-  reviewerRequest: (request: string) => `Pedido do revisor — pode alterar os arquivos para atender:\n${request}`,
 
   // sidebar
   tabFiles: "Arquivos",
@@ -301,7 +218,6 @@ imperativo, em português, sem título. Responda só com o comentário.`,
   markReviewed: "Marcar como revisado",
   reviewed: "Revisado",
   commentSelection: (snippet: string) => `Comentar o trecho selecionado (${snippet})`,
-  askSelection: "Perguntar ao Claude sobre o trecho selecionado",
 
   // the whole diff
   bookmarksResolved: (done: number, total: number) =>
@@ -357,7 +273,6 @@ imperativo, em português, sem título. Responda só com o comentário.`,
     ".",
   ],
   loadingDiff: "Carregando diff…",
-  moreLines: (n: number) => `… mais ${n} linhas — veja o arquivo na aba pendente`,
 };
 
 const en: typeof pt = {
@@ -417,6 +332,10 @@ const en: typeof pt = {
     { code: "{file}" },
     ", the path goes at the end. Empty opens VS Code.",
   ],
+  attention: "Attention",
+  blinkOnAttention: "Blink when a panel needs you",
+  blinkOnAttentionHelp:
+    "The orange outline of the panel waiting for your answer, and its tab's dot and ring. Off, they stay lit, still.",
 
   // preferences: the plugins tab
   prefsTabTermiau: "TermIAu",
@@ -466,15 +385,12 @@ const en: typeof pt = {
   copyAllHint: "Copy every review comment, in list order, to paste into a prompt",
   copiedOnes: "Copied",
   copyAll: (n) => `Copy all (${n})`,
-  askAboutSnippet: "Ask Claude about these lines",
   editBookmark: "Edit bookmark",
   removeBookmark: "Remove bookmark",
   improvementInSnippet: "What could be improved in these lines?",
   improvementHere: "What could be improved here?",
   saveCancels: "⌘↩ saves · Esc cancels",
   cancel: "Cancel",
-  askBeforeHint: "Ask before writing the note (⌘⇧↩)",
-  askToClaude: "Ask Claude",
   save: "Save",
   addBookmark: "Add bookmark",
 
@@ -525,91 +441,8 @@ const en: typeof pt = {
   resolved: "resolved",
   unreadableImage: "This image could not be displayed.",
 
-  // the context of the question to Claude
-  versionPreviousBefore: "previous version (before the change)",
-  versionNew: "new version",
-  fileVersion: (path, version) => `File: ${path} — ${version}`,
-  snippetSelected: "Selected passage:",
-  commentAlreadyDone: "Review comment already written on these lines:",
-  diffOfFile: "File diff:",
-  diffTooLarge: "(The file diff is too large to include; read the file if you need it.)",
-  question: "Question:",
-  answer: "Answer:",
-  changesUndone: (files) => `(Changes to ${files} — undone by the reviewer.)`,
-  changedIt: (files) => `(Changed: ${files}.)`,
-  conversationSoFar: "Conversation so far about these lines:",
-  requestOfBookmark: (decision) => `The reviewer has finished clearing up their question about these lines (the conversation is on stdin) and decided:
-
-${decision}
-
-Write the review comment that goes to the agent who will implement the change. Follow exactly what the \
-reviewer decided — the conversation is only there for precision (what to change, where and why). Do not \
-reopen the discussion, do not bring up alternatives the reviewer did not choose and do not quote the \
-conversation. Short text, in the imperative, in English, no title. Reply with the comment only.`,
-  modelWithoutText: "The model returned no text.",
-
-  // questions to Claude
-  modelDefault: "Default model",
-  haikuFast: "Haiku — fast",
-  opusCareful: "Opus — most careful",
-  now: "now",
-  haMin: (n) => `${n} min ago`,
-  hoursAgo: (n) => `${n} h ago`,
-  daysAgo: (n) => `${n} d ago`,
-  binaryWithoutSnapshot: "binary or no snapshot — can't show it",
-  changesUndoneTitle: "Changes undone",
-  changedFiles: (n) => (n === 1 ? "Changed 1 file" : `Changed ${n} files`),
-  undoHint: "Restores the files to how they were before this request. A file changed again after that is left as is.",
-  undo: "Undo",
-  notUndone: (files) => `Not undone, because they changed again after this request: ${files}`,
-  copyOfSessionHint: "Questions run on a copy of this session, which stays untouched",
-  closeAndCancel: "Close and cancel the question",
-  closeQuestion: "Close question",
-  changesAllowed: "edits allowed",
-  changing: "Editing…",
-  askingWithSession: "Asking, with the session as context…",
-  asking: "Asking…",
-  bookmarkForAgent: "Bookmark for the agent — review it before saving",
-  saveBackDecision: "⌘↩ saves · Esc goes back to the decision",
-  redo: "Redo",
-  rewriteBookmark: "Rewrite bookmark",
-  createBookmark: "Create bookmark",
-  whatWasDecided: "What did you decide? The model writes the bookmark from the conversation.",
-  exampleDecision: "E.g.: let's go with the second option, but without touching the public API",
-  writingBookmark: "Writing the bookmark…",
-  elaborateBack: "⌘↩ writes · Esc goes back",
-  goBack: "Back",
-  elaborateBookmark: "Write bookmark",
-  whatToChange: "What should Claude change? You can review and undo it afterwards.",
-  continueConversation: "Continue the conversation… (or adjust what it changed)",
-  whatToKnow: "What do you want to know about these lines?",
-  answeringModel: "Model that answers",
-  mentionSessionHint:
-    "Mention a session: the answer knows what was discussed in it. Slower and more expensive — it loads the whole conversation.",
-  noSession: "No session — fast",
-  loadingSessions: "Loading sessions…",
-  allowChangesHint:
-    "Off, Claude only talks: it doesn't even get the editing tools. On, it can edit the repository's files — and what it changes shows up here to review and undo.",
-  allowChanges: "Allow edits",
-  sendsShortcut: "⌘↩ sends",
-  questionShortcut: "⌘↩ asks",
-  recordDecision: "Record decision",
-  askChange: "Request change",
-  ask: "Ask",
-  askInSession: "Ask changes to a session",
-  askInSessionHint:
-    "Sends the request straight to a Claude session open in a panel, as if you typed it there. It edits the files with the permissions it already has, and the diff follows as the disk changes.",
-  editingSession: "Session that gets the request",
-  noSessionOpen: "No Claude session open in this repository",
-  working: "working",
-  waitingForYou: "waiting for you",
-  whatToChangeInSession: "What should the session change? The file and lines of this passage go along.",
-  sendForSession: "Send to session",
-  sentForSession: (name) => `Sent to the session in ${name} — the answer and the edits happen there.`,
-  goToPanel: "Go to panel",
+  // the plugins
   onlyInsideTermiau: "Sending to a session only works inside TermIAu.",
-  reviewingIn: (file, lines, version) => `[Review in TermIAu's diff] ${file}, ${lines} (${version}):`,
-  reviewerRequest: (request) => `Reviewer's request — you may edit the files to address it:\n${request}`,
 
   // sidebar
   tabFiles: "Files",
@@ -654,7 +487,6 @@ conversation. Short text, in the imperative, in English, no title. Reply with th
   markReviewed: "Mark as reviewed",
   reviewed: "Reviewed",
   commentSelection: (snippet) => `Comment on the selection (${snippet})`,
-  askSelection: "Ask Claude about the selection",
 
   // the whole diff
   bookmarksResolved: (done, total) => `${done} of ${total} ${total === 1 ? "bookmark resolved" : "bookmarks resolved"}`,
@@ -709,7 +541,6 @@ conversation. Short text, in the imperative, in English, no title. Reply with th
     ".",
   ],
   loadingDiff: "Loading diff…",
-  moreLines: (n) => `… ${n} more lines — see the file in the pending tab`,
 };
 
 export const T = translations({ pt, en });

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- The YouTube Radio plugin's icon: a screen with a play triangle, over the
+       footer's spectrum analyzer, in the Radio's purple-to-pink. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#343746"/>
+      <stop offset="1" stop-color="#21222c"/>
+    </linearGradient>
+    <linearGradient id="bar" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#bd93f9"/>
+      <stop offset=".55" stop-color="#bd93f9"/>
+      <stop offset="1" stop-color="#ff79c6"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <rect x="18" y="24" width="92" height="58" rx="14" fill="#bd93f9"/>
+  <path d="M56 40.5v25a2 2 0 0 0 3 1.7l21-12.5a2 2 0 0 0 0-3.4l-21-12.5a2 2 0 0 0-3 1.7Z" fill="#191a21"/>
+  <g fill="url(#bar)">
+    <rect x="30" y="98" width="8" height="10" rx="2"/>
+    <rect x="42" y="92" width="8" height="16" rx="2"/>
+    <rect x="54" y="95" width="8" height="13" rx="2"/>
+    <rect x="66" y="89" width="8" height="19" rx="2"/>
+    <rect x="78" y="94" width="8" height="14" rx="2"/>
+    <rect x="90" y="99" width="8" height="9" rx="2"/>
+  </g>
+</svg>

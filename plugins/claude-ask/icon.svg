@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- Claude in the diff: a removed and an added line, and Claude's orange spark
+       over them, on the same dark tile as the other TermIAu plugins. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#343746"/>
+      <stop offset="1" stop-color="#21222c"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <path d="M24 78 H70" stroke="#ff5555" stroke-width="9" stroke-linecap="round"/>
+  <path d="M24 100 H86" stroke="#50fa7b" stroke-width="9" stroke-linecap="round"/>
+  <g transform="translate(84 42)" stroke="#d97757" stroke-width="8" stroke-linecap="round">
+    <path d="M0 -22 V22 M-22 0 H22 M-15 -15 L15 15 M-15 15 L15 -15"/>
+  </g>
+</svg>

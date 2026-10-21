@@ -72,11 +72,11 @@ you —, and the Claude plugins (below) show the session's context, model and
 effort on the panel bar and the usage of the 5h and 7-day limits in the footer.
 All of this only arrives through the app's socket, and what writes there is a
 hook, which has to be registered in Claude Code's `settings.json`. From the app,
-it's **Claude Code ▸ Connect to Claude Code…** (the Claude Code plugin's menu), or
-turning on **TermIAu ▸ Restore Tabs on Launch**; from the repo:
+it's **Claude Code ▸ Connect to Claude Code…** (the Claude Code plugin's menu); from
+the repo:
 
 ```bash
-./hooks/install.sh
+./plugins/claude/hook/install.sh
 ```
 
 The script copies `termiau-event.sh` to `~/.claude/hooks/` (rather than pointing
@@ -118,8 +118,8 @@ marketplace, which depend on one core:
 
 - **Claude Code** (`termiau.claude`) — the link: installs and updates the hook,
   follows each panel's session from the hook's events and status lines, and gives
-  that to the others through its API. It draws nothing; the app lends Claude's raw
-  events only to it, signed by TermIAu.
+  that to the others through its API. It draws nothing; its hook talks to it
+  through the app's socket, which carries each message to the plugin it names.
 - **Claude Context** (`termiau.claude-context`) — the pill with the session's
   context on each panel's bar: yellow, then red with the panel's border pulsing;
   click or `⌘⇧K` compacts, and auto-compact can do it on its own. The limits are its
@@ -128,8 +128,11 @@ marketplace, which depend on one core:
   the footer's left corner, with the time left and the pace.
 - **Claude Model** (`termiau.claude-model`) — the session's model and effort on
   each panel's bar, one click from `/model` and `/effort`.
+- **Claude Chat** (`termiau.claude-chat`) — chat mode, over the terminal.
+- **Claude in the Diff** (`termiau.claude-ask`) — asking Claude about a passage of
+  the diff tab, loaded into that page (`ctx.differ.extend`).
 
-Installing any of the three brings Claude Code along.
+Installing any of them brings Claude Code along.
 
 ## Plugins
 
@@ -283,16 +286,18 @@ src/
   plugins/            the plugin host, its API (api.ts) and manifest rules
 plugins/
   radio/              the Radio plugin (npm run plugin:radio)
+  claude/             the Claude Code plugin: the hook (hook/), its engine (engine/) and the sessions
+  claude-chat/        chat mode, over the terminal
+  claude-ask/         asking Claude about a passage of the diff tab
 hooks/
-  termiau-event.sh    the hook: sends Claude's event to the app's socket
-  install.sh          registers the hook in Claude Code's settings.json
+  termiau             the `termiau` CLI (view, progress), installed in ~/.termiau/bin
 scripts/
   install.sh          bundles the app and puts it in /Applications (dev or prod channel)
   package-plugin.sh   builds a plugin from plugins/<name> into a .termiau package
   plugin-icon.sh      rebuilds icons/plugin.icns (the .termiau Finder icon) from plugin.svg
   build-marketplace.mjs  packages every plugin into dist-marketplace/, the local catalog
 src-tauri/
-  src/lib.rs          PTY, commands, menu and the hooks socket
+  src/lib.rs          PTY, commands, menu and the socket
   src/plugins.rs      installed plugins: list, install, menu, termiau-plugin://
   src/marketplace.rs  the catalog: read it, check a package's sha256, install
   src/main.rs         entrypoint
@@ -333,12 +338,13 @@ Events in the other direction: `pty://data` (output in base64) and `pty://exit`.
 
 **Claude Code** (through the hook)
 - Each tab shows its Claude session's state — working, waiting for you —, the Dock
-  badge counts the ones waiting, and `⌘⇧A` jumps to the panel that's waiting
+  badge counts the ones waiting, and `⌘⇧A` jumps to the panel that's waiting. The
+  waiting signals blink unless **Preferences ▸ Attention** turns blinking off
 - With the Claude plugins: the session's context, model and effort on the panel bar —
   click to compact (`⌘⇧K`), switch model or switch effort —, the context turning
   yellow, then red with a pulsing border, auto-compact, and the usage of the 5-hour
   and 7-day limits in the footer
-- Chat mode (`⌘⇧C`): the conversation read from the transcript, with Claude's
+- Chat mode (`⌘⇧C`, the Claude Chat plugin): the conversation read from the transcript, with Claude's
   questions and permission requests answered by click, `/` commands, pasted images,
   resuming earlier sessions and each edit's diff
 - Jump to your previous / next message in the terminal (`⌘⇧↑` / `⌘⇧↓`)
@@ -369,9 +375,9 @@ Events in the other direction: `pty://data` (output in base64) and `pty://exit`.
   everything, and commit from the sidebar
 - Bookmarks (review comments) on lines or selections, which know whether the code
   changed since; copy one or all as a reference to paste into a prompt
-- Ask Claude about a snippet — default model, Haiku or Opus, optionally with a
-  session as context —, let it edit the files and undo what it changed, and turn the
-  conversation into a bookmark
+- Ask Claude about a snippet (the Claude in the Diff plugin) — default model, Haiku
+  or Opus, optionally with a session as context —, let it edit the files and undo what
+  it changed, and turn the conversation into a bookmark
 - Warns when the repository gets new commits
 
 **Play button**
@@ -460,11 +466,10 @@ esperando você —, e os plugins do Claude (abaixo) mostram o contexto, o model
 esforço da sessão na barra do painel e o uso dos limites de 5h e de 7 dias no
 rodapé. Tudo isso só chega pelo socket do app, e quem escreve ali é um hook, que
 precisa estar registrado no `settings.json` do Claude Code. Pelo app, é
-**Claude Code ▸ Ligar ao Claude Code…** (o menu do plugin Claude Code), ou ligar
-**TermIAu ▸ Restaurar Abas ao Abrir**; pelo repo:
+**Claude Code ▸ Ligar ao Claude Code…** (o menu do plugin Claude Code); pelo repo:
 
 ```bash
-./hooks/install.sh
+./plugins/claude/hook/install.sh
 ```
 
 O script copia o `termiau-event.sh` para `~/.claude/hooks/` (e não aponta para
@@ -506,8 +511,8 @@ marketplace, que dependem de um núcleo:
 
 - **Claude Code** (`termiau.claude`) — a ligação: instala e atualiza o hook,
   acompanha a sessão de cada painel pelos eventos e pela status line, e passa isso
-  aos outros pela API dele. Não desenha nada; o app só empresta os eventos crus do
-  Claude a ele, assinado pelo TermIAu.
+  aos outros pela API dele. Não desenha nada; o hook dele fala com ele pelo socket
+  do app, que entrega cada mensagem ao plugin que ela nomeia.
 - **Claude Context** (`termiau.claude-context`) — a pílula com o contexto da sessão
   na barra de cada painel: amarela, depois vermelha com a borda do painel pulsando;
   clicar ou `⌘⇧K` compacta, e o auto-compact pode ir sozinho. Os limites são as
@@ -516,8 +521,11 @@ marketplace, que dependem de um núcleo:
   esquerdo do rodapé, com o tempo restante e o ritmo.
 - **Claude Model** (`termiau.claude-model`) — o modelo e o esforço da sessão na barra
   de cada painel, a um clique do `/model` e do `/effort`.
+- **Claude Chat** (`termiau.claude-chat`) — o modo chat, por cima do terminal.
+- **Claude in the Diff** (`termiau.claude-ask`) — perguntar ao Claude sobre um trecho
+  da aba de diff, carregado dentro daquela página (`ctx.differ.extend`).
 
-Instalar qualquer um dos três traz o Claude Code junto.
+Instalar qualquer um deles traz o Claude Code junto.
 
 ## Plugins
 
@@ -659,16 +667,18 @@ src/
   plugins/            o host de plugins, a API (api.ts) e as regras do manifesto
 plugins/
   radio/              o plugin Rádio (npm run plugin:radio)
+  claude/             o plugin Claude Code: o hook (hook/), o engine (engine/) e as sessões
+  claude-chat/        o modo chat, por cima do terminal
+  claude-ask/         perguntar ao Claude sobre um trecho da aba de diff
 hooks/
-  termiau-event.sh    o hook: manda o evento do Claude pro socket do app
-  install.sh          registra o hook no settings.json do Claude Code
+  termiau             o CLI `termiau` (view, progress), instalado em ~/.termiau/bin
 scripts/
   install.sh          empacota e põe em /Applications (canal dev ou prod)
   package-plugin.sh   constrói um plugin de plugins/<nome> num pacote .termiau
   plugin-icon.sh      refaz icons/plugin.icns (o ícone do .termiau no Finder) do plugin.svg
   build-marketplace.mjs  empacota cada plugin em dist-marketplace/, o catálogo local
 src-tauri/
-  src/lib.rs          PTY, comandos, menu e o socket dos hooks
+  src/lib.rs          PTY, comandos, menu e o socket
   src/plugins.rs      plugins instalados: listar, instalar, menu, termiau-plugin://
   src/marketplace.rs  o catálogo: ler, conferir o sha256 do pacote, instalar
   src/main.rs         entrypoint
@@ -700,8 +710,8 @@ Eventos na direção contrária: `pty://data` (saída em base64) e `pty://exit`.
 - Abas e painéis divididos (ao lado / abaixo), foco movido com `⌘⌥` + setas, painel
   maximizado e recolhido com `⌘⇧↩`, e um ✕ na barra para fechá-lo quando dividido
 - Preferências (`⌘,`) flutuam por cima de qualquer aba
-- Reabrir a aba fechada (`⌘⇧T`) e, se quiser, restaurar as abas ao abrir, nas mesmas
-  pastas, retomando as sessões do Claude
+- Reabrir a aba fechada (`⌘⇧T`); ao abrir, as abas voltam nas mesmas pastas,
+  retomando as sessões do Claude
 - Arquivos soltos do Finder viram caminhos escapados na linha; `⌘⇧V` cola o caminho
   do arquivo copiado
 - Referências de arquivo na saída (`src/main.ts:848`) abrem no visor embutido
@@ -710,12 +720,13 @@ Eventos na direção contrária: `pty://data` (saída em base64) e `pty://exit`.
 
 **Claude Code** (pelo hook)
 - Cada aba mostra o estado da sessão do Claude — trabalhando, esperando você —, o
-  badge do Dock conta as que esperam e `⌘⇧A` leva ao painel que espera
+  badge do Dock conta as que esperam e `⌘⇧A` leva ao painel que espera. Os sinais de
+  espera piscam, a menos que **Preferências ▸ Atenção** desligue o piscar
 - Com os plugins do Claude: o contexto, o modelo e o esforço da sessão na barra do
   painel — clique para compactar (`⌘⇧K`), trocar o modelo ou trocar o esforço —, o
   contexto ficando amarelo, depois vermelho com a borda pulsando, o auto-compact, e o
   uso dos limites de 5 horas e de 7 dias no rodapé
-- Modo chat (`⌘⇧C`): a conversa lida do transcript, com as perguntas e os pedidos de
+- Modo chat (`⌘⇧C`, plugin Claude Chat): a conversa lida do transcript, com as perguntas e os pedidos de
   permissão do Claude respondidos num clique, comandos `/`, imagens coladas, retomada
   de sessões anteriores e o diff de cada edição
 - Ir para a sua mensagem anterior / seguinte no terminal (`⌘⇧↑` / `⌘⇧↓`)
@@ -747,9 +758,9 @@ Eventos na direção contrária: `pty://data` (saída em base64) e `pty://exit`.
   arquivos, pastas ou tudo, e commitar pela barra lateral
 - Marcadores (comentários de revisão) em linhas ou seleções, que sabem se o código
   mudou depois; copiar um ou todos como referência para colar num prompt
-- Perguntar ao Claude sobre um trecho — modelo padrão, Haiku ou Opus, com uma sessão
-  como contexto se quiser —, deixar que ele edite os arquivos e desfazer o que mudou,
-  e transformar a conversa num marcador
+- Perguntar ao Claude sobre um trecho (plugin Claude in the Diff) — modelo padrão,
+  Haiku ou Opus, com uma sessão como contexto se quiser —, deixar que ele edite os
+  arquivos e desfazer o que mudou, e transformar a conversa num marcador
 - Avisa quando o repositório recebe commits novos
 
 **Botão de play**

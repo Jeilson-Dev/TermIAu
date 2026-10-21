@@ -1,0 +1,37 @@
+{
+  "id": "termiau.youtube",
+  "name": "YouTube Radio",
+  "version": "1.0.0",
+  "author": "TermIAu",
+  "description": "YouTube lives, videos and playlists from your own list, in the footer.",
+  "engines": { "termiau": ">=0.1.0" },
+  "main": "main.js",
+  "style": "style.css",
+  "icon": "icon.svg",
+  "activationEvents": ["onStartupFinished"],
+  "binaries": {
+    "engine": "bin/termiau-youtube"
+  },
+  "platforms": ["darwin-arm64"],
+  "contributes": {
+    "regions": [{ "region": "statusBar", "id": "youtube", "alignment": "right", "priority": 90 }],
+    "commands": [
+      {
+        "id": "toggle",
+        "title": { "en": "Play / Pause", "pt": "Tocar / Pausar" },
+        "keybinding": "CmdOrCtrl+Shift+Y",
+        "menu": { "en": "YouTube", "pt": "YouTube" }
+      },
+      {
+        "id": "next",
+        "title": { "en": "Next", "pt": "Próximo" },
+        "menu": { "en": "YouTube", "pt": "YouTube" }
+      },
+      {
+        "id": "playlist",
+        "title": { "en": "My Playlist…", "pt": "Minha Playlist…" },
+        "menu": { "en": "YouTube", "pt": "YouTube" }
+      }
+    ]
+  }
+}

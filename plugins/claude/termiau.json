@@ -1,18 +1,35 @@
 {
   "id": "termiau.claude",
   "name": "Claude Code",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "TermIAu",
-  "description": "Connects TermIAu to Claude Code: installs the hook and follows each panel's session, for the Claude plugins that show it.",
+  "description": "Connects TermIAu to Claude Code: installs the hook, follows each panel's session (its signals, its resume when the tabs come back, your prompts highlighted) and asks Claude from the diff tab.",
   "engines": { "termiau": ">=0.1.0" },
   "main": "main.js",
+  "style": "style.css",
   "icon": "icon.svg",
   "activationEvents": ["onStartupFinished"],
+  "binaries": {
+    "engine": "bin/termiau-claude"
+  },
+  "platforms": ["darwin-arm64"],
   "contributes": {
     "commands": [
       {
         "id": "connect",
         "title": { "en": "Connect to Claude Code…", "pt": "Ligar ao Claude Code…" },
+        "menu": { "en": "Claude Code", "pt": "Claude Code" }
+      },
+      {
+        "id": "previousMessage",
+        "title": { "en": "Your Previous Message", "pt": "Sua Mensagem Anterior" },
+        "keybinding": "CmdOrCtrl+Shift+Up",
+        "menu": { "en": "Claude Code", "pt": "Claude Code" }
+      },
+      {
+        "id": "nextMessage",
+        "title": { "en": "Your Next Message", "pt": "Sua Próxima Mensagem" },
+        "keybinding": "CmdOrCtrl+Shift+Down",
         "menu": { "en": "Claude Code", "pt": "Claude Code" }
       }
     ]

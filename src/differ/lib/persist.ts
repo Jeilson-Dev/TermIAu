@@ -14,6 +14,8 @@ export interface Settings {
    * your shell. Empty means VS Code, through `vscode://`, which doesn't depend on `code` being on PATH.
    */
   editor: string;
+  /** The waiting panel's orange outline and its tab's dot and ring blink. Off, they stay lit, still. */
+  blinkOnAttention: boolean;
 }
 
 export interface RepoConfig {
@@ -42,6 +44,7 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultTarget: "",
   scope: "branch",
   editor: "",
+  blinkOnAttention: true,
 };
 
 let store: Promise<Store> | null = null;
