@@ -132,7 +132,7 @@ function createUsage(ctx: PluginContext): () => void {
 
   function paintBar(b: UsageBar, remains: number | null, text: string, level: Level) {
     b.full.style.width = `${remains ?? 0}%`;
-    b.num.textContent = remains === null ? "—" : text;
+    b.num.textContent = remains === null ? "-" : text;
     b.line.dataset.level = level;
   }
 
@@ -217,7 +217,7 @@ function createUsage(ctx: PluginContext): () => void {
     paintColumn(session, s, SESSION_MIN, sessionLevel);
     paintColumn(week, u.week, WEEK_MIN, u.week ? usageLevel(u.week.usage) : "");
     root.dataset.level = sessionLevel;
-    pct.textContent = s ? `${clamp(100 - s.usage)}%` : "—";
+    pct.textContent = s ? `${clamp(100 - s.usage)}%` : "-";
     mini.full.style.height = `${s ? clamp(100 - s.usage) : 0}%`;
     circle.style.strokeDashoffset = String(USAGE_CIRCLE * (1 - remaining));
     hour.style.transform = `rotate(${remaining * 360}deg)`;

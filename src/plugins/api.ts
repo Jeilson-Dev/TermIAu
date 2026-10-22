@@ -136,12 +136,19 @@ export interface PluginStorage {
 /// unless the user turned blinking off.
 export type PanelStatus = "working" | "waiting";
 
+/// Where a panel's shell is (`Panel.where`).
+export type PanelPlace = { folder: string | null; repo: string | null; branch: string | null };
+
 /// A terminal panel, as a plugin sees it.
 export interface Panel {
   /// The panel's number: stable while it is open, and the one the hook's events carry.
   readonly id: number;
   /// The terminal's title (the shell or the program in front of it sets it).
   readonly title: string;
+  /// This plugin's title for the panel — the session running in it, say. It shows on
+  /// the panel's bar and in its tab in place of the terminal's; `undefined` gives the
+  /// terminal's back.
+  setTitle(title: string | undefined): void;
   /// The panel's xterm.js terminal, to read its buffer and decorate lines.
   readonly xterm: Terminal;
   /// Writes into the panel's shell as if typed (no Enter unless `text` has `\r`).
@@ -153,6 +160,10 @@ export interface Panel {
   isAlive(): boolean;
   /// The folder of the process in front of the shell.
   cwd(): Promise<string | null>;
+  /// Where the panel's shell is, as its bars show it: the folder, the git repository's
+  /// root and the branch (`null` outside a repository, or with a detached HEAD).
+  /// Known shortly after the panel opens and after each `cd`; `onMoved` says when.
+  where(): PanelPlace;
   /// Whether a program other than the shell is in front.
   isBusy(): Promise<boolean>;
   /// Gives the panel the keyboard (and brings its tab to the front).
@@ -168,6 +179,11 @@ export interface Panel {
   /// This plugin's layer over the panel's terminal, created on the first call. It
   /// starts hidden; the plugin shows it (`hidden = false`) and draws in it.
   layer(): HTMLElement;
+  /// This plugin's pane beside the panel's terminal, created on the first call. It
+  /// starts hidden; shown (`hidden = false`), it takes a share of the panel and the
+  /// terminal shrinks to make room. The border between them drags the share, which is
+  /// the same for every panel.
+  side(): HTMLElement;
   /// Who gets the panel's keyboard while this plugin's layer is on screen: an element
   /// of the layer, or `undefined` to give it back to the terminal. A text field set
   /// here also gets the paths dropped on the panel.
@@ -252,6 +268,8 @@ export interface PluginContext {
     onUserInput(handler: (panel: Panel, data: string) => void): Disposable;
     /// A panel got the keyboard.
     onFocus(handler: (panel: Panel) => void): Disposable;
+    /// A panel's folder, repository or branch changed (`Panel.where`): a `cd`, a checkout.
+    onMoved(handler: (panel: Panel) => void): Disposable;
     /// A panel was opened; the ones already open are reported at once.
     onOpened(handler: (panel: Panel) => void): Disposable;
     onClosed(handler: (id: number) => void): Disposable;
@@ -284,6 +302,10 @@ export interface PluginContext {
     restoreFocus(): void;
     /// The app's dropdown, beside `anchor`. Clicking the same anchor again closes it.
     menu(anchor: HTMLElement, items: MenuItem[]): void;
+    /// Draws the ```mermaid blocks of Markdown rendered inside `root` (the
+    /// `pre.mermaid` that `markdown` leaves), with the file viewer's zoom. A diagram
+    /// that doesn't parse stays as code.
+    mermaid(root: HTMLElement): Promise<void>;
     /// The app's question box. True for the confirm button; without `cancel` it is a notice.
     ask(question: { title: string; text: string; confirm: string; cancel?: string }): Promise<boolean>;
     /// ⌘- or ⌃-click on a link: opens it in the browser. A plain click does nothing.

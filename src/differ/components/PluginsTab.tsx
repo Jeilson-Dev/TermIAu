@@ -4,14 +4,13 @@ import { T } from "../../i18n/differ";
 import type { Manifest } from "../../plugins/api";
 import { ACTIVATION_ERRORS_KEY, pluginFileUrl, type InstalledPlugin } from "../../plugins/manifest";
 import { Icon } from "./Icons";
-import { Marketplace } from "./Marketplace";
 import { PluginIcon, VerifiedBadge } from "./PluginIcon";
 import { PluginSettings } from "./PluginSettings";
 
 /// How long "Really remove?" waits for the second click.
 const CONFIRM_MS = 3000;
 
-/// The Preferences' Plugins tab: what is installed, turning each one on and off,
+/// The Preferences' Installed plugins section: what is installed, turning each one on and off,
 /// removing, and installing a `.termiau` package from a file.
 ///
 /// Rust does the work (src-tauri/src/plugins.rs) and tells the main window, which
@@ -24,7 +23,6 @@ export function PluginsTab() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
-  const [marketOpen, setMarketOpen] = useState(false);
   const file = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -84,9 +82,6 @@ export function PluginsTab() {
       <p className="prefs-help plugins-trust">{T.pluginsTrust}</p>
 
       <div className="plugins-actions">
-        <button className="btn primary" onClick={() => setMarketOpen(true)}>
-          {T.marketplaceOpen}
-        </button>
         <button className="btn" disabled={busy} onClick={() => file.current?.click()}>
           {busy ? T.pluginsInstalling : T.pluginsInstall}
         </button>
@@ -112,10 +107,6 @@ export function PluginsTab() {
         </p>
       )}
       {plugins?.length === 0 && <p className="prefs-help">{T.pluginsEmpty}</p>}
-
-      {marketOpen && (
-        <Marketplace installed={plugins ?? []} onChanged={refresh} onClose={() => setMarketOpen(false)} />
-      )}
 
       <ul className="plugins-list">
         {plugins?.map((p) => {

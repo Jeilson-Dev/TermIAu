@@ -42,3 +42,6 @@ export const readBlobBytes = (path: string, oid: string) =>
 
 export const readWorktreeBytes = (path: string, file: string) =>
   invoke<ArrayBuffer>("read_worktree_bytes", { path, file });
+
+/** Writes an exported review in Downloads and shows it in Finder; returns where it went. */
+export const exportReview = (name: string, text: string) => invoke<string>("review_export", { name, text });

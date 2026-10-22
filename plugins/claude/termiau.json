@@ -1,7 +1,7 @@
 {
   "id": "termiau.claude",
   "name": "Claude Code",
-  "version": "1.1.0",
+  "version": "1.3.0",
   "author": "TermIAu",
   "description": "Connects TermIAu to Claude Code: installs the hook, follows each panel's session (its signals, its resume when the tabs come back, your prompts highlighted) and asks Claude from the diff tab.",
   "engines": { "termiau": ">=0.1.0" },

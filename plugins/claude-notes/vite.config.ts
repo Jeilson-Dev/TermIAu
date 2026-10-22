@@ -1,9 +1,9 @@
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
 
-/// The dictation plugin builds to a single ES module: the host imports `main.js` from
+/// The notebook plugin builds to a single ES module: the host imports `main.js` from
 /// `termiau-plugin://`, and one file means no relative imports to resolve there.
-/// `scripts/package-plugin.sh dictation` zips it with the manifest and the stylesheet.
+/// `scripts/package-plugin.sh claude-notes` zips it with the manifest and the stylesheet.
 export default defineConfig({
   root: __dirname,
   logLevel: "warn",

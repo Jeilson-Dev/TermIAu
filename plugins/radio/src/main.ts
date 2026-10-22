@@ -58,7 +58,7 @@ const toStep = (v: number): number =>
 const SPEC_BANDS = 10;
 /// Five 2px segments with a 1px gap give exactly the strip's 14px.
 const SPEC_SEGMENTS = 5;
-/// The same beat as the dictation wave: ~20 frames per second.
+/// ~20 frames per second.
 const SPEC_MS = 50;
 /// How much the level and the peak fall per frame. The peak comes down much more slowly — that is
 /// what it is for, leaving in the air for an instant what has already passed. The

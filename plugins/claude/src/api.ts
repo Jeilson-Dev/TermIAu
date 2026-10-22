@@ -23,6 +23,9 @@ export type ClaudePanel = {
   state: ClaudeState;
   /// Claude Code's session id.
   session?: string;
+  /// The session's title: the one given with `/rename`, else the one Claude gave it,
+  /// else the last prompt. Unknown until the engine reads it.
+  title?: string;
   /// The folder the session was born in: `--resume` only finds it from there.
   folder?: string;
   /// The JSONL where Claude Code writes the conversation.
@@ -56,6 +59,12 @@ export type TranscriptChunk = { text: string; end: number; from_start: boolean; 
 
 /// A `/command` on disk: the user's, the project's or a plugin's.
 export type SlashCommand = { name: string; description: string };
+
+/// Where a session starts, for whoever adds to its context (`addSessionContext`).
+export type SessionStart = { session?: string; cwd?: string };
+
+/// What a plugin adds to a starting session's context; nothing, to add nothing there.
+export type SessionContext = (panel: Panel, start: SessionStart) => string | undefined | Promise<string | undefined>;
 
 /// A session stored on disk, newest first.
 export type SavedSession = { id: string; title: string; modified: number };
@@ -94,4 +103,8 @@ export interface ClaudeApi {
   transcript(path: string, since: number): Promise<TranscriptChunk>;
   commands(folder: string | undefined): Promise<SlashCommand[]>;
   sessions(folder: string): Promise<SavedSession[]>;
+  /// Adds to what Claude reads when a session starts in a panel, after TermIAu's own
+  /// part (the viewer, the progress footer). Asked on every start — a `/clear` and a
+  /// resume too —, so it can depend on where the panel is.
+  addSessionContext(provider: SessionContext): Disposable;
 }

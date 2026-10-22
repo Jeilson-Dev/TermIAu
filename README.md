@@ -173,7 +173,7 @@ A plugin can also declare **settings** (`contributes.configuration`, like VS Cod
 each one a `key`, a localized `title` and `description`, and a `type` — `enum` (with
 `options`), `boolean` or `number` (with `min` and `max`) — with a `default`. The Plugins tab draws them under the
 plugin, and the plugin reads them with `ctx.settings.get(key)` and hears changes with
-`ctx.settings.onChange`. Dictation uses one for the spoken language.
+`ctx.settings.onChange`. Claude Context uses them for its limits.
 
 The regions so far are the footer (`statusBar`, at the left corner with `"alignment":
 "start"`, after the task pills with `"left"`, or against the right end) and
@@ -210,7 +210,7 @@ one an online catalog will have: the paths in `index.json` become URLs.
 
 A plugin may ship **native binaries** (`"binaries"` in the manifest) that the app
 runs as child processes and speaks to with JSON lines over stdin/stdout — that is
-how Dictation brings whisper.cpp without it being part of the app. Native code runs
+how the Claude Code plugin brings its engine without it being part of the app. Native code runs
 with your full rights, so the app only installs such a plugin when it is **signed by
 a publisher it trusts** (today: TermIAu): an Ed25519 signature (`termiau.sig`) over
 the sha256 of every file in the package. The check runs again before each launch, so
@@ -220,13 +220,6 @@ unsigned; signed ones show a **Verified** badge.
 The private key lives outside the repository (`~/.termiau-signing/ed25519.pem`,
 created by `scripts/signing-key.sh`); `npm run plugin:<name>` signs with it, and the
 public key is in `src-tauri/src/signing.rs`.
-
-### Dictation
-
-Speaking instead of typing (`⌘E`) is the second plugin
-([`plugins/dictation/`](plugins/dictation/README.md)): local transcription with
-whisper.cpp in a native engine, typed into the focused panel and sent after a short
-countdown that typing cancels.
 
 ### The radio
 
@@ -248,7 +241,6 @@ builds the package, and the Plugins tab installs it.
 | `⌘⇧A` | Go to the panel where Claude is waiting for an answer |
 | `⌘K` | Clear the screen |
 | `⌘⇧V` | Paste the **path** of the file on the clipboard |
-| `⌘E` | Turn listening on and off (with the Dictation plugin) |
 | `⌘⇧P` | Play or pause the radio (with the Radio plugin) |
 | `⌘⇧K` | Compact the Claude conversation (with the Claude Context plugin) |
 
@@ -553,8 +545,8 @@ Um plugin também pode declarar **configurações** (`contributes.configuration`
 no VS Code): cada uma com `key`, `title` e `description` traduzidos e um `type` —
 `enum` (com `options`), `boolean` ou `number` (com `min` e `max`) — com um `default`.
 A aba Plugins desenha os campos embaixo do plugin, e o plugin lê com
-`ctx.settings.get(key)` e ouve as mudanças com `ctx.settings.onChange`. A escuta usa
-uma para o idioma falado.
+`ctx.settings.get(key)` e ouve as mudanças com `ctx.settings.onChange`. O Claude
+Context usa para os limites dele.
 
 As regiões até aqui são o rodapé (`statusBar`, no canto esquerdo com `"alignment":
 "start"`, depois das pílulas de tarefa com `"left"`, ou encostado na direita) e
@@ -591,7 +583,7 @@ catálogo online: os caminhos do `index.json` viram URLs.
 
 Um plugin pode trazer **binários nativos** (`"binaries"` no manifesto), que o app roda
 como processos filhos e com quem conversa por linhas de JSON no stdin/stdout — é assim
-que a Escuta traz o whisper.cpp sem ele fazer parte do app. Código nativo roda com
+que o plugin Claude Code traz o motor dele sem ele fazer parte do app. Código nativo roda com
 todos os seus direitos, então o app só instala um plugin desses **assinado por um
 publicador em que confia** (hoje: o TermIAu): uma assinatura Ed25519 (`termiau.sig`)
 sobre o sha256 de cada arquivo do pacote. A conferência roda de novo antes de cada
@@ -601,13 +593,6 @@ de JS podem ficar sem assinatura; os assinados ganham o selo **Verificado**.
 A chave privada mora fora do repositório (`~/.termiau-signing/ed25519.pem`, criada
 pelo `scripts/signing-key.sh`); o `npm run plugin:<nome>` assina com ela, e a chave
 pública fica em `src-tauri/src/signing.rs`.
-
-### A escuta
-
-Falar em vez de digitar (`⌘E`) é o segundo plugin
-([`plugins/dictation/`](plugins/dictation/README.md)): transcrição local com
-whisper.cpp num motor nativo, digitada no painel em foco e enviada depois de uma
-contagem curta que digitar cancela.
 
 ### A rádio
 
@@ -629,7 +614,6 @@ gera o pacote, e a aba Plugins instala.
 | `⌘⇧A` | Vai para o painel onde o Claude espera resposta |
 | `⌘K` | Limpa a tela |
 | `⌘⇧V` | Cola o **caminho** do arquivo que está na área de transferência |
-| `⌘E` | Liga e desliga a escuta (com o plugin Escuta) |
 | `⌘⇧P` | Toca ou pausa a rádio (com o plugin Rádio) |
 | `⌘⇧K` | Compacta a conversa do Claude (com o plugin Claude Context) |
 

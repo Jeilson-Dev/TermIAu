@@ -4,9 +4,20 @@ import * as persist from "../lib/persist";
 import type { Settings } from "../lib/persist";
 import { PluginsTab } from "./PluginsTab";
 import { Snippets } from "./Snippets";
-import { Icon } from "./Icons";
+import { Icon, type IconName } from "./Icons";
+import { Marketplace } from "./Marketplace";
 
-/// TermIAu's preferences, opened by the menu's ⌘,.
+type Section = "general" | "plugins" | "marketplace";
+
+/// The side menu's entries. Labels are read on render, so they follow the current language.
+const SECTIONS: Record<Section, { icon: IconName; label(): string }> = {
+  general: { icon: "sliders", label: () => T.prefsGeneral },
+  plugins: { icon: "puzzle", label: () => T.prefsInstalledPlugins },
+  marketplace: { icon: "store", label: () => T.marketplace },
+};
+
+/// TermIAu's preferences, opened by the menu's ⌘,: a panel the marketplace's size, with
+/// a side menu — General and Installed plugins on top, the Marketplace at the bottom.
 ///
 /// The target branch guess is here because it is the only thing that doesn't belong
 /// to a repository: each one's target is stored with it, and picking by hand in the
@@ -31,7 +42,7 @@ export function Prefs({
   onClose(): void;
 }) {
   const campo = useRef<HTMLInputElement>(null);
-  const [tab, setTab] = useState<"termiau" | "plugins">("termiau");
+  const [section, setSection] = useState<Section>("general");
 
   // Opened by shortcut: the keyboard is already here, and the cursor must be too.
   // On mount only, and in an effect separate from the one below on purpose: `onClose`
@@ -51,77 +62,96 @@ export function Prefs({
     return () => window.removeEventListener("keydown", keyOf);
   }, [onClose]);
 
+  const item = (id: Section) => (
+    <button
+      key={id}
+      role="tab"
+      aria-selected={section === id}
+      className={section === id ? "prefs-nav-item active" : "prefs-nav-item"}
+      onClick={() => setSection(id)}
+    >
+      <Icon name={SECTIONS[id].icon} />
+      {SECTIONS[id].label()}
+    </button>
+  );
+
+  const header = (
+    <header className="prefs-top">
+      <h2>{SECTIONS[section].label()}</h2>
+      <button className="icon-btn" title={T.closeEsc} onClick={onClose}>
+        <Icon name="x" />
+      </button>
+    </header>
+  );
+
   return (
     <div className="prefs-background" onMouseDown={onClose}>
       {/* A click outside closes; a click inside must not leak to it. */}
-      <div className="prefs" onMouseDown={(e) => e.stopPropagation()}>
-        <header className="prefs-top">
-          <h2>{T.preferences}</h2>
-          <button className="icon-btn" title={T.closeEsc} onClick={onClose}>
-            <Icon name="x" />
-          </button>
-        </header>
+      <div className="prefs" role="dialog" aria-label={T.preferences} onMouseDown={(e) => e.stopPropagation()}>
+        <nav className="prefs-nav" role="tablist" aria-orientation="vertical">
+          <span className="prefs-nav-title">{T.preferences}</span>
+          {item("general")}
+          {item("plugins")}
+          <span className="prefs-nav-gap" />
+          {item("marketplace")}
+        </nav>
 
-        <div className="segmented prefs-tabs" role="tablist">
-          {(["termiau", "plugins"] as const).map((id) => (
-            <button
-              key={id}
-              role="tab"
-              aria-selected={tab === id}
-              className={tab === id ? "active" : ""}
-              onClick={() => setTab(id)}
-            >
-              {id === "termiau" ? T.prefsTabTermiau : T.prefsTabPlugins}
-            </button>
-          ))}
-        </div>
+        {/* Keyed by section, so each one fades in when picked. */}
+        <section key={section} className="prefs-main" role="tabpanel">
+          {section === "marketplace" ? (
+            <Marketplace onClose={onClose} />
+          ) : section === "plugins" ? (
+            <>
+              {header}
+              <div className="prefs-body">
+                <PluginsTab />
+              </div>
+            </>
+          ) : (
+            <>
+              {header}
+              <div className="prefs-body">
+                <label className="prefs-field">
+                  <span className="prefs-name">{T.branchDefault}</span>
+                  <input
+                    ref={campo}
+                    type="text"
+                    value={defaultTarget}
+                    placeholder="main"
+                    spellCheck={false}
+                    autoComplete="off"
+                    onChange={(e) => onDefaultTarget(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && onClose()}
+                  />
+                  <span className="prefs-help">{T.branchDefaultHelp}</span>
+                </label>
 
-        {tab === "plugins" ? (
-          <div className="prefs-body">
-            <PluginsTab />
-          </div>
-        ) : (
-          <div className="prefs-body">
-            <label className="prefs-field">
-              <span className="prefs-name">{T.branchDefault}</span>
-              <input
-                ref={campo}
-                type="text"
-                value={defaultTarget}
-                placeholder="main"
-                spellCheck={false}
-                autoComplete="off"
-                onChange={(e) => onDefaultTarget(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && onClose()}
-              />
-              <span className="prefs-help">{T.branchDefaultHelp}</span>
-            </label>
+                <label className="prefs-field">
+                  <span className="prefs-name">{T.editor}</span>
+                  <input
+                    type="text"
+                    value={editor}
+                    placeholder="VS Code"
+                    spellCheck={false}
+                    autoComplete="off"
+                    onChange={(e) => onEditor(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && onClose()}
+                  />
+                  <span className="prefs-help"><Snippets from={T.editorHelp} /></span>
+                </label>
 
-            <label className="prefs-field">
-              <span className="prefs-name">{T.editor}</span>
-              <input
-                type="text"
-                value={editor}
-                placeholder="VS Code"
-                spellCheck={false}
-                autoComplete="off"
-                onChange={(e) => onEditor(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && onClose()}
-              />
-              <span className="prefs-help"><Snippets from={T.editorHelp} /></span>
-            </label>
-
-            <div className="prefs-field">
-              <span className="prefs-name">{T.attention}</span>
-              <label className="prefs-check">
-                <input type="checkbox" checked={blink} onChange={(e) => onBlink(e.target.checked)} />
-                {T.blinkOnAttention}
-              </label>
-              <span className="prefs-help">{T.blinkOnAttentionHelp}</span>
-            </div>
-
-          </div>
-        )}
+                <div className="prefs-field">
+                  <span className="prefs-name">{T.attention}</span>
+                  <label className="prefs-check">
+                    <input type="checkbox" checked={blink} onChange={(e) => onBlink(e.target.checked)} />
+                    {T.blinkOnAttention}
+                  </label>
+                  <span className="prefs-help">{T.blinkOnAttentionHelp}</span>
+                </div>
+              </div>
+            </>
+          )}
+        </section>
       </div>
     </div>
   );

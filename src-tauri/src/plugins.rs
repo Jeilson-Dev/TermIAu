@@ -722,7 +722,7 @@ mod tests {
     }
 
     const WITH_BINARY: &str =
-        r#"{"id":"termiau.dictation","name":"Dictation","version":"1.0.0","main":"main.js","binaries":{"engine":"bin/engine"}}"#;
+        r#"{"id":"termiau.sample","name":"Sample","version":"1.0.0","main":"main.js","binaries":{"engine":"bin/engine"}}"#;
 
     /// A package with a binary, signed by `key` over exactly these files.
     fn signed_with_binary(key: &signing::tests::TestKey, engine: &[u8]) -> Vec<u8> {
@@ -743,13 +743,13 @@ mod tests {
         // Signed by a trusted key: installs, and the binary is executable.
         install_trusting(dir.path(), &signed_with_binary(&ours, b"\x7fELF"), &trusted).unwrap();
         use std::os::unix::fs::PermissionsExt;
-        let mode = std::fs::metadata(dir.path().join("termiau.dictation/bin/engine")).unwrap().permissions().mode();
+        let mode = std::fs::metadata(dir.path().join("termiau.sample/bin/engine")).unwrap().permissions().mode();
         assert_eq!(mode & 0o111, 0o111);
-        assert_eq!(signing::verify_dir(&trusted, &dir.path().join("termiau.dictation")), Some("Ours"));
+        assert_eq!(signing::verify_dir(&trusted, &dir.path().join("termiau.sample")), Some("Ours"));
 
         // Changed on disk after install: no longer verified.
-        std::fs::write(dir.path().join("termiau.dictation/bin/engine"), b"evil").unwrap();
-        assert_eq!(signing::verify_dir(&trusted, &dir.path().join("termiau.dictation")), None);
+        std::fs::write(dir.path().join("termiau.sample/bin/engine"), b"evil").unwrap();
+        assert_eq!(signing::verify_dir(&trusted, &dir.path().join("termiau.sample")), None);
 
         // Signed by someone else, or not signed at all: refused.
         let other = signing::tests::TestKey::new();

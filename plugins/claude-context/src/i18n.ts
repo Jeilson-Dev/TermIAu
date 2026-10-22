@@ -3,19 +3,19 @@
 import type { Language } from "../../../src/plugins/api";
 
 const en = {
-  emptyContext: "Context —",
-  emptyContextHint: "Session context: arrives when Claude answers — click to compact (⌘⇧K)",
+  emptyContext: "Context -",
+  emptyContextHint: "Session context: arrives when Claude answers - click to compact (⌘⇧K)",
   context: (pct: number) => `Context ${pct}%`,
-  contextHint: (pct: number) => `Session context: ${pct}% used, ${100 - pct}% free — click to compact (⌘⇧K)`,
+  contextHint: (pct: number) => `Session context: ${pct}% used, ${100 - pct}% free - click to compact (⌘⇧K)`,
   claudeWorkingCompact: "Claude is working: compact once it stops.",
   compactingAlone: (pct: number) => `Context at ${pct}%: compacting automatically.`,
 };
 
 const pt: typeof en = {
-  emptyContext: "Contexto —",
-  emptyContextHint: "Contexto da sessão: chega quando o Claude responder — clique para compactar (⌘⇧K)",
+  emptyContext: "Contexto -",
+  emptyContextHint: "Contexto da sessão: chega quando o Claude responder - clique para compactar (⌘⇧K)",
   context: (pct) => `Contexto ${pct}%`,
-  contextHint: (pct) => `Contexto da sessão: ${pct}% usado, ${100 - pct}% livre — clique para compactar (⌘⇧K)`,
+  contextHint: (pct) => `Contexto da sessão: ${pct}% usado, ${100 - pct}% livre - clique para compactar (⌘⇧K)`,
   claudeWorkingCompact: "O Claude está trabalhando: compacte quando ele parar.",
   compactingAlone: (pct) => `Contexto em ${pct}%: compactando sozinho.`,
 };

@@ -10,7 +10,7 @@ the texts `src/i18n.ts`, the styles `style.css`, and the manifest `termiau.json`
 
 ## English
 
-In the right corner of the footer, across from the listening wave: ☰ for the list, ▶,
+In the right corner of the footer: ☰ for the list, ▶,
 the next-station arrow, the volume and the name of what's playing. There are **257
 stations across 15 genres** — underground electronic, freeform, jazz, ambient, campus,
 chiptune, world, metal —, played by an `<audio>` in the page itself.
@@ -130,7 +130,7 @@ the picker warns when one doesn't open.
 
 ## Português
 
-No canto direito do rodapé, do outro lado da onda da escuta: ☰ para a lista, ▶,
+No canto direito do rodapé: ☰ para a lista, ▶,
 a seta de próxima estação, o volume e o nome do que está tocando. São **257
 rádios em 15 gêneros** — eletrônica underground, freeform, jazz, ambient, campus,
 chiptune, world, metal —, tocadas por um `<audio>` da própria página.

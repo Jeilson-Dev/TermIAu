@@ -14,7 +14,7 @@ import { commandLine, runnerFor, type Plan } from "./run/runners";
 import { quote, word } from "./run/shell";
 import type { DifferService, Disposable, MenuItem, Panel, PanelStatus } from "./plugins/api";
 import { createPluginHost } from "./plugins/host";
-import { CLOSE_DIALOG_ICON, footerButton, isMarqueeRunning, marquee } from "./ui";
+import { CLOSE_DIALOG_ICON, footerButton, marquee } from "./ui";
 import { escape, markdown, markOnLine } from "./markdown";
 import {
   findReferences,
@@ -134,9 +134,20 @@ type Leaf = {
   /// gets the keyboard while it is on screen (`Panel.setKeyboard`).
   layers?: Map<string, HTMLElement>;
   keyboards?: Map<string, HTMLElement>;
+  /// Each plugin's pane beside the terminal (`Panel.side`).
+  sides?: Map<string, HTMLElement>;
   /// What each plugin wants back when the panel reopens (`Panel.setSaved`).
   saved?: Record<string, string>;
+  /// Each plugin's title for the panel (`Panel.setTitle`): the session running in it,
+  /// shown in place of the terminal's title.
+  titles?: Map<string, string>;
 };
+
+/// What the panel is called: the title a plugin gave it (the last one set), or else the
+/// terminal's.
+function titleOf(leaf: Leaf): string {
+  return [...(leaf.titles?.values() ?? [])].pop() ?? leaf.title;
+}
 
 /// A split: two children and the share that goes to the first. Nesting these nodes
 /// gives the layouts iTerm2 makes — splitting an already split panel.
@@ -154,9 +165,14 @@ type TreeNode = Leaf | Split;
 type Tab = {
   body: HTMLDivElement;
   chip: HTMLDivElement;
+  /// The chip's text (see `showTicker`); scrolls inside when it doesn't fit.
   label: HTMLSpanElement;
-  /// The focused panel's branch, right after the chip's title.
-  branchChip: BranchChip;
+  labelText: HTMLSpanElement;
+  /// The text the label is showing, to only restart the scroll when it changes.
+  shown?: string;
+  /// The name given with a double click. Above everything: while there is one, it is
+  /// what the tab says.
+  name?: string;
   root: TreeNode;
   /// The panel that gets the keyboard; its title is what the tab shows.
   focus: Leaf;
@@ -303,10 +319,9 @@ function focusLeaf(leaf: Leaf) {
 }
 
 function rotular(tab: Tab) {
-  tab.label.textContent = tab.focus.title;
-  tab.chip.title = tab.focus.title;
   showBranches(tab);
-  if (tab === active && !inDiff) appWindow.setTitle(`${tab.focus.title} — TermIAu`).catch(() => {});
+  const title = titleOf(tab.focus);
+  if (tab === active && !inDiff) appWindow.setTitle(`${title} - TermIAu`).catch(() => {});
 }
 
 function activate(tab: Tab) {
@@ -321,8 +336,9 @@ function activate(tab: Tab) {
   // in the meantime: re-measure now, before giving focus back.
   measure(tab);
   sync(tab);
-  // A branch that arrived with the tab hidden measured zero and didn't start scrolling.
-  for (const f of visibleOnes(tab)) if (f.bar) repass(f.bar.branchChip);
+  // The label measured zero with the tab hidden: forgetting what it shows makes `rotular`
+  // measure its scroll again.
+  tab.shown = undefined;
   keyboard(tab.focus);
   rotular(tab);
   scheduleSave();
@@ -352,6 +368,8 @@ async function createLeaf(
   host.append(screen);
   if (bar) el.append(bar.el);
   el.append(host);
+  // Below the terminal and above the drawer: it says where this shell is, not the app's.
+  if (bar) el.append(bar.footer);
   insert(el);
 
   const term = new Terminal(TERM_OPTIONS);
@@ -421,8 +439,8 @@ async function createLeaf(
   // would have no one listening and the start of the prompt would be lost.
   await invoke("pty_attach", { id });
 
-  // screen -> PTY. `onData` is user input: plugins (dictation) write through
-  // `pty_write` directly and don't pass here, so typing is distinguishable from speaking.
+  // screen -> PTY. `onData` is user input: plugins write through `pty_write` directly
+  // and don't pass here, so what you type is distinguishable from what a plugin writes.
   term.onData((data) => {
     // The terminal's own answers to the program aren't you touching the panel.
     if (!TERMINAL_ANSWER.test(data)) for (const listener of userInputListeners) listener(id, data);
@@ -496,18 +514,18 @@ async function newTab(at?: string | null): Promise<Tab | undefined> {
     // The panel's status dot; stays transparent while no plugin set one.
     const sinal = document.createElement("span");
     sinal.className = "tab-dot";
-    const label = document.createElement("span");
-    label.className = "tab-title";
-    label.textContent = leaf.title;
-    const branchChip = createBranchChip("tab-branch");
+    const label = element("span", "tab-title");
+    const labelText = element("span", "tab-title-text");
+    labelText.textContent = leaf.title;
+    label.append(labelText);
     const close = document.createElement("span");
     close.className = "tab-close";
     // The "+" of the new tab, turned: the same stroke and size, where the "✕" glyph came out small.
     close.innerHTML = ICON_CLOSE_TAB;
-    chip.append(sinal, label, branchChip.el, close);
+    chip.append(sinal, label, close);
     bar.appendChild(chip);
 
-    const tab: Tab = { body, chip, label, branchChip, root: leaf, focus: leaf };
+    const tab: Tab = { body, chip, label, labelText, root: leaf, focus: leaf };
     leaf.el.classList.add("focused");
 
     // Closing a tab has no undo: the shell dies with it, and with it whatever was
@@ -543,6 +561,9 @@ async function newTab(at?: string | null): Promise<Tab | undefined> {
         disarm();
         activate(tab);
       }
+    });
+    chip.addEventListener("dblclick", (e) => {
+      if (e.target !== close) renameTab(tab);
     });
     // Middle button closes, like in the browser. It is a gesture nobody makes by
     // accident, so this one skips the confirmation.
@@ -1315,10 +1336,10 @@ function keyboard(leaf: Leaf) {
   else leaf.term.focus();
 }
 
-/// The keyboard target of a plugin layer that is on screen, if any.
+/// The keyboard target of a plugin layer or pane that is on screen, if any.
 function layerKeyboard(leaf: Leaf): HTMLElement | undefined {
   for (const [owner, target] of leaf.keyboards ?? []) {
-    if (leaf.layers?.get(owner)?.hidden === false) return target;
+    if (leaf.layers?.get(owner)?.hidden === false || leaf.sides?.get(owner)?.hidden === false) return target;
   }
 }
 
@@ -2219,8 +2240,13 @@ const folderOf = (path: string) => path.slice(0, path.lastIndexOf("/")) || "/";
 function shortPath(leaf: Leaf, path: string): string {
   const base = leaf.bar?.repo ?? leaf.bar?.folder;
   if (base && path.startsWith(`${base}/`)) return path.slice(base.length + 1);
-  const home = path.match(/^\/Users\/[^/]+\//)?.[0];
-  return home ? `~/${path.slice(home.length)}` : path;
+  return withTilde(path);
+}
+
+/// The path with the home folder as `~`.
+function withTilde(path: string): string {
+  const home = path.match(/^\/Users\/[^/]+(?=\/|$)/)?.[0];
+  return home ? `~${path.slice(home.length)}` : path;
 }
 
 /// The header follows the tab on screen: its path (with the line), its ref, its buttons.
@@ -2312,7 +2338,8 @@ function drawViewer(leaf: Leaf, scroll: boolean) {
     const markedOnes = markBlocks(html, p.line, p.to);
     copyButtons(html);
     v.body.replaceChildren(html);
-    void drawMermaid(v, html);
+    const turn = v.turn;
+    void drawMermaid(html, () => turn === v.turn);
     if (scroll && markedOnes[0]) {
       // As in the source: a third below the top.
       const blockTop = markedOnes[0].getBoundingClientRect().top - v.body.getBoundingClientRect().top + v.body.scrollTop;
@@ -2582,13 +2609,12 @@ function viewerImage(url: string): HTMLElement {
 let mermaidPronto: Promise<typeof import("mermaid").default> | null = null;
 let mermaidN = 0;
 
-/// The ```mermaid blocks of a rendered .md, as drawings. The import only happens when a
-/// file has one: mermaid weighs more than the rest of the viewer. A diagram that
-/// doesn't parse stays as code.
-async function drawMermaid(v: Viewer, html: HTMLElement) {
+/// The ```mermaid blocks of a rendered .md (or of a plugin's Markdown), as drawings. The
+/// import only happens when there is one: mermaid weighs more than the rest of the
+/// viewer. A diagram that doesn't parse stays as code; `current` false drops the rest.
+async function drawMermaid(html: HTMLElement, current = () => true) {
   const blocks = [...html.querySelectorAll<HTMLElement>("pre.mermaid")];
   if (!blocks.length) return;
-  const turn = v.turn;
   mermaidPronto ??= import("mermaid").then(({ default: m }) => {
     m.initialize({ startOnLoad: false, theme: "dark", securityLevel: "strict", fontFamily: "inherit" });
     return m;
@@ -2597,8 +2623,10 @@ async function drawMermaid(v: Viewer, html: HTMLElement) {
   for (const block of blocks) {
     try {
       const { svg } = await mermaid.render(`mermaid-${++mermaidN}`, block.textContent ?? "");
-      if (turn !== v.turn || !block.isConnected) return;
+      if (!current() || !block.isConnected) return;
       const drawing = element("div", "viewer-mermaid");
+      // What it was drawn from: a page redrawn with the same diagram can keep this drawing.
+      drawing.dataset.source = block.textContent ?? "";
       const area = element("div", "viewer-mermaid-area");
       area.innerHTML = svg;
       drawing.append(area);
@@ -2932,12 +2960,17 @@ type Run = {
   stopping?: boolean;
 };
 
-/// A panel's bar. Each panel has its own: with the screen split into two
+/// A panel's bars. Each panel has its own: with the screen split into two
 /// projects, each one has its own play, its own running app and its own diff.
+/// The one on top carries the title and the actions; the one below (`footer`) says where
+/// the shell is — the folder on the left, the diff and the branch on the right.
 type Bar = {
   el: HTMLDivElement;
   title: HTMLSpanElement;
-  /// The plugins' `panelHeader` slots, after the branch.
+  footer: HTMLDivElement;
+  /// The shell's folder, with the home folder as `~`.
+  path: HTMLSpanElement;
+  /// The plugins' `panelHeader` slots, after the title.
   plugins: HTMLDivElement;
   notice: HTMLSpanElement;
   actions: HTMLSpanElement;
@@ -2960,12 +2993,11 @@ type Bar = {
   /// it isn't in any. It says whether the diff button has somewhere to
   /// lead, and it is how we know whether the open diff is this panel's.
   repo: string | null;
-  /// The shell's folder and its branch. `showBranches` decides whether the branch shows
-  /// on the bar: only when the tab's panels aren't all in the
-  /// same folder — otherwise the tab chip's already says it all.
+  /// The shell's folder and its branch, on the bottom bar.
   folder: string | null;
   branch: string | null;
-  branchChip: BranchChip;
+  /// The diff button's label: the branch, which gives way to "See diff" on hover.
+  diffBranch: HTMLSpanElement;
   /// `loadProject` responses arriving out of order (several `cd`s
   /// in a row) must not overwrite the newest one.
   request: number;
@@ -3041,7 +3073,15 @@ function createBar(): Bar {
   choose.append(name, seta);
   const groupPlay = element("div", "task-play-group");
   groupPlay.append(play, choose);
+  // The branch is the button's label, and on hover "See diff" takes its place. Both
+  // share one cell, so the button is as wide as the longer one and doesn't jump.
+  const diffBranch = element("span", "diff-branch");
+  const diffSee = element("span", "diff-see");
+  diffSee.textContent = T.seeDiff;
+  const diffLabel = element("span", "diff-label");
+  diffLabel.append(diffBranch, diffSee);
   const diff = buttonTask("task-diff", ICON_DIFF);
+  diff.append(diffLabel);
   diff.title = T.thisPanelDiff;
   // Only shows after the first file is opened: before that there is nothing to show.
   const viewer = buttonTask("task-viewer", ICON_FILE);
@@ -3053,19 +3093,26 @@ function createBar(): Bar {
   close.title = T.closePanel;
   // Like maximize: `drawMaximize` shows it once the leaf has a tab.
   close.hidden = true;
-  controls.append(actions, drawer, stop, groupPlay, diff, viewer, maximize, close);
-  const branchChip = createBranchChip("task-branch");
+  controls.append(actions, drawer, stop, groupPlay, viewer, maximize, close);
   // On the left, like the drawer it opens.
   const explore = buttonTask("task-explore", ICON_FOLDER);
   const plugins = element("div", "panel-plugins");
-  el.append(explore, title, branchChip.el, plugins, notice, controls);
+  el.append(explore, title, plugins, notice, controls);
+
+  const footer = element("div", "panel-footer");
+  const path = element("span", "footer-path");
+  const where = element("div", "footer-where");
+  where.append(diff);
+  footer.append(path, where);
   return {
     el,
     title,
+    footer,
+    path,
     plugins,
     folder: null,
     branch: null,
-    branchChip,
+    diffBranch,
     notice,
     actions,
     drawer,
@@ -3130,8 +3177,14 @@ function drawMaximize(leaf: Leaf) {
 function drawBar(leaf: Leaf) {
   const b = leaf.bar;
   if (!b) return;
-  b.title.textContent = leaf.title;
-  b.title.title = leaf.title;
+  const title = titleOf(leaf);
+  b.title.textContent = title;
+  b.title.title = title;
+  const path = b.folder ? withTilde(b.folder) : "";
+  // The bar cuts the path on the left (`direction: rtl`); the mark keeps the `~/` at the
+  // start, where the right-to-left run would otherwise move it.
+  b.path.textContent = path && `\u200e${path}`;
+  b.path.title = path;
 
   const g = leaf.drawer;
   b.drawer.hidden = !g;
@@ -3238,10 +3291,12 @@ async function loadProject(leaf: Leaf) {
     }
   }
   if (request !== b.request || leaf.dead) return;
+  const moved = b.repo !== root || b.folder !== cwd || b.branch !== branch;
   b.repo = root;
   b.project = fresh;
   b.folder = cwd;
   b.branch = branch;
+  if (moved) for (const fn of movedListeners) fn(leaf.id);
   const tab = tabOf(leaf);
   if (tab) showBranches(tab);
   drawBar(leaf);
@@ -3796,47 +3851,81 @@ window.addEventListener(
 );
 progressEl.hidden = true;
 
-// ---------- the branch name ----------
-
-/// A `[branch]`: the brackets outside, the name in a box with a width cap, and
-/// whatever doesn't fit scrolls inside (see `marquee` in ui.ts).
-type BranchChip = { el: HTMLSpanElement; box: HTMLSpanElement; text: HTMLSpanElement };
-
-function createBranchChip(cls: string): BranchChip {
-  const text = element("span", "branch-text");
-  const box = element("span", "branch-box");
-  box.append(text);
-  const el = element("span", `branch ${cls}`);
-  el.append("[", box, "]");
-  el.hidden = true;
-  return { el, box, text };
-}
-
-/// Only touches it when the name or visibility change: redoing the scroll on every
-/// prompt would leave it stuck on the first pixel.
-function showBranchChip(r: BranchChip, name: string | null) {
-  const fresh = name ?? "";
-  if (r.text.textContent === fresh && r.el.hidden === !name) return;
-  r.text.textContent = fresh;
-  r.el.hidden = !name;
-  r.el.title = name ? T.branch(name) : "";
-  marquee(r.box, r.text);
-}
-
-/// Measures again the ones left without scrolling for having arrived hidden (measuring zero).
-function repass(r: BranchChip) {
-  if (!r.el.hidden && !isMarqueeRunning(r.box)) marquee(r.box, r.text);
-}
-
-/// The tab chip shows the focused panel's branch. Panels show theirs
-/// only when not all of them are in the same folder: with all together, repeating on every
-/// bar what the chip already says is just noise.
+/// Each panel's diff button says its branch (`HEAD` when detached); the tab chip says
+/// the focused panel's folder and session (see `showTicker`).
 function showBranches(tab: Tab) {
-  const bars = [...leaves(tab.root)].flatMap((f) => (f.bar ? [f.bar] : []));
-  const mixed = new Set(bars.map((b) => b.folder)).size > 1;
-  for (const b of bars) showBranchChip(b.branchChip, mixed ? b.branch : null);
-  showBranchChip(tab.branchChip, tab.focus.bar?.branch ?? null);
+  for (const f of leaves(tab.root)) if (f.bar) f.bar.diffBranch.textContent = f.bar.branch ?? "HEAD";
+  showTicker(tab);
 }
+
+/// The tab's label: the name you gave it; else the session running in the focused panel
+/// (Claude's); else that panel's folder — or, before the folder is known, the terminal's
+/// title. The branch is on the panel's bottom bar.
+function showTicker(tab: Tab) {
+  const { session, folder } = labelParts(tab);
+  const text = tab.name ?? autoLabel(tab);
+  // The hover says everything the label may be hiding.
+  tab.chip.title = [...new Set([tab.name, session, folder].filter(Boolean))].join(" · ") || text;
+  if (tab.shown === text || tab.label.querySelector("input")) return;
+  tab.shown = text;
+  tab.labelText.textContent = text;
+  marquee(tab.label, tab.labelText);
+}
+
+function labelParts(tab: Tab): { session?: string; folder: string | null } {
+  const leaf = tab.focus;
+  const b = leaf.bar;
+  const folder = b?.folder ? b.folder.split("/").filter(Boolean).pop() || b.folder : null;
+  return { session: [...(leaf.titles?.values() ?? [])].pop(), folder };
+}
+
+/// What the tab says when nobody named it.
+function autoLabel(tab: Tab): string {
+  const { session, folder } = labelParts(tab);
+  return session ?? folder ?? titleOf(tab.focus);
+}
+
+/// Double click on the chip: the label becomes a field. Enter or leaving keeps the name,
+/// Esc gives up; emptied, the tab goes back to naming itself.
+function renameTab(tab: Tab) {
+  if (tab.label.querySelector("input")) return;
+  const field = element("input", "tab-rename");
+  field.value = tab.name ?? tab.labelText.textContent ?? "";
+  field.spellcheck = false;
+  field.autocomplete = "off";
+  tab.labelText.hidden = true;
+  tab.label.append(field);
+  field.focus();
+  field.select();
+
+  let done = false;
+  const finish = (keep: boolean) => {
+    if (done) return;
+    done = true;
+    if (keep) {
+      const name = field.value.trim();
+      // Confirmed as it came, with no name before, it isn't a name: it is what the tab
+      // already says on its own, and fixing it would stop it following the session.
+      tab.name = name && (tab.name || name !== autoLabel(tab)) ? name : undefined;
+      scheduleSave();
+    }
+    field.remove();
+    tab.labelText.hidden = false;
+    tab.shown = undefined;
+    showTicker(tab);
+    // Left by clicking another tab: the keyboard already went there.
+    if (tab === active && document.activeElement === document.body) keyboard(tab.focus);
+  };
+  field.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") finish(true);
+    else if (e.key === "Escape") finish(false);
+  });
+  field.addEventListener("blur", () => finish(true));
+  // Clicking inside the field moves the cursor in it: not a drag, not the chip's click.
+  field.addEventListener("mousedown", (e) => e.stopPropagation());
+}
+
 
 // ---------- help: the shortcut list (Help ▸ Keyboard Shortcuts) ----------
 
@@ -3955,10 +4044,12 @@ function setPluginShortcuts(rows: [string, string][]) {
 // ---------- plugins (see src/plugins/host.ts) ----------
 
 /// Who wants to know the user typed in a panel: plugins, through
-/// `ctx.terminal.onUserInput` (dictation cancels its auto-Enter on it).
+/// `ctx.terminal.onUserInput` (Claude's plugin clears a waiting panel on it).
 const userInputListeners = new Set<(id: number, data: string) => void>();
 /// Who wants to know a panel got the keyboard (`ctx.terminal.onFocus`).
 const focusListeners = new Set<(id: number) => void>();
+/// Who wants to know a panel's folder, repository or branch changed (`ctx.terminal.onMoved`).
+const movedListeners = new Set<(id: number) => void>();
 /// Who wants back what it saved in restored panels, by plugin.
 const restoredListeners = new Map<string, Set<(id: number, saved: string) => void>>();
 
@@ -3978,11 +4069,13 @@ function pluginPanel(leaf: Leaf, owner: string): Panel {
     get title() {
       return leaf.title;
     },
+    setTitle: (title) => setTitle(leaf, owner, title),
     xterm: leaf.term,
     write: (text) => void invoke("pty_write", { id: leaf.id, data: text }).catch((e) => jlog(`plugin pty_write: ${e}`)),
     paste: (text) => paste(leaf, text),
     isAlive: () => !leaf.dead,
     cwd: () => invoke<string | null>("pty_cwd", { id: leaf.id }).catch(() => null),
+    where: () => ({ folder: leaf.bar?.folder ?? null, repo: leaf.bar?.repo ?? null, branch: leaf.bar?.branch ?? null }),
     isBusy: () => invoke<boolean>("pty_busy", { id: leaf.id }).catch(() => false),
     focus: () => {
       const tab = tabOf(leaf);
@@ -4001,6 +4094,7 @@ function pluginPanel(leaf: Leaf, owner: string): Panel {
       else leaf.statuses.delete(owner);
       paint();
     },
+    side: () => pluginSide(leaf, owner),
     layer: () => {
       let layer = leaf.layers?.get(owner);
       if (layer) return layer;
@@ -4030,13 +4124,105 @@ function pluginPanel(leaf: Leaf, owner: string): Panel {
   };
 }
 
+const SIDE_KEY = "termiau:plugin-side";
+
+/// The plugins' panes' share of the panel (`Panel.side`): one for every panel and plugin.
+let shareSide = readShareSide();
+document.documentElement.style.setProperty("--plugin-side-share", `${(shareSide * 100).toFixed(2)}%`);
+
+function readShareSide(): number {
+  try {
+    const share = Number(localStorage.getItem(SIDE_KEY) ?? NaN);
+    return share >= 0.15 && share <= 0.85 ? share : 0.4;
+  } catch {
+    return 0.4;
+  }
+}
+
+/// Plugin `owner`'s pane beside the terminal. Shown or hidden, the terminal is measured
+/// again: it lost or got back the pane's share. The border before it drags the share.
+function pluginSide(leaf: Leaf, owner: string): HTMLElement {
+  const existing = leaf.sides?.get(owner);
+  if (existing) return existing;
+  const handle = element("div", "plugin-side-handle");
+  const side = element("div", "plugin-side");
+  side.dataset.plugin = owner;
+  side.hidden = handle.hidden = true;
+  leaf.el.querySelector(".leaf-term")?.append(handle, side);
+  (leaf.sides ??= new Map()).set(owner, side);
+  const remeasure = () => {
+    const tab = tabOf(leaf);
+    if (!tab || tab !== active || inDiff) return;
+    measure(tab);
+    scheduleSync(tab);
+  };
+  new MutationObserver(() => {
+    handle.hidden = side.hidden;
+    if (!side.isConnected) handle.remove();
+    remeasure();
+  }).observe(side, { attributes: true, attributeFilter: ["hidden"] });
+  handle.addEventListener("pointerdown", (e) => {
+    const host = side.parentElement;
+    if (!host) return;
+    e.preventDefault();
+    e.stopPropagation();
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add("dragging");
+    const mover = (ev: PointerEvent) => {
+      const r = host.getBoundingClientRect();
+      shareSide = Math.min(0.85, Math.max(0.15, (r.right - ev.clientX) / r.width));
+      document.documentElement.style.setProperty("--plugin-side-share", `${(shareSide * 100).toFixed(2)}%`);
+      remeasure();
+    };
+    const release = () => {
+      handle.removeEventListener("pointermove", mover);
+      handle.removeEventListener("pointerup", release);
+      handle.removeEventListener("pointercancel", release);
+      handle.classList.remove("dragging");
+      try {
+        localStorage.setItem(SIDE_KEY, String(shareSide));
+      } catch {
+        // Just a convenience.
+      }
+    };
+    handle.addEventListener("pointermove", mover);
+    handle.addEventListener("pointerup", release);
+    handle.addEventListener("pointercancel", release);
+  });
+  return side;
+}
+
+/// Plugin `owner`'s title for the panel; `undefined` gives the terminal's back.
+function setTitle(leaf: Leaf, owner: string, title: string | undefined) {
+  const before = titleOf(leaf);
+  leaf.titles ??= new Map();
+  // Set again, it goes to the end: the last one set is the one shown.
+  leaf.titles.delete(owner);
+  if (title) leaf.titles.set(owner, title);
+  const tab = tabOf(leaf);
+  if (tab?.focus === leaf) rotular(tab);
+  if (titleOf(leaf) !== before) drawBar(leaf);
+}
+
 /// Takes back what plugin `owner` left on the panels when it is turned off.
 function clearPanels(owner: string) {
   for (const leaf of pluginPanels.values()) {
+    if (leaf.titles?.has(owner)) setTitle(leaf, owner, undefined);
     setAlert(leaf, owner, false);
     if (leaf.statuses?.delete(owner)) paint();
     leaf.layers?.get(owner)?.remove();
     leaf.layers?.delete(owner);
+    const side = leaf.sides?.get(owner);
+    if (side) {
+      side.previousElementSibling?.remove();
+      side.remove();
+      leaf.sides?.delete(owner);
+      const tab = tabOf(leaf);
+      if (tab && tab === active && !inDiff) {
+        measure(tab);
+        scheduleSync(tab);
+      }
+    }
     if (leaf.keyboards?.delete(owner) && tabOf(leaf)?.focus === leaf) keyboard(leaf);
   }
 }
@@ -4106,6 +4292,7 @@ const plugins = createPluginHost({
   onPanelOpened: (fn) => void panelOpened.add(fn),
   onPanelClosed: (fn) => void panelClosed.add(fn),
   onFocus: (fn) => listenerSet(focusListeners, fn),
+  onMoved: (fn) => listenerSet(movedListeners, fn),
   onRestored(owner, fn) {
     for (const [id, saved] of pendingRestored) {
       if (owner in saved && pluginPanels.has(id)) {
@@ -4128,6 +4315,7 @@ const plugins = createPluginHost({
   socketDrop: (id) => void invoke("socket_drop", { id }).catch((e) => jlog(`socket_drop: ${e}`)),
   onUserInput: (listener) => listenerSet(userInputListeners, listener),
   openLink,
+  mermaid: (root) => drawMermaid(root),
   openReference: (id, e) => {
     const leaf = pluginPanels.get(id);
     return !!leaf && referenceClick(leaf, e);
@@ -4217,6 +4405,8 @@ type SavedTab = {
   root: SavedNode;
   /// The focused panel, by its position among the tree's leaves.
   focus: number;
+  /// The name given to the tab, if any.
+  name?: string;
 };
 
 /// Something ⌘⇧T brings back: a whole tab, or a single panel — with the split it was in
@@ -4237,11 +4427,11 @@ function storeClosed(f: Closed) {
 }
 
 function savedClosed(x: unknown): Closed | undefined {
-  const f = x as { tab?: { root?: unknown; focus?: unknown }; panel?: unknown; axis?: unknown; fraction?: unknown } | null;
+  const f = x as { tab?: unknown; panel?: unknown; axis?: unknown; fraction?: unknown } | null;
   if (!f || typeof f !== "object") return;
   if (f.tab) {
-    const root = savedNode(f.tab.root);
-    return root && { tab: { root, focus: typeof f.tab.focus === "number" ? f.tab.focus : 0 } };
+    const tab = savedTab(f.tab);
+    return tab && { tab };
   }
   const panel = savedNode(f.panel);
   if (panel?.kind !== "leaf") return;
@@ -4265,7 +4455,7 @@ function snapshot(no: TreeNode): SavedNode {
 function snapshotTab(tab: Tab): SavedTab {
   // With the keyboard in the drawer, the owner comes back focused: the drawer doesn't come back.
   const focus = [...leaves(tab.root)].indexOf(tab.focus.owner ?? tab.focus);
-  return { root: snapshot(tab.root), focus: Math.max(0, focus) };
+  return { root: snapshot(tab.root), focus: Math.max(0, focus), name: tab.name };
 }
 
 /// Checks the shape of what came from disk. A file from another version, or edited
@@ -4294,6 +4484,14 @@ function savedNode(x: unknown): SavedNode | undefined {
   };
 }
 
+function savedTab(x: unknown): SavedTab | undefined {
+  const a = x as { root?: unknown; focus?: unknown; name?: unknown } | null;
+  const root = savedNode(a?.root);
+  if (!root) return;
+  const name = typeof a?.name === "string" && a.name.trim() ? a.name.trim() : undefined;
+  return { root, focus: typeof a?.focus === "number" ? a.focus : 0, name };
+}
+
 function readSession(text: string | null): { tabs: SavedTab[]; active: number; closed: Closed[] } {
   const emptyOne = { tabs: [], active: 0, closed: [] };
   if (!text) return emptyOne;
@@ -4301,10 +4499,7 @@ function readSession(text: string | null): { tabs: SavedTab[]; active: number; c
     const given = JSON.parse(text) as { tabs?: unknown; active?: unknown; closed?: unknown } | null;
     if (!given || !Array.isArray(given.tabs)) return emptyOne;
     const closed = Array.isArray(given.closed) ? given.closed.flatMap((f) => savedClosed(f) ?? []) : [];
-    const savedOnes = given.tabs.flatMap((a: { root?: unknown; focus?: unknown } | null): SavedTab[] => {
-      const root = savedNode(a?.root);
-      return root ? [{ root, focus: typeof a?.focus === "number" ? a.focus : 0 }] : [];
-    });
+    const savedOnes = given.tabs.flatMap((a: unknown) => savedTab(a) ?? []);
     return { tabs: savedOnes, active: typeof given.active === "number" ? given.active : 0, closed: closed.slice(-MAX_CLOSED) };
   } catch (e) {
     jlog(`unreadable saved session: ${e}`);
@@ -4372,6 +4567,8 @@ async function build(tab: Tab, leaf: Leaf, savedItem: SavedNode, doneOnes: Leaf[
 async function reopen(saved: SavedTab): Promise<Tab | undefined> {
   const tab = await newTab(firstLeaf(saved.root).cwd);
   if (!tab) return;
+  tab.name = saved.name;
+  showTicker(tab);
   busy = true;
   try {
     const doneOnes: Leaf[] = [];

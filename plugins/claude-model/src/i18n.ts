@@ -3,11 +3,11 @@
 import type { Language } from "../../../src/plugins/api";
 
 const en = {
-  emptyModel: "Model —",
-  modelHint: (model: string) => `Session model: ${model} — click to change`,
+  emptyModel: "Model -",
+  modelHint: (model: string) => `Session model: ${model} - click to change`,
   emptyModelHint: "Session model: arrives when Claude answers",
   effort: (level: string) => `Effort ${level}`,
-  effortHint: "Claude's effort level — click to change",
+  effortHint: "Claude's effort level - click to change",
   accountDefault: "Account default",
   effortLow: "low",
   effortMedium: "medium",
@@ -19,11 +19,11 @@ const en = {
 };
 
 const pt: typeof en = {
-  emptyModel: "Modelo —",
-  modelHint: (model) => `Modelo da sessão: ${model} — clique para trocar`,
+  emptyModel: "Modelo -",
+  modelHint: (model) => `Modelo da sessão: ${model} - clique para trocar`,
   emptyModelHint: "Modelo da sessão: chega quando o Claude responder",
   effort: (level) => `Esforço ${level}`,
-  effortHint: "Nível de esforço do Claude — clique para trocar",
+  effortHint: "Nível de esforço do Claude - clique para trocar",
   accountDefault: "Padrão da conta",
   effortLow: "baixo",
   effortMedium: "médio",

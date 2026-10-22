@@ -16,6 +16,7 @@ usage() {
   echo "usage: termiau view <file>[:line[-line]] [--ref <branch|commit>]" >&2
   echo "       termiau progress < plan.json      the task's progress, in the footer" >&2
   echo "       termiau progress --clear          takes it off" >&2
+  echo "       termiau send <plugin> < message       a message for a plugin; prints its answer" >&2
   exit 2
 }
 
@@ -51,8 +52,41 @@ if [ "${1:-}" = progress ]; then
   answer=$(printf '{"panel":%s,"progress_text":"%s"}\n' "$PANEL" "$plan" | nc -U "$TERMIAU_SOCK" -w 2 2>/dev/null)
   case "$answer" in
     ok) echo "progress updated in the TermIAu footer" ;;
-    error:*) echo "termiau: plan rejected — $answer" >&2; exit 1 ;;
+    error:*) echo "termiau: plan rejected - $answer" >&2; exit 1 ;;
     *) echo "termiau: the app did not respond" >&2; exit 1 ;;
+  esac
+  exit 0
+fi
+
+# ---------- termiau send: a message for a plugin ----------
+#
+# What comes on stdin goes, as text, to the plugin with that id, and this waits for its
+# answer: the plugin decides what the text means (a JSON, usually) and what to answer.
+# An answer starting with `error:` becomes this command's error. No answer means the
+# plugin isn't installed or is off.
+if [ "${1:-}" = send ]; then
+  plugin="${2:-}"
+  [ -n "$plugin" ] && [ $# -eq 2 ] || usage
+  case "$plugin" in *[!A-Za-z0-9._-]*) usage ;; esac
+  if [ -z "${TERMIAU_SOCK:-}" ] || [ ! -S "$TERMIAU_SOCK" ]; then
+    echo "termiau: only works inside a TermIAu panel" >&2
+    exit 1
+  fi
+  text=$(cat)
+  if [ -z "${text//[[:space:]]/}" ]; then
+    echo "termiau: the message goes on stdin" >&2
+    exit 2
+  fi
+  text=${text//\\/\\\\}
+  text=${text//\"/\\\"}
+  text=${text//$'\n'/\\n}
+  text=${text//$'\r'/\\r}
+  text=${text//$'\t'/\\t}
+  answer=$(printf '{"panel":%s,"plugin":"%s","message":"%s","wait":true}\n' "$PANEL" "$plugin" "$text" | nc -U "$TERMIAU_SOCK" -w 5 2>/dev/null)
+  case "$answer" in
+    "") echo "termiau: no answer from $plugin - is it installed and on?" >&2; exit 1 ;;
+    error:*) echo "termiau:${answer#error:}" >&2; exit 1 ;;
+    *) printf '%s\n' "$answer" ;;
   esac
   exit 0
 fi

@@ -51,6 +51,8 @@ export type CoreServices = {
   panelIds(): number[];
   /// A panel got the keyboard.
   onFocus(listener: (id: number) => void): Disposable;
+  /// A panel's folder, repository or branch changed.
+  onMoved(listener: (id: number) => void): Disposable;
   /// What `owner` saved in panels that came back with the tabs: the pending ones at
   /// once, then each one restored later.
   onRestored(owner: string, listener: (id: number, saved: string) => void): Disposable;
@@ -58,7 +60,7 @@ export type CoreServices = {
   panelHeader(id: number): HTMLElement | undefined;
   onPanelOpened(listener: (id: number) => void): void;
   onPanelClosed(listener: (id: number) => void): void;
-  /// Takes back everything `owner` left on the panels: alerts, statuses, layers and
+  /// Takes back everything `owner` left on the panels: alerts, statuses, layers, panes and
   /// the keyboard. What it saved stays, for when it is turned on again.
   clearPanels(owner: string): void;
   menu(anchor: HTMLElement, items: MenuItem[]): void;
@@ -67,6 +69,7 @@ export type CoreServices = {
   socketDrop(id: string): void;
   onUserInput(listener: (id: number, data: string) => void): Disposable;
   openLink(event: MouseEvent, url: string): void;
+  mermaid(root: HTMLElement): Promise<void>;
   openReference(id: number, event: MouseEvent): boolean;
   isShortcut(event: KeyboardEvent): boolean;
   /// The diff tab's calls to plugins, and what plugins tell it.
@@ -304,6 +307,14 @@ export function createPluginHost(core: CoreServices) {
             }),
           );
         },
+        onMoved(handler) {
+          return keep(
+            core.onMoved((id) => {
+              const panel = core.panel(id, manifest.id);
+              if (panel) handler(panel);
+            }),
+          );
+        },
         onOpened(handler) {
           for (const id of core.panelIds()) {
             const panel = core.panel(id, manifest.id);
@@ -411,6 +422,7 @@ export function createPluginHost(core: CoreServices) {
         menu: core.menu,
         ask: core.ask,
         openLink: core.openLink,
+        mermaid: core.mermaid,
         openReference: (panel, event) => core.openReference(panel.id, event),
         isShortcut: core.isShortcut,
       },

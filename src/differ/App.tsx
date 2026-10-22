@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   commitIndex,
+  exportReview,
   loadDiff,
   loadDiffSince,
   loadDiffWorking,
@@ -18,6 +19,7 @@ import { Toolbar } from "./components/Toolbar";
 import { Snippets } from "./components/Snippets";
 import { T } from "../i18n/differ";
 import { bookmarkReference, checkBookmarks } from "./lib/bookmarks";
+import { mergeComments, readReviewFile, reviewFile, reviewFileName } from "./lib/reviewFile";
 import { incrementalBase, placeBookmarks, type FixPlacement } from "./lib/fixes";
 import { isGenerated } from "./lib/generated";
 import { nextToReview } from "./lib/navigation";
@@ -656,6 +658,39 @@ export default function App() {
     [updateReview],
   );
 
+  const exportComments = useCallback(
+    async (comments: Bookmark[]) => {
+      if (!repo || !diff) return;
+      const file = reviewFile(repo.name, diff, comments);
+      await exportReview(reviewFileName(file), JSON.stringify(file, null, 2));
+    },
+    [repo, diff],
+  );
+
+  const importComments = useCallback(
+    async (text: string) => {
+      let incoming: Bookmark[];
+      try {
+        incoming = readReviewFile(text);
+      } catch {
+        throw new Error(T.reviewImportInvalid);
+      }
+      const fresh = mergeComments(bookmarks, incoming).bookmarks.slice(bookmarks.length);
+      if (fresh.length === 0) return T.reviewImportNothing;
+      updateReview((s) => ({ ...s, bookmarks: mergeComments(s.bookmarks, fresh).bookmarks }));
+      // The lines were someone else's: the ones that no longer hold what was commented on
+      // show as outdated right away, as at load. In the incremental review the next load
+      // places them.
+      if (repo && diff && !sinceBase) {
+        const empty = { reviewed: {}, completed: [] };
+        const checked = await checkBookmarks(repo.root, diff.files, { ...empty, bookmarks: fresh });
+        if (checked.outdated.size) setOutdated((o) => new Set([...o, ...checked.outdated]));
+      }
+      return T.reviewImported(fresh.length);
+    },
+    [updateReview, bookmarks, repo, diff, sinceBase],
+  );
+
   // Every file marked as reviewed completes the review of this commit: the next commit's
   // incremental review starts from it.
   useEffect(() => {
@@ -950,6 +985,8 @@ export default function App() {
             onSelectBookmark={selectBookmark}
             onRemoveBookmark={removeBookmark}
             onToggleResolved={toggleResolved}
+            onExport={exportComments}
+            onImport={importComments}
           />
           <main className="diff-scroller" ref={scrollerRef} onScroll={onScroll}>
             <div className="diff-content">

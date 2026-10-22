@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- The notebook plugin's icon: a notebook with a decision's diamond, a question mark
+       and a finding's check, on the same dark tile as the other plugins. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#343746"/>
+      <stop offset="1" stop-color="#21222c"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <rect x="32" y="22" width="66" height="84" rx="8" fill="#44475a" stroke="#6272a4" stroke-width="3"/>
+  <path d="M42 22v84" stroke="#6272a4" stroke-width="3"/>
+  <path d="M60 40l6 6-6 6-6-6z" fill="#bd93f9"/>
+  <path d="M74 44h14" stroke="#bd93f9" stroke-width="4" stroke-linecap="round"/>
+  <path d="M56 64a5 5 0 1 1 7 4.6c-1.2.6-2 1.4-2 2.6" fill="none" stroke="#ffb86c" stroke-width="3.5" stroke-linecap="round"/>
+  <circle cx="61" cy="76" r="2" fill="#ffb86c"/>
+  <path d="M74 66h14" stroke="#ffb86c" stroke-width="4" stroke-linecap="round"/>
+  <path d="M54 90l4 4 8-8" fill="none" stroke="#50fa7b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M74 90h14" stroke="#50fa7b" stroke-width="4" stroke-linecap="round"/>
+</svg>

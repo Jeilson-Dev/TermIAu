@@ -18,7 +18,7 @@ const en = {
   alreadyAnswered: "The question was already answered.",
   sessionNoLongerOpen: "That session is no longer open in any panel.",
   sessionWaitingForYou: (name: string) =>
-    `The session in ${name} is waiting for your answer in its panel — answer there and send again.`,
+    `The session in ${name} is waiting for your answer in its panel - answer there and send again.`,
 };
 
 const pt: typeof en = {
@@ -37,7 +37,7 @@ const pt: typeof en = {
   alreadyAnswered: "A pergunta já tinha sido respondida.",
   sessionNoLongerOpen: "Essa sessão não está mais aberta em nenhum painel.",
   sessionWaitingForYou: (name) =>
-    `A sessão em ${name} está esperando uma resposta sua no painel — responda lá e envie de novo.`,
+    `A sessão em ${name} está esperando uma resposta sua no painel - responda lá e envie de novo.`,
 };
 
 export type Texts = typeof en;

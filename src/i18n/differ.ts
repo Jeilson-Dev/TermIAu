@@ -44,7 +44,7 @@ const pt = {
   closeEsc: "Fechar (Esc)",
   branchDefault: "Branch padrão",
   branchDefaultHelp:
-    "Com o que comparar um repositório aberto pela primeira vez. Depois disso vale a última branch que você escolheu nele — esta aqui não desfaz escolha feita à mão.",
+    "Com o que comparar um repositório aberto pela primeira vez. Depois disso vale a última branch que você escolheu nele - esta aqui não desfaz escolha feita à mão.",
   editor: "Editor",
   editorHelp: [
     "O comando do “Abrir no editor” do visor de arquivos, rodado no seu shell (aliases valem) e na raiz do repositório do arquivo. ",
@@ -68,9 +68,9 @@ const pt = {
   blinkOnAttentionHelp:
     "O contorno laranja do painel que espera sua resposta, e o ponto e o anel da aba dele. Desligado, eles ficam acesos, parados.",
 
-  // preferences: the plugins tab
-  prefsTabTermiau: "TermIAu",
-  prefsTabPlugins: "Plugins",
+  // preferences: the side menu
+  prefsGeneral: "Geral",
+  prefsInstalledPlugins: "Plugins instalados",
   pluginsTrust:
     "Um plugin roda dentro do TermIAu, com o mesmo acesso que o app tem ao seu computador. Instale só pacotes de quem você confia.",
   pluginsInstall: "Instalar de arquivo…",
@@ -87,11 +87,10 @@ const pt = {
 
   // the marketplace
   marketplace: "Marketplace",
-  marketplaceOpen: "Abrir o marketplace",
   marketplaceSearch: "Buscar plugins",
   marketplaceCount: (n: number) => (n === 1 ? "1 plugin" : `${n} plugins`),
   marketplaceBy: (author: string) => `por ${author}`,
-  marketplaceRequires: (names: string) => `Precisa de ${names} — vem junto na instalação.`,
+  marketplaceRequires: (names: string) => `Precisa de ${names} - vem junto na instalação.`,
   marketplaceInstall: "Instalar",
   marketplaceUpdate: (version: string) => `Atualizar para ${version}`,
   marketplaceInstalled: "Instalado",
@@ -108,7 +107,7 @@ const pt = {
   fileUntouchedHint: "Este arquivo não mudou desde a última revisão completa",
   notLocated: "não localizado",
   notLocatedHint: "Estas linhas não estão na versão revisada",
-  resolvedHint: "Resolvido — clique para reabrir",
+  resolvedHint: "Resolvido - clique para reabrir",
   markResolved: "Marcar como resolvido",
   copyReference: "Copiar referência (caminho:linhas + comentário) para colar num prompt",
   copied: "Copiado!",
@@ -116,6 +115,14 @@ const pt = {
   copyAllHint: "Copiar todos os comentários da revisão, na ordem da lista, para colar num prompt",
   copiedOnes: "Copiados",
   copyAll: (n: number) => `Copiar todos (${n})`,
+  reviewExport: "Exportar",
+  reviewExportHint: "Salvar os comentários da revisão num arquivo, em Downloads, para outra pessoa importar e ler no TermIAu dela",
+  reviewExported: "Exportado",
+  reviewImport: "Importar",
+  reviewImportHint: "Trazer os comentários de uma revisão exportada (.json) para esta",
+  reviewImported: (n: number) => (n === 1 ? "1 comentário importado" : `${n} comentários importados`),
+  reviewImportNothing: "Esses comentários já estavam aqui.",
+  reviewImportInvalid: "Esse arquivo não é uma revisão exportada do TermIAu.",
   editBookmark: "Editar marcador",
   removeBookmark: "Remover marcador",
   improvementInSnippet: "O que merece melhoria neste trecho?",
@@ -179,7 +186,7 @@ const pt = {
   tabFiles: "Arquivos",
   tabBookmarks: "Marcadores",
   messageOfCommit: "Mensagem do commit",
-  nothingStaged: "Nada no índice — ponha arquivos com o +",
+  nothingStaged: "Nada no índice - ponha arquivos com o +",
   commitHint: "Commitar o índice (⌘↵)",
   committing: "Commitando…",
   commit: "Commit",
@@ -204,7 +211,7 @@ const pt = {
   outdated: "desatualizado",
 
   // the file in the diff
-  fileBinary: "Arquivo binário — conteúdo não exibido.",
+  fileBinary: "Arquivo binário - conteúdo não exibido.",
   fileRenamed: "Arquivo renomeado, sem mudanças no conteúdo.",
   permissionChanged: (from: string, dest: string) => `Permissão alterada: ${from} → ${dest}`,
   noChanges: "Sem mudanças de conteúdo.",
@@ -231,7 +238,7 @@ const pt = {
   summaryWorking: (branch: string): Snippet[] => [
     "O que está para ser commitado em ",
     { code: branch, branch: true },
-    " — com ",
+    " - com ",
     { code: "git add" },
     " ou sem ele, e mais o que o git ainda não rastreia",
   ],
@@ -247,7 +254,7 @@ const pt = {
     " desde que saiu de ",
     { code: target, branch: true },
   ],
-  noCompleteReview: " — nenhuma revisão completa ainda, então é a branch inteira",
+  noCompleteReview: " - nenhuma revisão completa ainda, então é a branch inteira",
   newSideIsDisk: "O lado novo é o disco, como está agora",
   disk: "disco",
   nothingNew: "Nada novo",
@@ -313,7 +320,7 @@ const en: typeof pt = {
   closeEsc: "Close (Esc)",
   branchDefault: "Default branch",
   branchDefaultHelp:
-    "What to compare a repository against the first time it is opened. After that, the last branch you picked for it wins — this setting never overrides a manual choice.",
+    "What to compare a repository against the first time it is opened. After that, the last branch you picked for it wins - this setting never overrides a manual choice.",
   editor: "Editor",
   editorHelp: [
     "The command behind the file viewer's “Open in editor”, run in your shell (aliases work) from the root of the file's repository. ",
@@ -337,9 +344,9 @@ const en: typeof pt = {
   blinkOnAttentionHelp:
     "The orange outline of the panel waiting for your answer, and its tab's dot and ring. Off, they stay lit, still.",
 
-  // preferences: the plugins tab
-  prefsTabTermiau: "TermIAu",
-  prefsTabPlugins: "Plugins",
+  // preferences: the side menu
+  prefsGeneral: "General",
+  prefsInstalledPlugins: "Installed plugins",
   pluginsTrust:
     "A plugin runs inside TermIAu, with the same access to your computer the app has. Only install packages from people you trust.",
   pluginsInstall: "Install from file…",
@@ -356,11 +363,10 @@ const en: typeof pt = {
 
   // the marketplace
   marketplace: "Marketplace",
-  marketplaceOpen: "Open the marketplace",
   marketplaceSearch: "Search plugins",
   marketplaceCount: (n) => (n === 1 ? "1 plugin" : `${n} plugins`),
   marketplaceBy: (author) => `by ${author}`,
-  marketplaceRequires: (names) => `Requires ${names} — installed along with it.`,
+  marketplaceRequires: (names) => `Requires ${names} - installed along with it.`,
   marketplaceInstall: "Install",
   marketplaceUpdate: (version) => `Update to ${version}`,
   marketplaceInstalled: "Installed",
@@ -377,7 +383,7 @@ const en: typeof pt = {
   fileUntouchedHint: "This file did not change since the last complete review",
   notLocated: "not found",
   notLocatedHint: "These lines are not in the reviewed version",
-  resolvedHint: "Resolved — click to reopen",
+  resolvedHint: "Resolved - click to reopen",
   markResolved: "Mark as resolved",
   copyReference: "Copy reference (path:lines + comment) to paste into a prompt",
   copied: "Copied!",
@@ -385,6 +391,14 @@ const en: typeof pt = {
   copyAllHint: "Copy every review comment, in list order, to paste into a prompt",
   copiedOnes: "Copied",
   copyAll: (n) => `Copy all (${n})`,
+  reviewExport: "Export",
+  reviewExportHint: "Save the review's comments to a file, in Downloads, for someone else to import and read in their TermIAu",
+  reviewExported: "Exported",
+  reviewImport: "Import",
+  reviewImportHint: "Bring the comments of an exported review (.json) into this one",
+  reviewImported: (n) => (n === 1 ? "1 comment imported" : `${n} comments imported`),
+  reviewImportNothing: "Those comments were already here.",
+  reviewImportInvalid: "This file isn't a review exported from TermIAu.",
   editBookmark: "Edit bookmark",
   removeBookmark: "Remove bookmark",
   improvementInSnippet: "What could be improved in these lines?",
@@ -448,7 +462,7 @@ const en: typeof pt = {
   tabFiles: "Files",
   tabBookmarks: "Bookmarks",
   messageOfCommit: "Commit message",
-  nothingStaged: "Nothing staged — stage files with +",
+  nothingStaged: "Nothing staged - stage files with +",
   commitHint: "Commit the index (⌘↵)",
   committing: "Committing…",
   commit: "Commit",
@@ -473,7 +487,7 @@ const en: typeof pt = {
   outdated: "outdated",
 
   // the file in the diff
-  fileBinary: "Binary file — content not shown.",
+  fileBinary: "Binary file - content not shown.",
   fileRenamed: "File renamed, no content changes.",
   permissionChanged: (from, dest) => `Mode changed: ${from} → ${dest}`,
   noChanges: "No content changes.",
@@ -499,7 +513,7 @@ const en: typeof pt = {
   summaryWorking: (branch) => [
     "What is about to be committed on ",
     { code: branch, branch: true },
-    " — with ",
+    " - with ",
     { code: "git add" },
     " or without it, plus what git does not track yet",
   ],
@@ -515,7 +529,7 @@ const en: typeof pt = {
     " since it left ",
     { code: target, branch: true },
   ],
-  noCompleteReview: " — no complete review yet, so it's the whole branch",
+  noCompleteReview: " - no complete review yet, so it's the whole branch",
   newSideIsDisk: "The new side is the disk, as it is now",
   disk: "disk",
   nothingNew: "Nothing new",

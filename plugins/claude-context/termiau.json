@@ -3,7 +3,7 @@
   "name": "Claude Context",
   "version": "1.0.0",
   "author": "TermIAu",
-  "description": "How much of Claude's context each session has used, as a pill on its panel — yellow, then red with the panel outlined — and /compact on its own when it gets full.",
+  "description": "How much of Claude's context each session has used, as a pill on its panel - yellow, then red with the panel outlined - and /compact on its own when it gets full.",
   "engines": { "termiau": ">=0.1.0" },
   "main": "main.js",
   "style": "style.css",

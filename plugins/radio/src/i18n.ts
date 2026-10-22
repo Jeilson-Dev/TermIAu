@@ -28,9 +28,9 @@ const en = {
   nextStation: "Next station",
   volume: "Volume",
   volumeHint: (current: number, next: number) =>
-    `${current === 0 ? "Muted" : `Volume ${current}%`} — click for ${next === 0 ? "mute" : `${next}%`}`,
+    `${current === 0 ? "Muted" : `Volume ${current}%`} - click for ${next === 0 ? "mute" : `${next}%`}`,
   noStations: "no stations",
-  offAir: "station off the air — try the next one",
+  offAir: "station off the air - try the next one",
   didNotStart: (e: string) => `the radio didn't start: ${e}`,
   stations: "Stations",
   playStation: (name: string) => `Play ${name}`,
@@ -45,9 +45,9 @@ const pt: typeof en = {
   nextStation: "Próxima estação",
   volume: "Volume",
   volumeHint: (current, next) =>
-    `${current === 0 ? "Mudo" : `Volume ${current}%`} — clique para ${next === 0 ? "mudo" : `${next}%`}`,
+    `${current === 0 ? "Mudo" : `Volume ${current}%`} - clique para ${next === 0 ? "mudo" : `${next}%`}`,
   noStations: "sem estações",
-  offAir: "estação fora do ar — tente a próxima",
+  offAir: "estação fora do ar - tente a próxima",
   didNotStart: (e) => `a rádio não abriu: ${e}`,
   stations: "Estações",
   playStation: (name) => `Tocar ${name}`,

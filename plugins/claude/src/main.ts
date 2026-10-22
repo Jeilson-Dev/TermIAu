@@ -18,6 +18,7 @@
 import type { IDecoration } from "@xterm/xterm";
 import type { Panel, PluginContext, PluginProcess } from "../../../src/plugins/api";
 import type {
+  SessionContext,
   ClaudeApi,
   ClaudePanel,
   ClaudeState,
@@ -67,6 +68,10 @@ const NEED_TERMINAL = new Set(["AskUserQuestion", "ExitPlanMode"]);
 /// any of the user's processes can write to: only what looks like an id gets through.
 const ID_SESSION = /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
+/// How long after an event the session's title is read again: a turn sends several
+/// events in a row, and one read is enough for all of them.
+const TITLE_MS = 800;
+
 /// How many prompts a panel remembers. The oldest have already left the scrollback.
 const MAX_PROMPTS = 300;
 /// How often the highlight is redone while the screen changes. It is a frequency
@@ -98,6 +103,8 @@ export function activate(ctx: PluginContext): ClaudeApi {
   const chatOpen = new Set<number>();
   const navigators = new Map<number, (delta: number) => void>();
   const highlights = new Map<number, Marks>();
+  const titleWaits = new Map<number, ReturnType<typeof setTimeout>>();
+  const contexts = new Set<SessionContext>();
 
   // ---------- the engine ----------
 
@@ -211,8 +218,11 @@ export function activate(ctx: PluginContext): ClaudeApi {
       context: same ? before?.context : undefined,
       model: before?.model,
       effort: before?.effort,
+      title: same ? before?.title : undefined,
     };
     sessions.set(id, s);
+    // Another session in the panel: the old title would name the wrong conversation.
+    if (!same && before?.title) panel.setTitle(undefined);
 
     switch (ev.hook_event_name) {
       case "UserPromptSubmit":
@@ -268,9 +278,61 @@ export function activate(ctx: PluginContext): ClaudeApi {
       case "SessionEnd":
         dropQuestion(s);
         sessions.delete(id);
+        panel.setTitle(undefined);
         break;
     }
+    // Claude names the session after the first prompt, and `/rename` renames it at any
+    // time: each turn's start and end read it again.
+    if (ev.hook_event_name !== "SessionEnd") scheduleTitle(id);
     changed(id);
+  }
+
+  function scheduleTitle(id: number) {
+    clearTimeout(titleWaits.get(id));
+    titleWaits.set(
+      id,
+      setTimeout(() => {
+        titleWaits.delete(id);
+        void readTitle(id);
+      }, TITLE_MS),
+    );
+  }
+
+  /// The session's title, from its file on disk (the engine's `sessions`), on the panel.
+  async function readTitle(id: number) {
+    const s = sessions.get(id);
+    if (!s?.session || !s.folder) return;
+    const session = s.session;
+    const found = await call<SavedSession[]>("sessions", { path: s.folder }).catch(() => []);
+    const title = found.find((f) => f.id === session)?.title;
+    const now = sessions.get(id);
+    // The session may have ended, or changed, while the engine read.
+    if (!title || now?.session !== session || now.title === title) return;
+    now.title = title;
+    ctx.terminal.panel(id)?.setTitle(title);
+    changed(id);
+  }
+
+  /// The hook, at a session's start, waits for what the other plugins add to Claude's
+  /// context. It goes back escaped for a JSON string: the hook pastes it inside one.
+  async function answerContext(id: number, raw: Record<string, unknown>, replyId: string) {
+    const panel = ctx.terminal.panel(id);
+    const start = { session: raw.session_id as string | undefined, cwd: raw.cwd as string | undefined };
+    const parts = panel
+      ? await Promise.all(
+          [...contexts].map(async (fn) => {
+            try {
+              return await fn(panel, start);
+            } catch (e) {
+              ctx.log(`session context: ${e}`);
+              return undefined;
+            }
+          }),
+        )
+      : [];
+    const text = parts.filter((p): p is string => !!p?.trim()).join("\n\n");
+    if (!text) return socket.drop(replyId);
+    await socket.reply(replyId, JSON.stringify(text).slice(1, -1)).catch(() => {});
   }
 
   function receiveStatus(id: number, raw: Record<string, unknown>) {
@@ -416,6 +478,7 @@ export function activate(ctx: PluginContext): ClaudeApi {
       folder,
     });
     changed(panel.id);
+    scheduleTitle(panel.id);
     // `--resume` only finds the session from the folder it was born in.
     const here = await panel.cwd();
     const cd = folder && here !== folder ? `cd '${folder.replace(/'/g, `'\\''`)}' && ` : "";
@@ -460,8 +523,13 @@ export function activate(ctx: PluginContext): ClaudeApi {
     // What the hook sends: `{"status":…}`, Claude Code's status line, or `{"event":…}`,
     // a hook event; one that waits for an answer (a question) gets `question_id`.
     socket.onMessage((id, message, replyId) => {
-      const m = message as { status?: Record<string, unknown>; event?: Record<string, unknown> } | null;
-      if (m?.status) receiveStatus(id, m.status);
+      const m = message as {
+        status?: Record<string, unknown>;
+        event?: Record<string, unknown>;
+        context?: Record<string, unknown>;
+      } | null;
+      if (m?.context && replyId) void answerContext(id, m.context, replyId);
+      else if (m?.status) receiveStatus(id, m.status);
       else if (m?.event) receive(id, replyId ? { ...m.event, question_id: replyId } : m.event);
       else if (replyId) socket.drop(replyId);
     }),
@@ -477,6 +545,8 @@ export function activate(ctx: PluginContext): ClaudeApi {
     ctx.terminal.onClosed((id) => {
       dropQuestion(sessions.get(id));
       sessions.delete(id);
+      clearTimeout(titleWaits.get(id));
+      titleWaits.delete(id);
       chatOpen.delete(id);
       navigators.delete(id);
       const h = highlights.get(id);
@@ -569,6 +639,10 @@ export function activate(ctx: PluginContext): ClaudeApi {
     transcript: (path, since) => call<TranscriptChunk>("transcript_read", { path, since }),
     commands: (folder) => call<SlashCommand[]>("commands_list", { folder: folder ?? null }),
     sessions: (folder) => call<SavedSession[]>("sessions", { path: folder }),
+    addSessionContext(provider) {
+      contexts.add(provider);
+      return { dispose: () => void contexts.delete(provider) };
+    },
   };
 }
 

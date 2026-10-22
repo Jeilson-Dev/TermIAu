@@ -1,0 +1,24 @@
+{
+  "id": "termiau.claude-notes",
+  "name": "Claude Notebook",
+  "version": "1.0.0",
+  "author": "TermIAu",
+  "description": "A notebook per task (repository and branch) where Claude writes the decisions it takes on its own, the questions it couldn't answer and what it found out - beside the terminal, not in a file.",
+  "engines": { "termiau": ">=0.1.0" },
+  "main": "main.js",
+  "style": "style.css",
+  "icon": "icon.svg",
+  "activationEvents": ["onStartupFinished"],
+  "dependencies": ["termiau.claude"],
+  "contributes": {
+    "regions": [{ "region": "panelHeader", "id": "notes", "priority": 90 }],
+    "commands": [
+      {
+        "id": "allTasks",
+        "title": { "en": "Task Notebooks…", "pt": "Cadernos das Tarefas…" },
+        "keybinding": "CmdOrCtrl+Shift+N",
+        "menu": { "en": "Claude Code", "pt": "Claude Code" }
+      }
+    ]
+  }
+}

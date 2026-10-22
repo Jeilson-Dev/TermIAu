@@ -464,14 +464,49 @@ body {
   background: var(--bg);
 }
 
+/* The tab's name, the session or the folder (`showTicker` in src/main.ts); what doesn't
+   fit scrolls inside (`marquee` in ui.ts). */
 .tab-title {
-  /* As wide as the text: the branch comes right after it, and ✕ goes to the right
-     through `margin-left: auto`. */
-  flex: 0 1 auto;
+  /* Takes the room between the dot and ✕, with the text centered in it. A text wider than
+     the room starts at the left edge, which is where the scroll starts from. */
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: center;
+}
+
+.tab-title-text {
+  display: inline-block;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+.tab-title-text[hidden] {
+  display: none;
+}
+
+/* Renaming (double click): the label becomes this field, in the chip's own type, so the
+   tab doesn't change size or jump. */
+.tab-rename {
+  width: 100%;
+  margin: 0;
+  padding: 0 4px;
+  border: 1px solid var(--purple);
+  border-radius: 4px;
+  background: var(--bg-dark);
+  color: var(--fg);
+  font: inherit;
+  text-align: center;
+  outline: none;
+  box-sizing: border-box;
+  animation: tab-rename-in 0.15s ease;
+}
+
+@keyframes tab-rename-in {
+  from {
+    opacity: 0;
+  }
 }
 
 .tab-close {
@@ -629,6 +664,100 @@ body {
   -webkit-user-select: none;
 }
 
+/* The panel's bottom bar: where its shell is. The folder on the left; the diff and the
+   branch on the right. The top bar's typography, a step quieter. */
+.panel-footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* 4px of room around the diff button on every side — less looked glued to the card's
+     rounded corner. The height comes from it. Right and bottom take one more: the card's
+     1px border (`.leaf::after`) is drawn over them. */
+  padding: 4px 5px 5px 10px;
+  box-sizing: border-box;
+  background: var(--bg-dark);
+  border-top: 1px solid var(--bg-darker);
+  font: 11.5px/1 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  color: var(--comment);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.footer-path {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* The start of a long path matters less than its end: the ellipsis goes on the left. */
+  direction: rtl;
+  text-align: left;
+  transition: color var(--time) ease;
+}
+
+.leaf.focused > .panel-footer .footer-path {
+  color: var(--fg-dim);
+}
+
+.footer-where {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.footer-where .task-btn {
+  height: 20px;
+}
+
+/* The diff button carries the branch as its label: in the text's color, purple when this
+   repository is the one open in the diff (`.on`). On hover, "See diff" takes the branch's
+   place. Both stacked in one cell — the button is as wide as the longer one, so nothing
+   jumps — and they cross-fade, sliding, both ways. */
+.footer-where .task-diff {
+  color: var(--fg);
+}
+
+.footer-where .task-diff.on {
+  color: var(--purple);
+}
+
+.diff-label {
+  display: inline-grid;
+  overflow: hidden;
+}
+
+.diff-label > span {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.diff-see {
+  opacity: 0;
+  transform: translateY(70%);
+}
+
+.task-diff:hover .diff-branch {
+  opacity: 0;
+  transform: translateY(-70%);
+}
+
+.task-diff:hover .diff-see {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .diff-label > span {
+    transition: none;
+  }
+}
+
 /* The plugins' slots (the `panelHeader` region), in the bar's own flow: each slot
    takes part in the bar's gap as if it were one of its chips. */
 .panel-plugins,
@@ -637,7 +766,7 @@ body {
 }
 
 .task-title {
-  /* As wide as the text, not stretched: the branch comes right after it.
+  /* As wide as the text, not stretched: the plugins' slots come right after it.
      The controls' `margin-left: auto` is what pushes them to the right. */
   flex: 0 1 auto;
   min-width: 0;
@@ -649,45 +778,6 @@ body {
 
 .leaf.focused > .panel-bar .task-title {
   color: var(--fg);
-}
-
-/* The branch, in brackets, after the title — on the panel bar and on the tab
-   chip. It doesn't shrink: the title is what gives up space, with an ellipsis. */
-.branch {
-  flex: none;
-  display: inline-flex;
-  align-items: baseline;
-  white-space: nowrap;
-}
-
-.branch[hidden] {
-  display: none;
-}
-
-.task-branch {
-  margin-left: -4px;
-  color: var(--purple);
-  opacity: 0.8;
-}
-
-/* The chip already gives a 6px gap; a text space is enough between title and branch. */
-.tab-branch {
-  margin-left: -3px;
-}
-
-/* The cap is the width of "branch-longa": whatever exceeds it scrolls inside,
-   the same way as the station's name in the footer. */
-.branch-box {
-  display: inline-block;
-  max-width: 12ch;
-  overflow: hidden;
-  vertical-align: bottom;
-}
-
-.branch-text {
-  display: inline-block;
-  white-space: nowrap;
-  will-change: transform;
 }
 
 .task-notice {
@@ -827,7 +917,8 @@ body {
    (`toggleMenu` writes top and right): inside the panel, its edge would clip it. */
 .task-menu {
   position: fixed;
-  z-index: 20;
+  /* Above the dialogs (40): a list opened from inside one has to show over it. */
+  z-index: 45;
   /* Loose in body, the list doesn't inherit the bar's font: without this the items came out
      in the page's default font. */
   font: 12px/1.2 -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
@@ -1265,8 +1356,8 @@ body.dragging * {
   display: none;
 }
 
-/* The left end, after the usage and progress pills: dictation's wave and text. It
-   takes what is left of the strip; the right slots don't shrink. */
+/* The left end, after the usage and progress pills: the plugins' slots. It takes
+   what is left of the strip; the right slots don't shrink. */
 #status-bar-left {
   flex: 1 1 auto;
   min-width: 0;
@@ -1548,6 +1639,40 @@ body.dragging * {
 
 .plugin-layer[hidden] {
   display: none;
+}
+
+/* A plugin's pane beside the terminal (the notebook): it takes its share of the panel
+   and the terminal, measured again, keeps the rest. */
+.plugin-side {
+  position: relative;
+  flex: 0 0 var(--plugin-side-share, 40%);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.plugin-side[hidden],
+.plugin-side-handle[hidden] {
+  display: none;
+}
+
+/* The border before it, which can be dragged. Wider than the visible line. */
+.plugin-side-handle {
+  flex: none;
+  width: 4px;
+  margin: 0 -3px;
+  padding: 0 3px;
+  background: var(--bg-lighter);
+  background-clip: content-box;
+  cursor: col-resize;
+  z-index: 2;
+}
+
+.plugin-side-handle:hover,
+.plugin-side-handle.dragging {
+  background-color: var(--purple);
 }
 
 

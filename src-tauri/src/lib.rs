@@ -719,6 +719,33 @@ fn reveal_in_finder(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Writes an exported review in Downloads, under `name` (a file name, nothing more) —
+/// with " 2", " 3"… before the extension when one is already there — and shows it in
+/// Finder. Returns where it went.
+#[tauri::command(async)]
+fn review_export(name: String, text: String) -> Result<String, String> {
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let folder = std::path::Path::new(&home).join("Downloads");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let clean: String = name
+        .chars()
+        .map(|c| if c == '/' || c == ':' || c.is_control() { '-' } else { c })
+        .collect();
+    let file = std::path::Path::new(&clean);
+    let stem = file.file_stem().and_then(|s| s.to_str()).filter(|s| !s.is_empty()).unwrap_or("review");
+    let ext = file.extension().and_then(|s| s.to_str()).unwrap_or("json");
+    let mut target = folder.join(format!("{stem}.{ext}"));
+    let mut n = 2;
+    while target.exists() {
+        target = folder.join(format!("{stem} {n}.{ext}"));
+        n += 1;
+    }
+    std::fs::write(&target, text).map_err(|e| e.to_string())?;
+    let path = target.to_string_lossy().into_owned();
+    reveal_in_finder(path.clone())?;
+    Ok(path)
+}
+
 /// Opens the file in the editor, at the line. `command` is the one from Preferences, with
 /// `{file}` and `{line}`, run in an interactive login shell: that is what reads
 /// .zshrc, where the aliases live (a `work='codium .'`) and the PATH for `cursor`,
@@ -1057,6 +1084,7 @@ pub fn run() {
             files_exist,
             open_in_editor,
             reveal_in_finder,
+            review_export,
             pty_resize,
             pty_cwd,
             pty_close,
@@ -1108,7 +1136,7 @@ pub fn run() {
                 plugins::on_opened(app, urls);
             }
             if let tauri::RunEvent::Exit = event {
-                // The plugins' native processes (dictation's engine) die with the app.
+                // The plugins' native processes (the Claude plugin's engine) die with the app.
                 app.state::<plugin_process::Processes>().kill(None);
                 window::save(app);
                 // The socket is a real file; without this one would be left per

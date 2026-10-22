@@ -39,6 +39,10 @@ interface Props {
   onSelectBookmark(bookmark: Bookmark): void;
   onRemoveBookmark(id: string): void;
   onToggleResolved(id: string): void;
+  /// Saves the comments, in the list's order, to a file another TermIAu imports.
+  onExport(comments: Bookmark[]): Promise<void>;
+  /// Brings in an exported review's comments; says how it went.
+  onImport(text: string): Promise<string>;
 }
 
 export function Sidebar(props: Props) {
@@ -73,6 +77,8 @@ export function Sidebar(props: Props) {
           onSelect={props.onSelectBookmark}
           onRemove={props.onRemoveBookmark}
           onToggleResolved={props.onToggleResolved}
+          onExport={props.onExport}
+          onImport={props.onImport}
         />
       )}
     </aside>
@@ -385,6 +391,8 @@ function BookmarkList({
   onSelect,
   onRemove,
   onToggleResolved,
+  onExport,
+  onImport,
 }: {
   bookmarks: Bookmark[];
   files: FileDiff[];
@@ -394,6 +402,8 @@ function BookmarkList({
   onSelect(bookmark: Bookmark): void;
   onRemove(id: string): void;
   onToggleResolved(id: string): void;
+  onExport(comments: Bookmark[]): Promise<void>;
+  onImport(text: string): Promise<string>;
 }) {
   const groups = useMemo(() => {
     const order = new Map(files.map((f, i) => [f.path, i]));
@@ -413,9 +423,13 @@ function BookmarkList({
     [groups, referenceOf],
   );
 
+  const sorted = useMemo(() => groups.flatMap(([, items]) => items), [groups]);
+  const reviewFile = <ReviewFileButtons comments={sorted} onExport={onExport} onImport={onImport} />;
+
   if (bookmarks.length === 0) {
     return (
       <div className="empty-list">
+        {reviewFile}
         <Icon name="bookmark" size={24} />
         <p>{T.noBookmark}</p>
         <p className="muted">
@@ -436,6 +450,7 @@ function BookmarkList({
       <div className="bookmark-all">
         <CopyAllButton reference={everything} count={bookmarks.length} />
       </div>
+      {reviewFile}
       {groups.map(([path, items]) => (
         <div key={path} className="bookmark-group">
           <div className="bookmark-group-path" title={path}>
@@ -484,6 +499,83 @@ function BookmarkList({
           })}
         </div>
       ))}
+    </div>
+  );
+}
+
+/// How long "Exported" and the import's message stay before going away.
+const REVIEW_FILE_MS = 4000;
+
+/// Export and import of the review's comments: export saves them to a file for someone
+/// else, import brings someone's into this review. Import also shows with no comments
+/// yet — that is exactly who receives a review.
+function ReviewFileButtons({
+  comments,
+  onExport,
+  onImport,
+}: {
+  comments: Bookmark[];
+  onExport(comments: Bookmark[]): Promise<void>;
+  onImport(text: string): Promise<string>;
+}) {
+  const [exported, setExported] = useState(false);
+  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  const file = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!exported && !message) return;
+    const timer = setTimeout(() => {
+      setExported(false);
+      setMessage(null);
+    }, REVIEW_FILE_MS);
+    return () => clearTimeout(timer);
+  }, [exported, message]);
+
+  const doExport = async () => {
+    setMessage(null);
+    try {
+      await onExport(comments);
+      setExported(true);
+    } catch (e) {
+      setMessage({ text: String(e), error: true });
+    }
+  };
+
+  const doImport = async (f: File) => {
+    try {
+      setMessage({ text: await onImport(await f.text()) });
+    } catch (e) {
+      setMessage({ text: e instanceof Error ? e.message : String(e), error: true });
+    }
+  };
+
+  return (
+    <div className="review-file">
+      <div className="review-file-buttons">
+        {comments.length > 0 && (
+          <button className={exported ? "copy-all copied" : "copy-all"} title={T.reviewExportHint} onClick={doExport}>
+            <Icon name={exported ? "check" : "export"} size={14} />
+            {exported ? T.reviewExported : T.reviewExport}
+          </button>
+        )}
+        <button className="copy-all" title={T.reviewImportHint} onClick={() => file.current?.click()}>
+          <Icon name="import" size={14} />
+          {T.reviewImport}
+        </button>
+        <input
+          ref={file}
+          type="file"
+          accept=".json,application/json"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            // Cleared, so picking the same file again fires again.
+            e.target.value = "";
+            if (f) void doImport(f);
+          }}
+        />
+      </div>
+      {message && <p className={message.error ? "review-file-message error" : "review-file-message"}>{message.text}</p>}
     </div>
   );
 }
